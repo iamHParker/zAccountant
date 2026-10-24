@@ -37,6 +37,7 @@ export const DEFAULT_CHART = Object.freeze([
   { code: '4000', name: 'Sales', type: 'revenue', subtype: 'operating' },
   { code: '4100', name: 'Service Revenue', type: 'revenue', subtype: 'operating' },
   { code: '4900', name: 'Interest Income', type: 'revenue', subtype: 'other' },
+  { code: '4950', name: 'Gain (Loss) on Sale of Assets', type: 'revenue', subtype: 'asset_disposal', key: 'disposal_gain' },
 
   // Expenses 5000-6999
   { code: '5000', name: 'Cost of Goods Sold', type: 'expense', subtype: 'cogs' },

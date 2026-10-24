@@ -206,6 +206,10 @@
             <tr class="total"><td>Net change in cash</td><td class="num">{{ money(report.data.netChangeCents) }}</td></tr>
             <tr><td>Cash at beginning of period</td><td class="num">{{ money(report.data.beginningCashCents) }}</td></tr>
             <tr class="total"><td>Cash at end of period</td><td class="num">{{ money(report.data.endingCashCents) }}</td></tr>
+            <template v-if="report.data.nonCashActivities.length">
+              <tr class="head"><td colspan="2">Non-cash investing and financing activities (disclosure)</td></tr>
+              <tr v-for="l in report.data.nonCashActivities"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.debitCents - l.creditCents) }}</td></tr>
+            </template>
           </table>
         </template>
         <p :class="reportCheck === 0 ? 'ok' : 'bad'">{{ reportCheck === 0 ? '✓ This report ties out.' : '⚠ This report does not tie out by ' + money(reportCheck) }}</p>
@@ -219,9 +223,14 @@
         <label>Number <input v-model.trim="newAcct.code" required placeholder="e.g. 6450"></label>
         <label>Name <input v-model.trim="newAcct.name" required></label>
         <label>Type
-          <select v-model="newAcct.type">
+          <select v-model="newAcct.type" @change="newAcct.subtype = subtypeChoices[newAcct.type][0][0]">
             <option value="asset">Asset (something you own)</option><option value="liability">Liability (something you owe)</option>
             <option value="equity">Equity (owner's stake)</option><option value="revenue">Income</option><option value="expense">Expense</option>
+          </select>
+        </label>
+        <label>Kind
+          <select v-model="newAcct.subtype">
+            <option v-for="[v, l] in subtypeChoices[newAcct.type]" :value="v">{{ l }}</option>
           </select>
         </label>
         <button class="primary">Add</button>
@@ -297,6 +306,18 @@
           <td><button class="link" @click="startPaycheck(e)">Run paycheck</button></td></tr>
       </table>
 
+      <template v-if="paychecks.length">
+        <h2>Recent paychecks</h2>
+        <table class="data">
+          <thead><tr><th>Pay date</th><th>Employee</th><th class="num">Gross</th><th class="num">Net</th><th></th></tr></thead>
+          <tr v-for="p in paychecks.slice(0, 20)">
+            <td>{{ p.payDate }}</td><td>{{ p.employee }}</td><td class="num">{{ money(p.grossCents) }}</td><td class="num">{{ money(p.netPayCents) }}</td>
+            <td><span class="muted" v-if="p.voidsPaycheckId">void record</span><span class="muted" v-else-if="p.voided">voided</span>
+              <button v-else class="link" @click="voidPaycheck(p)">void</button></td>
+          </tr>
+        </table>
+      </template>
+
       <div class="card" v-if="pc.employee">
         <h2>Paycheck for {{ pc.employee.firstName }} {{ pc.employee.lastName }}</h2>
         <form @submit.prevent="previewPaycheck" class="grid2">
@@ -306,6 +327,12 @@
             <label>Overtime hours (1.5×) <input v-model.trim="pc.overtimeHours" inputmode="decimal" placeholder="0"></label>
           </template>
           <label>401(k) deduction <input v-model.trim="pc.k401" inputmode="decimal" placeholder="0"></label>
+          <label>Net pay paid from
+            <select v-model="pc.paidFrom">
+              <option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option>
+              <option value="">Not paid yet (hold in Net Pay Payable)</option>
+            </select>
+          </label>
           <div><button class="primary">Calculate</button></div>
         </form>
         <div v-if="pc.result" class="stub">
@@ -336,6 +363,7 @@
         <p class="hint">After you close a period, nobody can add or change transactions dated on or before that day.
           Currently closed through: <strong>{{ company.locked_through || 'not closed' }}</strong></p>
         <form @submit.prevent="lockBooks"><label>Close through <input type="date" v-model="lockDate" required></label><button class="primary">Close books</button></form>
+        <button v-if="company.locked_through" class="link" @click="reopenBooks">Reopen closed periods…</button>
       </div>
       <div class="card narrow">
         <h2>State unemployment rate</h2>

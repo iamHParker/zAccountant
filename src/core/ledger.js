@@ -29,6 +29,20 @@ export function isIsoDate(d) {
   return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === d;
 }
 
+/** Largest amount allowed on one journal line: $1 billion. Keeps every report total far inside exact-integer range. */
+export const MAX_LINE_CENTS = 100_000_000_000;
+export const MAX_LINES = 1000;
+export const MAX_MEMO = 500;
+
+function cleanMemo(memo, label, errors) {
+  if (memo == null || memo === '') return null;
+  if (typeof memo !== 'string') { errors.push(`${label} must be text`); return null; }
+  // eslint-disable-next-line no-control-regex
+  const m = memo.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  if (m.length > MAX_MEMO) errors.push(`${label} is longer than ${MAX_MEMO} characters`);
+  return m || null;
+}
+
 export class LedgerError extends Error {
   constructor(message, details) {
     super(details?.length ? `${message}: ${details.join('; ')}` : message);
@@ -49,7 +63,10 @@ export function validateEntry(entry) {
   if (!isIsoDate(date)) errors.push(`date must be a real calendar date written YYYY-MM-DD (got ${date})`);
   if (!Array.isArray(entry.lines) || entry.lines.length < 2) {
     errors.push('an entry needs at least two lines');
+  } else if (entry.lines.length > MAX_LINES) {
+    errors.push(`an entry can have at most ${MAX_LINES} lines`);
   }
+  const memo = cleanMemo(entry.memo, 'memo', errors);
   const lines = [];
   for (const [i, raw] of (entry.lines ?? []).entries()) {
     try {
@@ -58,20 +75,23 @@ export function validateEntry(entry) {
       assertCents(debitCents, `line ${i + 1} debit`);
       assertCents(creditCents, `line ${i + 1} credit`);
       if (debitCents < 0 || creditCents < 0) errors.push(`line ${i + 1}: amounts cannot be negative (swap debit/credit instead)`);
+      if (debitCents > MAX_LINE_CENTS || creditCents > MAX_LINE_CENTS) errors.push(`line ${i + 1}: amount is larger than the $1,000,000,000 per-line limit`);
       if ((debitCents > 0) === (creditCents > 0)) errors.push(`line ${i + 1}: enter either a debit or a credit, not both or neither`);
-      if (!raw.accountId) errors.push(`line ${i + 1}: account is required`);
-      lines.push({ accountId: raw.accountId, debitCents, creditCents, memo: raw.memo ?? null });
+      if (!raw.accountId || typeof raw.accountId !== 'string') errors.push(`line ${i + 1}: account is required`);
+      lines.push({ accountId: raw.accountId, debitCents, creditCents, memo: cleanMemo(raw.memo, `line ${i + 1} memo`, errors) });
     } catch (e) {
       errors.push(`line ${i + 1}: ${e.message}`);
     }
   }
+  if (errors.length) throw new LedgerError('Journal entry is not valid', errors);
+  // Each line ≤ $1B and ≤ 1000 lines, so these totals are exact (< 2^53).
   const totalDebits = sum(lines.map((l) => l.debitCents));
   const totalCredits = sum(lines.map((l) => l.creditCents));
   if (!errors.length && totalDebits !== totalCredits) {
     errors.push(`debits (${totalDebits}¢) must equal credits (${totalCredits}¢); difference ${totalDebits - totalCredits}¢`);
   }
   if (errors.length) throw new LedgerError('Journal entry is not valid', errors);
-  return { date, memo: entry.memo ?? null, lines, totalCents: totalDebits };
+  return { date, memo, lines, totalCents: totalDebits };
 }
 
 /** Build the lines that exactly reverse an entry (debits <-> credits). */
@@ -84,9 +104,15 @@ export function reversingLines(lines) {
  * TO account is debited, FROM account is credited. Examples:
  *   paid rent from checking:   from=Checking, to=Rent Expense
  *   customer paid cash sale:   from=Sales,    to=Checking
+ * `amount` is always DOLLARS ("12.50" or 12.5); use `amountCents` to pass integer cents.
  */
-export function simpleTransaction({ date, memo, fromAccountId, toAccountId, amount }) {
-  const cents = typeof amount === 'number' && Number.isInteger(amount) ? amount : toCents(amount);
+export function simpleTransaction({ date, memo, fromAccountId, toAccountId, amount, amountCents }) {
+  let cents;
+  try {
+    cents = amountCents != null ? assertCents(amountCents, 'amountCents') : toCents(amount);
+  } catch (e) {
+    throw new LedgerError('Journal entry is not valid', [e.message]);
+  }
   if (cents <= 0) throw new LedgerError('Journal entry is not valid', ['amount must be greater than zero']);
   if (fromAccountId === toAccountId) throw new LedgerError('Journal entry is not valid', ['from and to accounts must differ']);
   return validateEntry({

@@ -28,9 +28,15 @@ CREATE TABLE paychecks (
   calculation       jsonb NOT NULL,          -- full engine output, for audit & pay stub
   tables_verified   boolean NOT NULL,
   journal_entry_id  uuid NOT NULL,
+  voids_paycheck_id uuid,
+  idempotency_key   text,                    -- client-supplied; a repeated request returns the same paycheck                    -- set on a void row: negative amounts that cancel the original
   created_at        timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (company_id, id),
+  UNIQUE (company_id, idempotency_key),
+  FOREIGN KEY (company_id, voids_paycheck_id) REFERENCES paychecks(company_id, id),
   FOREIGN KEY (company_id, employee_id) REFERENCES employees(company_id, id),
   FOREIGN KEY (company_id, journal_entry_id) REFERENCES journal_entries(company_id, id)
 );
+CREATE UNIQUE INDEX paychecks_one_void ON paychecks (voids_paycheck_id) WHERE voids_paycheck_id IS NOT NULL;
 CREATE INDEX paychecks_ytd ON paychecks (company_id, employee_id, tax_year, pay_date);
 CREATE TRIGGER paychecks_immutable BEFORE UPDATE OR DELETE ON paychecks FOR EACH ROW EXECUTE FUNCTION zacc_immutable();

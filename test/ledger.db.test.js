@@ -54,7 +54,13 @@ test('ledger against PostgreSQL', { skip: !hasDb && 'DATABASE_URL not set' }, as
   });
 
   await t.test('closed periods reject postings', async () => {
+    const early = await ledger.postSimple(pool, co.id, { date: '2026-01-20', memo: 'Will be reversed after close', fromAccountId: A['1000'], toAccountId: A['6200'], amount: '10' });
     await ledger.lockPeriod(pool, co.id, { through: '2026-01-31' });
+    await assert.rejects(ledger.lockPeriod(pool, co.id, { through: '2026-02-30' }), /real date/);
+    await assert.rejects(ledger.lockPeriod(pool, co.id, { through: null }), /requires a reason/);
+    // Reversing an entry in a closed period defaults to the first open day.
+    const rev = await ledger.reverseEntry(pool, co.id, early.id);
+    assert.equal(rev.entry_date, '2026-02-01');
     await assert.rejects(ledger.postSimple(pool, co.id, { date: '2026-01-15', fromAccountId: A['1000'], toAccountId: A['6200'], amount: '1' }), /closed through 2026-01-31/);
     await ledger.postSimple(pool, co.id, { date: '2026-02-01', memo: 'Sale', fromAccountId: A['4000'], toAccountId: A['1000'], amount: '5000.01' });
   });
@@ -65,6 +71,13 @@ test('ledger against PostgreSQL', { skip: !hasDb && 'DATABASE_URL not set' }, as
     const bs = await reports.getBalanceSheet(pool, co.id, { asOf: '2026-12-31' });
     assert.equal(bs.balanced, true);
     assert.equal(bs.totalAssetsCents, 2_500_000 - 180_000 + 500_001);
+    // Retained earnings cannot be posted to directly
+    await assert.rejects(ledger.postSimple(pool, co.id, { date: '2026-03-01', fromAccountId: A['3900'], toAccountId: A['1000'], amount: '1' }), /Retained Earnings/);
+    // Non-cash financing: truck bought entirely with a loan
+    await ledger.postEntry(pool, co.id, { date: '2026-03-02', memo: 'Truck financed', lines: [{ accountId: A['1510'], debit: '30000' }, { accountId: A['2700'], credit: '30000' }] });
+    const cf2 = await reports.getCashFlow(pool, co.id, { from: '2026-01-01', to: '2026-12-31' });
+    assert.equal(cf2.investing.totalCents, 0);
+    assert.equal(cf2.nonCashActivities.length, 2);
     const cf = await reports.getCashFlow(pool, co.id, { from: '2026-01-01', to: '2026-12-31' });
     assert.equal(cf.balanced, true);
     assert.equal(cf.endingCashCents, 2_820_001);
@@ -73,11 +86,20 @@ test('ledger against PostgreSQL', { skip: !hasDb && 'DATABASE_URL not set' }, as
     const dash = await reports.getDashboard(pool, co.id, { asOf: '2026-12-31' });
     assert.equal(dash.cashCents, 2_820_001);
     assert.equal(dash.netIncomeYtdCents, 500_001 - 180_000);
+    const reopened = await ledger.lockPeriod(pool, co.id, { through: null, reason: 'Year-end adjustments from CPA' });
+    assert.equal(reopened.lockedThrough, null);
   });
 
   await t.test('audit hash chain verifies, and detects tampering', async () => {
     const ok = await verifyChain(pool, co.id);
-    assert.equal(ok.ok, true);
+    assert.equal(ok.ok, true, JSON.stringify(ok));
+    // Ledger edited behind the app's back (triggers disabled) is caught by reconciliation
+    await pool.query('ALTER TABLE journal_lines DISABLE TRIGGER journal_lines_immutable');
+    await pool.query(`UPDATE journal_lines SET debit_cents = debit_cents + 1, credit_cents = 0 WHERE id = (SELECT min(id) FROM journal_lines WHERE company_id = $1 AND debit_cents > 0)`, [co.id]);
+    await pool.query('ALTER TABLE journal_lines ENABLE TRIGGER journal_lines_immutable');
+    const ledgerTamper = await verifyChain(pool, co.id);
+    assert.equal(ledgerTamper.ok, false);
+    assert.deepEqual(ledgerTamper.ledgerMismatches, [1]);
     assert.ok(ok.rows >= 6);
     // Simulate an attacker with superuser rights who disables the guard trigger:
     await pool.query('ALTER TABLE audit_log DISABLE TRIGGER audit_log_immutable');

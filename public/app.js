@@ -54,9 +54,17 @@ createApp({
         { id: 'cash-flow', label: 'Cash Flow' }, { id: 'trial-balance', label: 'Trial Balance' },
       ],
       report: { type: 'balance-sheet', from: yearStart(), to: today(), data: null },
-      showNewAcct: false, newAcct: { code: '', name: '', type: 'expense' }, register: null,
+      showNewAcct: false, newAcct: { code: '', name: '', type: 'expense', subtype: 'operating' }, register: null,
+      subtypeChoices: {
+        asset: [['current', 'Current asset (prepaid, deposits…)'], ['bank', 'Bank or cash account'], ['receivable', 'Money owed to you'], ['fixed', 'Equipment, vehicle, building'], ['contra', 'Accumulated depreciation'], ['investment', 'Long-term investment']],
+        liability: [['current', 'Due within a year'], ['payable', 'Bills you owe'], ['credit_card', 'Credit card'], ['long_term', 'Long-term loan']],
+        equity: [['capital', 'Owner contribution'], ['draws', 'Owner draws / distributions']],
+        revenue: [['operating', 'Sales or services'], ['other', 'Other income (interest…)']],
+        expense: [['operating', 'Operating expense'], ['cogs', 'Cost of goods sold'], ['other', 'Other expense (interest…)']],
+      },
+      paychecks: [],
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
-      pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', result: null },
+      pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
       lockDate: '', suiRate: '', audit: null,
     };
   },
@@ -109,7 +117,10 @@ createApp({
     },
     async loadDash() { if (this.companyId) this.dash = await this.run(() => api('GET', `/companies/${this.companyId}/reports/dashboard?asOf=${today()}`)); },
     async loadEntries() { this.entries = (await this.run(() => api('GET', `/companies/${this.companyId}/entries`))) ?? []; },
-    async loadEmployees() { this.employees = (await this.run(() => api('GET', `/companies/${this.companyId}/employees`))) ?? []; },
+    async loadEmployees() {
+      this.employees = (await this.run(() => api('GET', `/companies/${this.companyId}/employees`))) ?? [];
+      this.paychecks = (await this.run(() => api('GET', `/companies/${this.companyId}/paychecks`))) ?? [];
+    },
     async createCompany() {
       const c = await this.run(() => api('POST', '/companies', this.newCompany), 'Company created. Your books are ready.');
       if (!c) return;
@@ -143,7 +154,7 @@ createApp({
     },
     async createAccount() {
       const a = await this.run(() => api('POST', `/companies/${this.companyId}/accounts`, this.newAcct), 'Account added.');
-      if (a) { this.accounts = await api('GET', `/companies/${this.companyId}/accounts`); this.newAcct = { code: '', name: '', type: 'expense' }; this.showNewAcct = false; }
+      if (a) { this.accounts = await api('GET', `/companies/${this.companyId}/accounts`); this.newAcct = { code: '', name: '', type: 'expense', subtype: 'operating' }; this.showNewAcct = false; }
     },
     async openRegister(a) { this.register = await this.run(() => api('GET', `/companies/${this.companyId}/accounts/${a.id}/register`)); },
     async createEmployee() {
@@ -154,11 +165,14 @@ createApp({
       const ok = await this.run(() => api('POST', `/companies/${this.companyId}/employees`, body), 'Employee saved.');
       if (ok) { this.newEmp = blankEmployee(); this.showNewEmp = false; this.loadEmployees(); }
     },
-    startPaycheck(e) { this.pc = { employee: e, payDate: today(), hours: '', overtimeHours: '', k401: '', result: null }; },
+    startPaycheck(e) {
+      this.pc = { employee: e, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: this.bankAccounts[0]?.id ?? '', result: null, key: crypto.randomUUID() };
+    },
     paycheckBody() {
       const p = this.pc;
       const k = cents(p.k401);
       return { payDate: p.payDate, hours: p.hours || undefined, overtimeHours: p.overtimeHours || undefined,
+        paidFromAccountId: p.paidFrom || undefined, idempotencyKey: p.key,
         preTaxDeductions: k ? [{ name: '401(k)', amountCents: k, kind: 'retirement_401k' }] : [] };
     },
     async previewPaycheck() {
@@ -166,11 +180,22 @@ createApp({
     },
     async postPaycheck() {
       const r = await this.run(() => api('POST', `/companies/${this.companyId}/employees/${this.pc.employee.id}/paychecks`, this.paycheckBody()), 'Paycheck recorded in your books.');
-      if (r) this.pc.employee = null;
+      if (r) { this.pc.employee = null; this.loadEmployees(); }
+    },
+    async voidPaycheck(p) {
+      const reason = prompt(`Void ${p.employee}'s paycheck of ${p.payDate}? This reverses it in your books and year-to-date wages.\n\nReason:`);
+      if (!reason) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/paychecks/${p.id}/void`, { reason }), 'Paycheck voided.')) this.loadEmployees();
     },
     async lockBooks() {
       const r = await this.run(() => api('POST', `/companies/${this.companyId}/lock`, { through: this.lockDate }), `Books closed through ${this.lockDate}.`);
       if (r) this.company.locked_through = r.lockedThrough;
+    },
+    async reopenBooks() {
+      const reason = prompt('Reopening lets transactions in closed periods be changed. Why are you reopening?');
+      if (!reason) return;
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/lock`, { through: null, reason }), 'Books reopened.');
+      if (r) this.company.locked_through = null;
     },
     async saveSui() {
       const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { suiRatePct: this.suiRate }), 'Rate saved.');

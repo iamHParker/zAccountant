@@ -1,5 +1,5 @@
 // Pulls account totals from the database and hands them to the pure report functions.
-import { trialBalance, incomeStatement, balanceSheet, cashFlowStatement } from '../core/reports.js';
+import { trialBalance, incomeStatement, balanceSheet, cashFlowStatement, postClosingSums } from '../core/reports.js';
 import { LedgerError, isIsoDate } from '../core/ledger.js';
 import { getCompany, listAccounts } from './ledgerService.js';
 
@@ -30,10 +30,42 @@ export function fiscalYearStart(date, startMonth) {
   return `${year}-${String(startMonth).padStart(2, '0')}-01`;
 }
 
+/** Trial balance as of a date, post-closing view: income accounts show this fiscal year only and
+ *  prior years' profit is in Retained Earnings, so it agrees line-for-line with the balance sheet. */
 export async function getTrialBalance(db, companyId, { asOf }) {
   need(asOf, 'asOf');
+  const company = await getCompany(db, companyId);
   const accounts = await listAccounts(db, companyId);
-  return { asOf, ...trialBalance(accounts, await accountSums(db, companyId, { to: asOf })) };
+  const fyStart = fiscalYearStart(asOf, company.fiscal_year_start_month);
+  const [sumsAsOf, sumsBeforeFy] = await Promise.all([
+    accountSums(db, companyId, { to: asOf }),
+    accountSums(db, companyId, { to: dayBefore(fyStart) }),
+  ]);
+  return { asOf, fiscalYearStart: fyStart, ...trialBalance(accounts, postClosingSums(accounts, sumsAsOf, sumsBeforeFy)) };
+}
+
+/**
+ * Per-account sums of NON-CASH investing/financing transactions in a period: entries with no cash
+ * line whose investing/financing lines net to zero among themselves (e.g. equipment bought with a
+ * loan, loan converted to owner's capital). ASC 230 requires these to be disclosed, not shown as cash.
+ */
+export async function nonCashSums(db, companyId, { from, to }) {
+  const { rows } = await db.query(
+    `WITH lines AS (
+       SELECT l.entry_id, l.account_id, l.debit_cents, l.credit_cents, a.cash_flow
+         FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+        WHERE l.company_id = $1 AND l.entry_date BETWEEN $2 AND $3),
+     candidates AS (
+       SELECT entry_id FROM lines GROUP BY entry_id
+       HAVING bool_and(cash_flow IS DISTINCT FROM 'cash')
+          AND bool_or(cash_flow IN ('investing','financing'))
+          AND sum(CASE WHEN cash_flow IN ('investing','financing') THEN debit_cents - credit_cents ELSE 0 END) = 0)
+     SELECT account_id, sum(debit_cents)::bigint AS d, sum(credit_cents)::bigint AS c
+       FROM lines WHERE entry_id IN (SELECT entry_id FROM candidates) AND cash_flow IN ('investing','financing')
+      GROUP BY account_id`,
+    [companyId, from, to],
+  );
+  return new Map(rows.map((r) => [r.account_id, { debitCents: r.d, creditCents: r.c }]));
 }
 
 export async function getIncomeStatement(db, companyId, { from, to }) {
@@ -59,15 +91,18 @@ export async function getCashFlow(db, companyId, { from, to }) {
   need(from, 'from'); need(to, 'to');
   if (from > to) throw new LedgerError('"from" must be on or before "to"');
   const accounts = await listAccounts(db, companyId);
-  const [start, end] = await Promise.all([
+  const [start, end, nonCash] = await Promise.all([
     accountSums(db, companyId, { to: dayBefore(from) }),
     accountSums(db, companyId, { to }),
+    nonCashSums(db, companyId, { from, to }),
   ]);
-  return { from, to, ...cashFlowStatement(accounts, start, end) };
+  return { from, to, ...cashFlowStatement(accounts, start, end, nonCash) };
 }
 
 /** Account register: every line on one account with a running balance. */
 export async function getAccountRegister(db, companyId, accountId, { from = null, to = null } = {}) {
+  if (from) need(from, 'from');
+  if (to) need(to, 'to');
   const accounts = await listAccounts(db, companyId);
   const account = accounts.find((a) => a.id === accountId);
   if (!account) throw new LedgerError('Account not found');

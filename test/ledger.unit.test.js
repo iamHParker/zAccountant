@@ -54,3 +54,18 @@ test('normal balances', () => {
   assert.equal(naturalBalance('liability', 100, 300), 200);
   assert.equal(naturalBalance('asset', 100, 300), -200); // e.g. accumulated depreciation (contra)
 });
+
+test('amount units: simple `amount` is always dollars; amountCents is cents (board finding #6)', () => {
+  const t = (x) => simpleTransaction({ date: '2026-01-02', fromAccountId: 'a', toAccountId: 'b', ...x }).totalCents;
+  assert.equal(t({ amount: 100 }), 10_000);
+  assert.equal(t({ amount: '100' }), 10_000);
+  assert.equal(t({ amount: 100.5 }), 10_050);
+  assert.equal(t({ amountCents: 100 }), 100);
+});
+
+test('per-line limit keeps totals exact (security B1)', () => {
+  const big = 9_007_199_254_740_991;
+  assert.throws(() => validateEntry({ date: '2026-01-01', lines: [{ accountId: 'a', debitCents: big }, { accountId: 'b', creditCents: big }] }), /per-line limit/);
+  assert.throws(() => validateEntry({ date: '2026-01-01', memo: { x: 1 }, lines: [L('a', '1'), L('b', null, '1')] }), /memo must be text/);
+  assert.equal(validateEntry({ date: '2026-01-01', memo: 'a\u0000b', lines: [L('a', '1'), L('b', null, '1')] }).memo, 'a b');
+});

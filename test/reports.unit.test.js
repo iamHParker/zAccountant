@@ -81,3 +81,47 @@ test('cash flow (indirect) reconciles to change in cash', () => {
   assert.equal(cf26.endingCashCents, 6_395_000);
   assert.equal(cf26.financing.totalCents, -400_000);   // loan principal -1,000, draw -3,000
 });
+
+test('cash flow: sale of equipment shows proceeds in investing, gain backed out of operating (board finding #1)', () => {
+  const ents = [
+    je('2025-01-01', 'Capital', ['1000', 2_000_000, 0], ['3000', 0, 2_000_000]),
+    je('2025-01-02', 'Buy equipment', ['1500', 1_000_000, 0], ['1000', 0, 1_000_000]),
+    je('2025-06-30', 'Depreciation', ['6100', 600_000, 0], ['1590', 0, 600_000]),
+    // Sell for $5,000: cost 10,000, accumulated depreciation 6,000, gain 1,000
+    je('2025-09-01', 'Sell equipment', ['1000', 500_000, 0], ['1590', 600_000, 0], ['1500', 0, 1_000_000], ['4950', 0, 100_000]),
+  ];
+  const cf = cashFlowStatement(chart(), sumsFor(ents, { to: '2025-06-30' }), sumsFor(ents, { to: '2025-12-31' }));
+  assert.equal(cf.balanced, true);
+  assert.equal(cf.netIncomeCents, 100_000);
+  assert.equal(cf.operating.totalCents, 0);        // 1,000 NI − 1,000 gain
+  assert.equal(cf.investing.totalCents, 500_000);  // proceeds
+  const full = cashFlowStatement(chart(), new Map(), sumsFor(ents, { to: '2025-12-31' }));
+  assert.equal(full.operating.adjustments.find((l) => l.name === 'Depreciation and amortization').amountCents, 600_000);
+  assert.equal(full.operating.totalCents, 0);       // −5,000 NI... : NI = 1,000 − 6,000 = −5,000; +6,000 dep −1,000 gain = 0
+  assert.equal(full.investing.totalCents, -500_000); // −10,000 purchase + 5,000 proceeds
+  assert.equal(full.balanced, true);
+});
+
+test('cash flow: non-cash investing/financing is disclosed, not shown as cash (board finding #2)', () => {
+  const ents = [je('2026-03-01', 'Truck financed 100%', ['1510', 800_000, 0], ['2700', 0, 800_000])];
+  const nonCash = sumsFor(ents);
+  const cf = cashFlowStatement(chart(), new Map(), sumsFor(ents), nonCash);
+  assert.equal(cf.investing.totalCents, 0);
+  assert.equal(cf.financing.totalCents, 0);
+  assert.equal(cf.nonCashActivities.length, 2);
+  assert.equal(cf.balanced, true);
+});
+
+test('trial balance (post-closing) agrees with the balance sheet in year two (board finding #3)', async () => {
+  const { postClosingSums } = await import('../src/core/reports.js');
+  const ents = [
+    je('2024-12-15', 'FY25 sale', ['1000', 50_000, 0], ['4000', 0, 50_000]),   // July fiscal year
+    je('2024-12-16', 'FY25 fee', ['6050', 1_000, 0], ['1000', 0, 1_000]),
+    je('2025-08-15', 'FY26 sale', ['1000', 20_000, 0], ['4000', 0, 20_000]),
+  ];
+  const tb = trialBalance(chart(), postClosingSums(chart(), sumsFor(ents, { to: '2025-08-31' }), sumsFor(ents, { to: '2025-06-30' })));
+  assert.equal(tb.balanced, true);
+  assert.equal(tb.rows.find((r) => r.code === '4000').creditCents, 20_000);
+  assert.equal(tb.rows.find((r) => r.code === '3900').creditCents, 49_000);
+  assert.equal(tb.rows.find((r) => r.code === '6050'), undefined);
+});

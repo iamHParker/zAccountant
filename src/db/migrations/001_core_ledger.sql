@@ -42,11 +42,13 @@ CREATE TABLE journal_entries (
   memo               text,
   source             text NOT NULL DEFAULT 'manual',  -- manual | simple | payroll | import | reversal | bank
   source_ref         text,
-  reverses_entry_id  uuid REFERENCES journal_entries(id),
+  reverses_entry_id  uuid,
   created_by         text,
   created_at         timestamptz NOT NULL DEFAULT now(),
   UNIQUE (company_id, entry_number),
-  UNIQUE (company_id, id)
+  UNIQUE (company_id, id),
+  FOREIGN KEY (company_id, reverses_entry_id) REFERENCES journal_entries(company_id, id),  -- same company only
+  CHECK (memo IS NULL OR length(memo) <= 500)
 );
 CREATE UNIQUE INDEX journal_entries_one_reversal ON journal_entries (reverses_entry_id) WHERE reverses_entry_id IS NOT NULL;
 CREATE INDEX journal_entries_company_date ON journal_entries (company_id, entry_date);
@@ -57,8 +59,8 @@ CREATE TABLE journal_lines (
   company_id    uuid NOT NULL,
   account_id    uuid NOT NULL,
   entry_date    date NOT NULL,
-  debit_cents   bigint NOT NULL DEFAULT 0 CHECK (debit_cents >= 0),
-  credit_cents  bigint NOT NULL DEFAULT 0 CHECK (credit_cents >= 0),
+  debit_cents   bigint NOT NULL DEFAULT 0 CHECK (debit_cents BETWEEN 0 AND 100000000000),   -- ≤ $1B per line
+  credit_cents  bigint NOT NULL DEFAULT 0 CHECK (credit_cents BETWEEN 0 AND 100000000000),
   memo          text,
   CHECK ((debit_cents > 0) <> (credit_cents > 0)),
   FOREIGN KEY (company_id, entry_id) REFERENCES journal_entries(company_id, id),
@@ -124,10 +126,12 @@ BEGIN
 END $$;
 CREATE TRIGGER journal_entries_period_open BEFORE INSERT ON journal_entries FOR EACH ROW EXECUTE FUNCTION zacc_period_open();
 
--- Tamper-evident audit trail: each row stores SHA-256(prev_hash || payload); see services/audit.js.
+-- Tamper-evident audit trail: each row stores HMAC-SHA-256(key, prev_hash || row); see services/audit.js.
 CREATE TABLE audit_log (
   id          bigserial PRIMARY KEY,
   company_id  uuid NOT NULL REFERENCES companies(id),
+  seq         integer NOT NULL,           -- 1, 2, 3 ... per company, no gaps
+  UNIQUE (company_id, seq),
   action      text NOT NULL,
   entity      text NOT NULL,
   entity_id   text,
@@ -137,6 +141,5 @@ CREATE TABLE audit_log (
   hash        text NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX audit_log_company ON audit_log (company_id, id);
 CREATE TRIGGER audit_log_immutable BEFORE UPDATE OR DELETE ON audit_log FOR EACH ROW EXECUTE FUNCTION zacc_immutable();
 CREATE TRIGGER audit_log_no_truncate BEFORE TRUNCATE ON audit_log EXECUTE FUNCTION zacc_immutable();
