@@ -1,6 +1,7 @@
 // zAccountant browser app (Vue 3, no build step).
 // ℹ️ Vue keeps the page in sync with the data below: change `this.tab` and the screen switches.
 import { createApp } from '/vendor/vue.js';
+import { HELP, helpForTab, searchHelp } from '/help.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const yearStart = () => today().slice(0, 4) + '-01-01';
@@ -119,6 +120,7 @@ createApp({
         { id: 'reports', label: 'Reports' }, { id: 'time', label: 'Time' },
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
+      help: { q: '', id: 'start', from: 'home' },
       roles: { permissions: [], presets: [], custom: [] }, departments: [], newDept: '',
       roleEdit: null,
       typeLabel: { asset: 'Asset', liability: 'Liability', equity: 'Equity', revenue: 'Income', expense: 'Expense' },
@@ -193,6 +195,8 @@ createApp({
       return d;
     },
     reportCheck() { return (this.report.data?.check ?? 0) || (this.report.data?.comparison?.check ?? 0); },
+    helpList() { return searchHelp(this.help.q); },
+    helpArticle() { return HELP.find((h) => h.id === this.help.id) ?? HELP[0]; },
     reportIsRange() { return Boolean(this.reportTypes.find((x) => x.id === this.report.type)?.range); },
     reportQuery() {
       const r = this.report;
@@ -320,6 +324,19 @@ createApp({
       };
       window.addEventListener('afterprint', done);
       window.print();
+    },
+    /** The "?" button: open the guide for the screen you're on. */
+    openHelp() {
+      if (this.tab === 'help') { this.tab = this.help.from; return; }
+      this.help.from = this.tab;
+      this.help.id = helpForTab(this.tab);
+      this.help.q = '';
+      this.tab = 'help';
+    },
+    /** Links inside a guide (<a data-help="id">) open another guide. */
+    helpClick(e) {
+      const id = e.target.closest?.('a[data-help]')?.dataset.help;
+      if (id) { e.preventDefault(); this.help.id = id; }
     },
     async downloadCsv(path) { await this.run(() => download(path)); },
     downloadReport() { this.downloadCsv(`/companies/${this.companyId}/reports/${this.report.type}?${this.reportQuery}&format=csv`); },

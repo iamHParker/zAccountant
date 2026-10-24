@@ -109,3 +109,11 @@ input.grow { flex: 1; width: auto; margin: 0; }
 .status-approved { color: var(--ok); }
 .status-rejected { color: var(--bad); }
 table.register td:first-child { white-space: nowrap; }
+button.help-btn { padding: 4px 12px; border-radius: 16px; font-weight: 600; margin: 0; }
+button.help-btn.active { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+ul.help-list { list-style: none; padding: 0; margin: 8px 0 0; }
+ul.help-list li { margin: 6px 0; }
+ul.help-list button { text-align: left; }
+ul.help-list button.sel { font-weight: 700; text-decoration: none; color: var(--ink); }
+.help-article a[data-help] { color: var(--brand); text-decoration: underline; cursor: pointer; }
+.help-article li { margin: 4px 0; }

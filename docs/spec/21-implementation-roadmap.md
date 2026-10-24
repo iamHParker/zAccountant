@@ -99,7 +99,7 @@ Built ahead of plan: S0–S5 scope (ledger, security/RLS, recurring entries, ban
 QuickBooks/Excel import, AR/AP), payroll runs and pay stubs, payroll tax liabilities and deposit recording, roles with
 custom permissions and departments, timesheets with approval and HoursTracker import feeding payroll (federal and
 California overtime), comparative statements (prior period / prior year), CSV export of statements, aging and the
-payroll register, print-to-PDF of reports and pay stubs, and the Sprint 6 payroll backlog except the two items that need outside people: **DC allowance
+payroll register, print-to-PDF of reports and pay stubs, the in-app help center, and the Sprint 6 payroll backlog except the two items that need outside people: **DC allowance
 confirmation with OTR** and **CPA/CPP certification of the 2027 tables**.
-Still ahead: Plaid (waiting on keys), Railway setup with Homer (~Nov 15), help center, hardening (S8),
+Still ahead: Plaid (waiting on keys), Railway setup with Homer (~Nov 15), hardening (S8),
 2027 tables (December).
