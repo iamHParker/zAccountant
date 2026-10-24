@@ -37,6 +37,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 ## Open items
 - DC $4,150 per-allowance withholding amount: no official 2026 source (latest FR-230 is 2018). Needs DC OTR
   confirmation before the Board certifies DC.
+- **Production has no backups yet** (Railway Hobby plan can't schedule them). Homer decides by mid-Nov: upgrade
+  to Pro, or Claude builds a nightly pg_dump to outside storage. Must be in place, with a restore drill, before alpha.
 - All tax-table blocks are `verified: false` until the Board certifies them; companies run in calculate-only mode.
 
 ## How the code is built (rules to keep)
@@ -54,7 +56,7 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   download with `?format=csv` (row builders in `src/core/csv.js`). PDFs come from the browser's print window;
   `printPage` prints only the card holding the button (or the section's `.print-me` card).
 
-- Railway: first-time setup steps in `docs/runbooks/railway-setup.md`; the server creates its restricted DB login
+- Railway: live at `zaccountant-production.up.railway.app` (Homer's owner account set up 2026-10-24); first-time setup steps in `docs/runbooks/railway-setup.md`; the server creates its restricted DB login
   from `DATABASE_URL` at start-up (`ensureRuntimeRole`).
 - Ops: request logs/metrics in `src/metrics.js`; restore drill and load test in `src/jobs/`; how to run them and
   the results log: `docs/runbooks/operations.md`.
