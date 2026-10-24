@@ -1485,9 +1485,16 @@
         <h2>Invoice letterhead and logo</h2>
         <p class="hint">What prints at the top and bottom of every invoice.</p>
         <div class="row wrap logo-row">
-          <img v-if="logoUrl()" :src="logoUrl()" alt="Your logo" class="invoice-logo">
-          <span v-else class="muted">No logo yet.</span>
-          <label class="button file-btn">{{ logoUrl() ? 'Change logo' : 'Upload logo' }}<input type="file" accept="image/png,image/jpeg" @change="chooseLogo" :disabled="inv.logoBusy"></label>
+          <label class="logo-drop" :class="{ over: inv.logoOver, busy: inv.logoBusy }"
+            @dragover.prevent="inv.logoOver = true" @dragleave="inv.logoOver = false" @drop.prevent="dropLogo">
+            <strong>{{ inv.logoBusy ? 'Saving…' : 'Drag your logo here' }}</strong>
+            <span class="muted small">or <span class="file-link">{{ logoUrl() ? 'choose a different file' : 'choose a file' }}</span> (PNG or JPEG)</span>
+            <input type="file" accept="image/png,image/jpeg" @change="chooseLogo" :disabled="inv.logoBusy">
+          </label>
+          <div class="logo-slot" :class="{ empty: !logoUrl() }">
+            <img v-if="logoUrl()" :src="logoUrl()" alt="Your logo" class="invoice-logo">
+            <span v-else class="muted small">Your logo<br>shows here</span>
+          </div>
           <button v-if="logoUrl()" type="button" class="link" @click="removeLogo">remove</button>
         </div>
         <p class="muted small">A PNG or JPEG. It's shrunk to 600 pixels on its longer side.</p>

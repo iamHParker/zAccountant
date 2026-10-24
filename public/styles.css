@@ -149,3 +149,10 @@ table.invoice-lines thead th { background: var(--bg); }
 .letterhead .grow { flex: 1; }
 .alpha-note { background: var(--warn-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
 .hint a, .welcome-foot a { color: var(--brand); }
+.logo-drop { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 260px; min-height: 90px; padding: 12px 16px; border: 2px dashed var(--line); border-radius: 10px; cursor: pointer; }
+.logo-drop:hover, .logo-drop.over { border-color: var(--brand); background: var(--warn-bg); }
+.logo-drop.busy { opacity: .6; }
+.logo-drop input[type=file] { display: none; }
+.logo-drop .file-link { color: var(--brand); text-decoration: underline; }
+.logo-slot { display: flex; align-items: center; justify-content: center; min-width: 160px; min-height: 90px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: #fff; text-align: center; }
+.logo-slot.empty { border-style: dashed; background: none; }

@@ -176,7 +176,7 @@ createApp({
       dep: { agency: null, form: '', date: today(), paidFrom: '', reference: '', key: newKey() },
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
-      items: [], inv: { item: blankItem(), editId: null, letterhead: { address: '', note: '', footer: '' }, logoBusy: false },
+      items: [], inv: { item: blankItem(), editId: null, letterhead: { address: '', note: '', footer: '' }, logoBusy: false, logoOver: false },
       lockDate: '', suiRate: '', famliCount: null, audit: null, futaCr: {},
       imp: { show: false, kind: 'journal', asOf: '', file: null, preview: null, problems: null, busy: false, history: [] },
       importKinds: [
@@ -923,9 +923,11 @@ createApp({
       if (r) { this.company = { ...this.company, invoice_address: r.address, invoice_note: r.note, invoice_footer: r.footer }; this.editLetterhead(); }
     },
     logoUrl() { return this.company?.logoVersion ? `/api/companies/${this.companyId}/logo?v=${this.company.logoVersion}` : null; },
-    async chooseLogo(e) {
-      const file = e.target.files?.[0]; e.target.value = '';
-      if (!file) return;
+    chooseLogo(e) { const file = e.target.files?.[0]; e.target.value = ''; return this.saveLogo(file); },
+    dropLogo(e) { this.inv.logoOver = false; return this.saveLogo(e.dataTransfer?.files?.[0]); },
+    async saveLogo(file) {
+      if (!file || this.inv.logoBusy) return;
+      if (!['image/png', 'image/jpeg'].includes(file.type)) { this.flash('The logo must be a PNG or JPEG picture.', 'bad'); return; }
       this.inv.logoBusy = true;
       try {
         const picture = await pictureFromFile(file, { maxSide: 600, type: 'image/png' });

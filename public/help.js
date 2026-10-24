@@ -56,7 +56,7 @@ Receivable in your books. Download it as CSV or print it.</p>
     html: `
 <p>Set these up once in <strong>Settings</strong> (owners and anyone with company settings):</p>
 <ul>
-  <li><strong>Invoice letterhead and logo</strong>: upload your logo, type your address, and a note for every invoice
+  <li><strong>Invoice letterhead and logo</strong>: drag your logo onto the box (or choose the file); it shows in the box beside it. Then type your address, and a note for every invoice
       (for example your tax ID and engineering firm registration number). The closing line prints at the bottom.</li>
   <li><strong>Invoice rates and items</strong>: your hourly rates (Eng Std Rate, Drafting…) and costs you pass on
       (equipment rental, lodging, rental car, airfare). <em>Start with an engineering firm's list</em> adds the usual names;

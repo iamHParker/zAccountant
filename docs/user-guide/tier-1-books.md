@@ -34,7 +34,8 @@ is checked every time the page loads. A full check of the books also runs every 
 ### Set up once (Settings, owner or anyone with company-settings permission)
 
 - **Invoice letterhead and logo:**
-  - Upload your logo (PNG or JPEG).
+  - Drag your logo (PNG or JPEG) onto the dashed box, or click it to choose the file. The box beside it shows the
+    logo your invoices will print.
   - Type the address that prints under your company name.
   - Add a note for every invoice, such as your **tax ID** and **state engineering firm number**.
   - Add a closing line ("Thank you for using us for your Engineering Consulting Services").
