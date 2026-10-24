@@ -961,12 +961,17 @@
           <label>Step 3 dependents amount ($/yr) <input v-model.trim="newEmp.w4.dependentsCredit" inputmode="decimal" placeholder="0"></label>
           </template>
           <label>Step 4(c) extra withholding per check <input v-model.trim="newEmp.w4.extraWithholding" inputmode="decimal" placeholder="0"></label>
+          <label class="check"><input type="checkbox" v-model="newEmp.w4.exempt"> Claims exempt from withholding</label>
+          <label v-if="newEmp.w4.exempt">Exempt for year <input type="number" min="2020" max="2100" v-model.number="newEmp.w4.exemptYear"></label>
         </div>
+        <p class="hint" v-if="newEmp.w4.exempt">An exempt W-4 lasts one year. Unless the employee gives you a new one by February 15, withholding restarts as Single with no adjustments.</p>
         <template v-if="newEmp.workState === 'CA'">
           <h3>California DE 4</h3>
           <div class="grid2">
             <label>Filing status <select v-model="newEmp.ca.filingStatus"><option value="single">Single / dual income married</option><option value="married">Married (one income)</option><option value="head">Head of household</option></select></label>
             <label>Allowances <input type="number" min="0" v-model.number="newEmp.ca.allowances"></label>
+            <label class="check"><input type="checkbox" v-model="newEmp.ca.exempt"> Claims exempt</label>
+            <label v-if="newEmp.ca.exempt">Exempt for year <input type="number" min="2020" max="2100" v-model.number="newEmp.ca.exemptYear"></label>
           </div>
         </template>
         <template v-if="newEmp.workState === 'CO'">
@@ -1143,6 +1148,15 @@
         <h2>State unemployment rate</h2>
         <p class="hint">Your state assigns this rate each year (it's on your rate notice). Current: {{ company.sui_rate_pct ? company.sui_rate_pct + '%' : 'not set (using new-employer rate)' }}</p>
         <form @submit.prevent="saveSui"><label>Rate (%) <input v-model.trim="suiRate" inputmode="decimal" placeholder="2.7" required></label><button class="primary">Save</button></form>
+      </div>
+      <div class="card narrow" v-if="can('admin')">
+        <h2>FUTA credit reduction</h2>
+        <p class="hint">When a state owes the federal government for unemployment loans, employers there pay extra FUTA at year end (Form 940 Schedule A).
+          California has been one of these states. Enter the expected rate for this year and the extra FUTA is recorded with each paycheck instead of all at once in January. Leave blank if none.</p>
+        <form @submit.prevent="saveFutaCr">
+          <div class="grid4"><label v-for="st in payrollStates()">{{ st }} rate (%) <input v-model.trim="futaCr[st]" inputmode="decimal" placeholder="none"></label></div>
+          <button class="primary">Save</button>
+        </form>
       </div>
       <div class="card narrow" v-if="can('admin') && (company.home_state === 'CO' || employees.some(e => e.workState === 'CO'))">
         <h2>Colorado FAMLI employer size</h2>

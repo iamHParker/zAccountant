@@ -96,19 +96,74 @@ export function federalIncomeTax({ taxableWagesCents, periods, w4, fed }) {
 }
 
 // ---------------------------------------------------------------- State income tax
-function caIncomeTax({ taxableWagesCents, periods, el, ca }) {
-  if (el?.exempt) return 0;
+const caKeys = (el) => {
   const status = el?.filingStatus ?? 'single';
   const allowances = el?.allowances ?? 0;
+  if (!Number.isInteger(allowances) || allowances < 0) throw new PayrollError('California: DE 4 allowances must be a whole number');
   const extra = el?.additionalAllowances ?? 0;
-  const tierKey = status === 'head' ? 'head' : status === 'married' ? (allowances >= 2 ? 'married_2plus' : 'married_0_1') : 'single';
+  if (!Number.isInteger(extra) || extra < 0) throw new PayrollError('California: additional allowances must be a whole number');
+  return {
+    allowances, extra,
+    tierKey: status === 'head' ? 'head' : status === 'married' ? (allowances >= 2 ? 'married_2plus' : 'married_0_1') : 'single',
+    bracketKey: status === 'head' ? 'head' : status === 'married' ? 'married' : 'single',
+  };
+};
+
+/**
+ * California DE 44 Method B with the per-period tables (Examples A-D): low-income test on this
+ * check's wages, minus estimated-deduction and standard-deduction amounts for the period, tax from
+ * the period's rate table ("plus" + rate × excess, rounded to the cent), minus the exemption credit.
+ */
+export function caIncomeTaxPerPeriod({ taxableWagesCents, el, t }) {
+  if (el?.exempt) return 0;
+  const { allowances, extra, tierKey, bracketKey } = caKeys(el);
+  if (taxableWagesCents <= dollars(t.lowIncomeExemption[tierKey])) return toCents(el?.extraWithholding ?? 0);
+  // Tables 2 and 4 list 1-10 allowances; above 10, the one-allowance amount times the number.
+  const byCount = (list, n, toC) => (n === 0 ? 0 : n <= list.length ? toC(list[n - 1]) : toC(list[0]) * n);
+  const taxable = Math.max(0, taxableWagesCents - byCount(t.estimatedDeduction, extra, dollars) - dollars(t.standardDeduction[tierKey]));
+  const rows = t.brackets[bracketKey];
+  let row = rows[0];
+  for (const r of rows) if (taxable > dollars(r[0])) row = r;
+  const excess = BigInt(Math.max(0, taxable - dollars(row[0])));
+  const gross = toCents(row[2]) + Number(divRoundHalfUp(excess * BigInt(pct(row[1])), 1_000_000n));
+  const credit = byCount(t.exemptionCredit, allowances, toCents);
+  return Math.max(0, gross - credit) + toCents(el?.extraWithholding ?? 0);
+}
+
+/** California Method B by annualizing (Examples E-F); used for pay periods without DE 44 tables. */
+export function caIncomeTaxAnnualized({ taxableWagesCents, periods, el, ca }) {
+  if (el?.exempt) return 0;
+  const { allowances, extra, tierKey, bracketKey } = caKeys(el);
   const annual = taxableWagesCents * periods;
   if (annual <= dollars(ca.lowIncomeExemption[tierKey])) return toCents(el?.extraWithholding ?? 0);
   const taxable = Math.max(0, annual - dollars(ca.estimatedDeductionPerAllowance) * extra - dollars(ca.standardDeduction[tierKey]));
-  const bracketKey = status === 'head' ? 'head' : status === 'married' ? 'married' : 'single';
   const gross = bracketTax(taxable, ca.brackets[bracketKey]);
   const credit = toCents(ca.exemptionCreditPerAllowance) * allowances;
   return perPeriod(Math.max(0, gross - credit), periods) + toCents(el?.extraWithholding ?? 0);
+}
+
+function caIncomeTax({ taxableWagesCents, periods, payFrequency, el, ca }) {
+  const t = ca.perPeriod?.[payFrequency];
+  return t ? caIncomeTaxPerPeriod({ taxableWagesCents, el, t }) : caIncomeTaxAnnualized({ taxableWagesCents, periods, el, ca });
+}
+
+/**
+ * A W-4 (or DE 4) claiming exempt is good for one calendar year: unless a new one is given by
+ * February 15 of the next year, withholding resumes as Single with no adjustments (federal: Pub 15;
+ * California: DE 4, "Single with zero allowances"). `exemptYear` is the year the exempt form covers.
+ * Returns { elections, warning } with the elections to use for this pay date.
+ */
+export function applyExemptExpiry(elections, payDate, form, lapsed) {
+  if (!elections?.exempt) return { elections, warning: null };
+  if (elections.exemptYear == null || !payDate) {
+    return { elections, warning: `${form} claims exempt: record the year it covers so it lapses after February 15 of the next year` };
+  }
+  const y = Number(elections.exemptYear);
+  if (!Number.isInteger(y)) throw new PayrollError(`${form}: exempt year must be a year like 2026`);
+  if (payDate > `${y + 1}-02-15`) {
+    return { elections: lapsed, warning: `${form} exempt claim for ${y} lapsed on ${y + 1}-02-15; withholding as Single with no adjustments until a new form is given` };
+  }
+  return { elections, warning: null };
 }
 
 function coIncomeTax({ taxableWagesCents, periods, el, co, filingStatus, federalExempt }) {
@@ -137,11 +192,12 @@ function dcIncomeTax({ taxableWagesCents, periods, el, dc }) {
  * @param {object} p
  * @param {number} p.year                tax year (selects tables)
  * @param {string} p.payFrequency        weekly | biweekly | semimonthly | monthly
+ * @param {string} [p.payDate]           YYYY-MM-DD (exempt W-4 / DE 4 claims lapse after Feb 15 of the next year)
  * @param {number} p.grossCents          gross pay this check
  * @param {Array}  [p.preTaxDeductions]  [{ name, amountCents, kind: 'retirement_401k' | 'section125' }]
  * @param {object} p.employee            { workState, w4:{filingStatus, step2, dependentsCredit, otherIncome, deductions, extraWithholding, exempt}, stateElections:{...} }
  * @param {object} [p.ytd]               { grossCents, ficaWagesCents, medicareWagesCents, futaWagesCents, suiWagesCents, stateInsWagesCents }
- * @param {object} [p.company]           { suiRatePct, famliHeadcount }
+ * @param {object} [p.company]           { suiRatePct, famliHeadcount, futaCreditReductionPct: { CA: '1.5' } }
  */
 export function calculatePaycheck(p) {
   const tables = loadTables(p.year);
@@ -156,6 +212,16 @@ export function calculatePaycheck(p) {
   const ytd = { grossCents: 0, ficaWagesCents: 0, medicareWagesCents: 0, futaWagesCents: 0, suiWagesCents: 0, stateInsWagesCents: 0, ...p.ytd };
   const company = p.company ?? {};
   const warnings = [];
+  // Expired "exempt" claims (federal W-4; California DE 4). Colorado follows the federal W-4.
+  const fedEx = applyExemptExpiry(p.employee?.w4, p.payDate, 'Form W-4', { filingStatus: 'single' });
+  if (fedEx.warning) warnings.push(fedEx.warning);
+  const w4 = fedEx.elections;
+  let stateElections = p.employee?.stateElections;
+  if (state === 'CA' && stateElections?.CA) {
+    const caEx = applyExemptExpiry(stateElections.CA, p.payDate, 'DE 4', { filingStatus: 'single', allowances: 0 });
+    if (caEx.warning) warnings.push(caEx.warning);
+    stateElections = { ...stateElections, CA: caEx.elections };
+  }
 
   // Pre-tax deductions
   const deductions = (p.preTaxDeductions ?? []).map((d) => ({ ...d }));
@@ -178,7 +244,7 @@ export function calculatePaycheck(p) {
   };
 
   // Federal income tax
-  add(employeeTaxes, 'FIT', 'Federal income tax', federalIncomeTax({ taxableWagesCents: incomeTaxWages, periods, w4: p.employee.w4, fed }), 'fit_payable', incomeTaxWages);
+  add(employeeTaxes, 'FIT', 'Federal income tax', federalIncomeTax({ taxableWagesCents: incomeTaxWages, periods, w4, fed }), 'fit_payable', incomeTaxWages);
 
   // Social Security & Medicare
   const ssTaxable = underCap(ficaWages, ytd.ficaWagesCents, dollars(fed.socialSecurity.wageBase));
@@ -195,6 +261,13 @@ export function calculatePaycheck(p) {
   // FUTA (employer)
   const futaTaxable = underCap(ficaWages, ytd.futaWagesCents, dollars(fed.futa.wageBase));
   add(employerTaxes, 'FUTA', 'Federal unemployment (FUTA)', applyRate(futaTaxable, pct(fed.futa.ratePct)), 'futa_payable', futaTaxable);
+  // FUTA credit reduction: in a state that owes the federal government for UI loans, part of the 5.4%
+  // credit is taken back on Form 940 Schedule A. Accruing it per paycheck (announced rate, or the
+  // employer's estimate) avoids a surprise at year end.
+  const crPct = company.futaCreditReductionPct?.[state] ?? fed.futa.creditReductionPct?.[state] ?? null;
+  if (crPct != null && crPct !== '' && pct(crPct) > 0) {
+    add(employerTaxes, 'FUTA_CR', `FUTA credit reduction (${state} ${crPct}%)`, applyRate(futaTaxable, pct(crPct)), 'futa_payable', futaTaxable);
+  }
 
   // State unemployment (employer)
   const suiRatePct = company.suiRatePct ?? st.unemployment.defaultRatePct;
@@ -206,15 +279,15 @@ export function calculatePaycheck(p) {
   }
 
   // State-specific
-  const el = p.employee.stateElections?.[state];
+  const el = stateElections?.[state];
   if (state === 'CA') {
-    add(employeeTaxes, 'CA_PIT', 'California income tax', caIncomeTax({ taxableWagesCents: incomeTaxWages, periods, el, ca: st.incomeTax }), 'state_wh_payable', incomeTaxWages);
+    add(employeeTaxes, 'CA_PIT', 'California income tax', caIncomeTax({ taxableWagesCents: incomeTaxWages, periods, payFrequency: p.payFrequency, el, ca: st.incomeTax }), 'state_wh_payable', incomeTaxWages);
     const sdiTaxable = underCap(ficaWages, ytd.stateInsWagesCents, st.sdi.wageBase == null ? null : dollars(st.sdi.wageBase));
     add(employeeTaxes, 'CA_SDI', 'California SDI', applyRate(sdiTaxable, pct(st.sdi.ratePct)), 'state_ins_payable', sdiTaxable);
     const ettTaxable = underCap(ficaWages, ytd.suiWagesCents, dollars(st.ett.wageBase));
     add(employerTaxes, 'CA_ETT', 'California ETT', applyRate(ettTaxable, pct(st.ett.ratePct)), 'suta_payable', ettTaxable);
   } else if (state === 'CO') {
-    add(employeeTaxes, 'CO_PIT', 'Colorado income tax', coIncomeTax({ taxableWagesCents: incomeTaxWages, periods, el, co: st.incomeTax, filingStatus: p.employee.w4?.filingStatus, federalExempt: Boolean(p.employee.w4?.exempt) }), 'state_wh_payable', incomeTaxWages);
+    add(employeeTaxes, 'CO_PIT', 'Colorado income tax', coIncomeTax({ taxableWagesCents: incomeTaxWages, periods, el, co: st.incomeTax, filingStatus: w4?.filingStatus, federalExempt: Boolean(w4?.exempt) }), 'state_wh_payable', incomeTaxWages);
     const f = st.famli;
     const cap = f.wageBase === 'socialSecurity' ? dollars(fed.socialSecurity.wageBase) : dollars(f.wageBase);
     const famliTaxable = underCap(ficaWages, ytd.stateInsWagesCents, cap);

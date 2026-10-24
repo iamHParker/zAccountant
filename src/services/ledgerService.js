@@ -405,7 +405,19 @@ export async function lockPeriod(pool, companyId, { through, reason = null, acto
   });
 }
 
-export async function updateCompanySettings(pool, companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount, actor = null }) {
+export async function updateCompanySettings(pool, companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount, futaCreditReduction, actor = null }) {
+  // FUTA credit-reduction estimate by state, e.g. { CA: '1.2' }; an empty value removes a state.
+  let futaCr = null;
+  if (futaCreditReduction != null) {
+    if (typeof futaCreditReduction !== 'object' || Array.isArray(futaCreditReduction)) throw new LedgerError('FUTA credit reduction must be rates by state');
+    futaCr = {};
+    for (const [st, v] of Object.entries(futaCreditReduction)) {
+      if (!['TX', 'CO', 'CA', 'DC'].includes(st)) throw new LedgerError(`FUTA credit reduction: ${st} is not a supported state`);
+      if (v === '' || v == null) continue;
+      if (!/^\d(\.\d{1,2})?$/.test(String(v)) || Number(v) > 5.4) throw new LedgerError('FUTA credit reduction must be a percent from 0 to 5.4, like 1.2');
+      futaCr[st] = String(v);
+    }
+  }
   if (suiRatePct != null && !/^\d{1,2}(\.\d{1,4})?$/.test(String(suiRatePct))) throw new LedgerError('Unemployment rate must be a percent like 2.7');
   if (famliHeadcount != null && !(Number.isInteger(famliHeadcount) && famliHeadcount >= 0)) throw new LedgerError('FAMLI headcount must be a whole number');
   if (calculateOnlyPayroll != null && typeof calculateOnlyPayroll !== 'boolean') throw new LedgerError('calculateOnlyPayroll must be true or false');
@@ -414,9 +426,11 @@ export async function updateCompanySettings(pool, companyId, { suiRatePct, calcu
     const { rows: [co] } = await c.query(
       `UPDATE companies SET sui_rate_pct = COALESCE($2, sui_rate_pct),
               calculate_only_payroll = COALESCE($3, calculate_only_payroll),
-              famli_headcount = COALESCE($4, famli_headcount) WHERE id = $1 RETURNING *`,
-      [companyId, suiRatePct == null ? null : String(suiRatePct), calculateOnlyPayroll ?? null, famliHeadcount ?? null]);
-    await appendAudit(c, companyId, { action: 'update_settings', entity: 'company', entityId: companyId, actor, payload: { suiRatePct: suiRatePct ?? null, calculateOnlyPayroll: calculateOnlyPayroll ?? null, famliHeadcount: famliHeadcount ?? null } });
+              famli_headcount = COALESCE($4, famli_headcount),
+              futa_credit_reduction = COALESCE($5::jsonb, futa_credit_reduction) WHERE id = $1 RETURNING *`,
+      [companyId, suiRatePct == null ? null : String(suiRatePct), calculateOnlyPayroll ?? null, famliHeadcount ?? null, futaCr == null ? null : JSON.stringify(futaCr)]);
+    await appendAudit(c, companyId, { action: 'update_settings', entity: 'company', entityId: companyId, actor,
+      payload: { suiRatePct: suiRatePct ?? null, calculateOnlyPayroll: calculateOnlyPayroll ?? null, famliHeadcount: famliHeadcount ?? null, futaCreditReduction: futaCr } });
     return co;
   });
 }

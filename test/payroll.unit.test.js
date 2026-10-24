@@ -2,7 +2,7 @@
 // so a reviewer can check the arithmetic without reading the engine.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculatePaycheck, paycheckJournalLines, bracketTax, PayrollError } from '../src/payroll/engine.js';
+import { calculatePaycheck, paycheckJournalLines, bracketTax, PayrollError, loadTables, caIncomeTaxAnnualized } from '../src/payroll/engine.js';
 
 const tax = (r, code) => [...r.employeeTaxes, ...r.employerTaxes].find((t) => t.code === code)?.amountCents ?? 0;
 const run = (o) => calculatePaycheck({ year: 2026, ytd: {}, company: {}, ...o });
@@ -86,9 +86,9 @@ test('Section 125 lowers both income-tax and FICA wages', () => {
 test('California single, 1 allowance, biweekly $3,000 (DE 44 Method B)', () => {
   const r = run({ payFrequency: 'biweekly', grossCents: 300_000, company: { suiRatePct: '3.4' },
     employee: { workState: 'CA', w4: { filingStatus: 'single' }, stateElections: { CA: { filingStatus: 'single', allowances: 1 } } } });
-  // 78,000 − 5,706 std = 72,294 → 121.869 + 334.07 + 668.272 + 1,061.94 + 8.8%×14,752 (1,298.176) = 3,484.327 → 3,484.33
-  // − 168.30 credit = 3,316.03 /26 = 127.54
-  assert.equal(tax(r, 'CA_PIT'), 12_754);
+  // Biweekly tables: 3,000 − 219 std = 2,781 → over 2,214 at 8.8%: 567 × 8.8% = 49.90 + 84.16 = 134.06
+  // − 6.47 credit (1 allowance) = 127.59. (Annualizing gives 127.54: the two Method B ways differ by cents.)
+  assert.equal(tax(r, 'CA_PIT'), 12_759);
   assert.equal(tax(r, 'CA_SDI'), 3_900);   // 1.3%, no wage cap
   assert.equal(tax(r, 'CA_ETT'), 300);     // 0.1%
   assert.equal(tax(r, 'CA_SUI'), 10_200);  // 3.4%
@@ -120,10 +120,91 @@ test('Colorado flat tax with DR 0004 allowance, FAMLI split', () => {
   assert.equal(tax(run({ payFrequency: 'monthly', grossCents: 500_000, employee: { workState: 'CO', w4: { exempt: true } } }), 'CO_PIT'), 0);
 });
 
-test('California DE 44 Example E: semimonthly $2,400, married, 4 allowances = $4.13', () => {
-  const r = run({ payFrequency: 'semimonthly', grossCents: 240_000,
-    employee: { workState: 'CA', w4: {}, stateElections: { CA: { filingStatus: 'married', allowances: 4 } } } });
-  assert.equal(tax(r, 'CA_PIT'), 413);
+// DE 44 Method B worked examples (26methb.pdf). A-D use the per-period tables, as the engine does for
+// weekly/biweekly/semimonthly/monthly payrolls; E-F show the annualized way, used for other periods.
+const ca = (payFrequency, grossCents, CA) => tax(run({ payFrequency, grossCents, employee: { workState: 'CA', w4: {}, stateElections: { CA } } }), 'CA_PIT');
+test('California DE 44 Examples A-D (per-period tables)', () => {
+  assert.equal(ca('weekly', 21_000, { filingStatus: 'single', allowances: 1 }), 0);   // A: under the $363 low-income line
+  // B: 1,600 − 38 est. deduction − 439 std = 1,123 → 2.2% × 271 = 5.96 + 9.37 = 15.33 − 2 × 6.47 = 2.38
+  assert.equal(ca('biweekly', 160_000, { filingStatus: 'married', allowances: 2, additionalAllowances: 1 }), 238);
+  // C: 5,100 − 951 = 4,149 → 2.2% × 2,301 = 50.62 + 20.33 = 70.95 − 5 × 14.03 = 0.82
+  assert.equal(ca('monthly', 510_000, { filingStatus: 'married', allowances: 5 }), 82);
+  // D: 950 − 219 = 731 → 2.2% × 305 = 6.71 + 4.69 = 11.40 − 3 × 3.24 = 1.69
+  assert.equal(ca('weekly', 95_000, { filingStatus: 'head', allowances: 3 }), 169);
+});
+
+test('California DE 44 Examples E-F (annualized) and the per-period result for the same pay', () => {
+  const t = loadTables(2026).states.CA.incomeTax;
+  // E: 57,600 − 11,412 = 46,188 → 243.74 + 528.66 = 772.40 − 673.20 = 99.20 / 24 = 4.13
+  assert.equal(caIncomeTaxAnnualized({ taxableWagesCents: 240_000, periods: 24, el: { filingStatus: 'married', allowances: 4 }, ca: t }), 413);
+  // F: 57,000 − 11,412 = 45,588 → 243.74 + 515.46 = 759.20 − 673.20 = 86.00 / 12 = 7.17
+  assert.equal(caIncomeTaxAnnualized({ taxableWagesCents: 475_000, periods: 12, el: { filingStatus: 'married', allowances: 4 }, ca: t }), 717);
+  // Same pay as E with the semimonthly tables: 2,400 − 476 = 1,924 → 22.00 + 10.16 = 32.16 − 28.05 (Table 4, 4 allowances) = 4.11.
+  // Both are official Method B; the 2¢ difference is the rounding of the per-period tables.
+  assert.equal(ca('semimonthly', 240_000, { filingStatus: 'married', allowances: 4 }), 411);
+});
+
+test('California per-period tables were transcribed correctly (every "plus" re-derived)', () => {
+  const pp = loadTables(2026).states.CA.incomeTax.perPeriod;
+  for (const period of ['weekly', 'biweekly', 'semimonthly', 'monthly']) {
+    for (const [status, rows] of Object.entries(pp[period].brackets)) {
+      let plus = 0;
+      rows.forEach((r, i) => {
+        if (i > 0) plus += Math.round((r[0] - rows[i - 1][0]) * Number(rows[i - 1][1])); // dollars × % = cents
+        assert.equal(Math.round(Number(r[2]) * 100), plus, `${period} ${status} row ${i}`);
+      });
+    }
+  }
+});
+
+test('California Tables 2 and 4 match the annual amounts × allowances ÷ periods', () => {
+  const ca = loadTables(2026).states.CA.incomeTax;
+  const periods = { weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 };
+  for (const [p, n] of Object.entries(periods)) {
+    const t = ca.perPeriod[p];
+    t.exemptionCredit.forEach((v, i) => assert.equal(Math.round(Number(v) * 100), Math.round(16830 * (i + 1) / n), `${p} credit ${i + 1}`));
+    t.estimatedDeduction.forEach((v, i) => assert.equal(v, Math.round(1000 * (i + 1) / n), `${p} deduction ${i + 1}`));
+  }
+  assert.equal(ca.exemptionCreditPerAllowance, '168.30');
+});
+
+test('California: more than 10 allowances use the one-allowance amount × the number (DE 44: 15 weekly = $48.60)', () => {
+  const big = { filingStatus: 'married', allowances: 15 };
+  // 3,000 weekly married: − 219 = 2,781 → over 2,214 at 8.8%: 567 × 8.8% = 49.90 + 84.16 = 134.06 − 48.60 = 85.46
+  assert.equal(ca('weekly', 300_000, big), 8_546);
+});
+
+test('an exempt W-4 / DE 4 lapses after February 15 of the next year', () => {
+  const emp = (w4, CA) => ({ workState: 'CA', w4, stateElections: { CA } });
+  const before = run({ payFrequency: 'biweekly', grossCents: 300_000, payDate: '2027-02-12',
+    employee: emp({ exempt: true, exemptYear: 2026 }, { exempt: true, exemptYear: 2026 }) });
+  assert.equal(tax(before, 'FIT'), 0);
+  assert.equal(tax(before, 'CA_PIT'), 0);
+  const after = run({ payFrequency: 'biweekly', grossCents: 300_000, payDate: '2027-02-16',
+    employee: emp({ exempt: true, exemptYear: 2026, filingStatus: 'married' }, { exempt: true, exemptYear: 2026, filingStatus: 'married', allowances: 3 }) });
+  const single = run({ payFrequency: 'biweekly', grossCents: 300_000, payDate: '2027-02-16', employee: emp({ filingStatus: 'single' }, { filingStatus: 'single', allowances: 0 }) });
+  assert.ok(tax(after, 'FIT') > 0);
+  assert.equal(tax(after, 'FIT'), tax(single, 'FIT'), 'federal: Single, no adjustments');
+  assert.equal(tax(after, 'CA_PIT'), tax(single, 'CA_PIT'), 'California: Single, zero allowances');
+  assert.ok(after.warnings.some((w) => /W-4 exempt claim for 2026 lapsed/.test(w)));
+  // Colorado follows the federal W-4, so its exemption lapses too.
+  const co = run({ payFrequency: 'monthly', grossCents: 500_000, payDate: '2027-03-01', employee: { workState: 'CO', w4: { exempt: true, exemptYear: 2026 } } });
+  assert.equal(tax(co, 'CO_PIT'), 19_983);
+  const noYear = run({ payFrequency: 'monthly', grossCents: 500_000, payDate: '2026-03-01', employee: { workState: 'TX', w4: { exempt: true } } });
+  assert.equal(tax(noYear, 'FIT'), 0);
+  assert.ok(noYear.warnings.some((w) => /record the year/.test(w)));
+});
+
+test('FUTA credit reduction accrues per paycheck when a rate is entered', () => {
+  const r = run({ payFrequency: 'monthly', grossCents: 500_000, company: { futaCreditReductionPct: { CA: '1.2' } },
+    employee: { workState: 'CA', w4: {}, stateElections: { CA: {} } } });
+  assert.equal(tax(r, 'FUTA'), 3_000);      // 0.6% × 5,000
+  assert.equal(tax(r, 'FUTA_CR'), 6_000);   // 1.2% × 5,000 (under the $7,000 base)
+  const later = run({ payFrequency: 'monthly', grossCents: 500_000, ytd: { futaWagesCents: 500_000 }, company: { futaCreditReductionPct: { CA: '1.2' } },
+    employee: { workState: 'CA', w4: {}, stateElections: { CA: {} } } });
+  assert.equal(tax(later, 'FUTA_CR'), 2_400); // only $2,000 left under the base
+  const tx = run({ payFrequency: 'monthly', grossCents: 500_000, company: { futaCreditReductionPct: { CA: '1.2' } }, employee: { workState: 'TX', w4: {} } });
+  assert.equal(tax(tx, 'FUTA_CR'), 0);       // rate is for California wages only
 });
 
 test('DC single semimonthly $4,000', () => {

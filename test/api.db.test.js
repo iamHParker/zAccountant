@@ -500,6 +500,32 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const after = (await owner.c.call('GET', `${base}/payroll-hours?payFrequency=weekly&periodStart=2026-11-01&periodEnd=2026-11-07`)).body;
     assert.equal(after.employees.find((e) => e.employeeId === emp.id).hours, '0.00', 'nothing left to pay');
 
+    // Voiding the paycheck reopens its hours; the next run (a later period) picks them up and says so.
+    const pcs = (await owner.c.call('GET', `${base}/paychecks`)).body;
+    const wesCheck = pcs.find((p) => p.employee === 'Wes Worker');
+    const v = await owner.c.call('POST', `${base}/paychecks/${wesCheck.id}/void`, { reason: 'wrong rate' });
+    assert.equal(v.status, 201, JSON.stringify(v.body));
+    assert.equal(v.body.timeEntriesReopened, 5);
+    assert.equal((await worker.c.call('GET', `${base}/time-entries?status=unpaid`)).body.length, 5);
+    // Next week: the two imported shifts, approved now, plus last week's reopened hours.
+    const nextIds = imported.map((e) => e.id);
+    await worker.c.call('POST', `${base}/time-entries/submit`, { ids: nextIds });
+    await foreman.c.call('POST', `${base}/time-entries/review`, { ids: nextIds, approve: true });
+    const next = (await owner.c.call('GET', `${base}/payroll-hours?payFrequency=weekly&periodStart=2026-11-08&periodEnd=2026-11-14`)).body.employees.find((e) => e.employeeId === emp.id);
+    assert.deepEqual([next.hours, next.overtimeHours], ['54.50', '5.00'], '40 + 14.5 regular, last week\'s 5 overtime');
+    assert.ok(next.warnings.some((w) => /45.00 unpaid hours from before this period/.test(w)), JSON.stringify(next.warnings));
+    const run2 = await owner.c.call('POST', `${base}/payroll-runs`, { payFrequency: 'weekly', periodStart: '2026-11-08', periodEnd: '2026-11-14', payDate: '2026-11-20',
+      paidFromAccountId: A['1000'], fromTimesheets: true, items: [{ employeeId: emp.id, hours: next.hours, overtimeHours: next.overtimeHours }] });
+    assert.equal(run2.status, 201, JSON.stringify(run2.body));
+    assert.equal(run2.body.timeEntriesPaid, 7);
+
+    // FUTA credit-reduction estimate (owner setting) is validated.
+    assert.equal((await owner.c.call('PATCH', `${base}/settings`, { futaCreditReduction: { CA: '9' } })).status, 400);
+    assert.equal((await owner.c.call('PATCH', `${base}/settings`, { futaCreditReduction: { NY: '1' } })).status, 400);
+    const set = await owner.c.call('PATCH', `${base}/settings`, { futaCreditReduction: { CA: '1.2', CO: '' } });
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    assert.deepEqual(set.body.futa_credit_reduction, { CA: '1.2' });
+
     // Hours by job.
     const sum = (await owner.c.call('GET', `${base}/reports/time-summary?from=2026-11-01&to=2026-11-15`)).body;
     assert.equal(sum.jobs.find((j) => j.jobName === 'Smith Residence').minutes, 45 * 60 + 8 * 60);

@@ -85,8 +85,8 @@ const blankRepeat = () => ({ on: false, name: '', frequency: 'monthly', endDate:
 
 const blankEmployee = () => ({
   firstName: '', lastName: '', ssn: '', workState: 'TX', payFrequency: 'biweekly', payType: 'hourly', payRate: '',
-  w4: { formYear: 2020, allowances: 0, filingStatus: 'single', step2: false, dependentsCredit: '', extraWithholding: '' },
-  ca: { filingStatus: 'single', allowances: 1 }, co: { annualAllowance: '' }, dc: { filingStatus: 'single', allowances: 0 },
+  w4: { formYear: 2020, allowances: 0, filingStatus: 'single', step2: false, dependentsCredit: '', extraWithholding: '', exempt: false, exemptYear: Number(today().slice(0, 4)) },
+  ca: { filingStatus: 'single', allowances: 1, exempt: false, exemptYear: Number(today().slice(0, 4)) }, co: { annualAllowance: '' }, dc: { filingStatus: 'single', allowances: 0 },
 });
 
 createApp({
@@ -129,7 +129,7 @@ createApp({
       liab: { from: today().slice(0, 8) + '01', to: today(), data: null },
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
-      lockDate: '', suiRate: '', famliCount: null, audit: null,
+      lockDate: '', suiRate: '', famliCount: null, audit: null, futaCr: {},
       imp: { show: false, kind: 'journal', asOf: '', file: null, preview: null, problems: null, busy: false, history: [] },
       importKinds: [
         { id: 'accounts', label: 'Chart of accounts', template: 'chart-of-accounts.csv', help: 'QuickBooks: Reports → Account List → Export to Excel/CSV. Or fill in our template.' },
@@ -182,7 +182,7 @@ createApp({
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if ((t === 'payroll' || t === 'settings') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
-      if (t === 'settings') { this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
+      if (t === 'settings') { this.editFutaCr(); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'bank') this.loadBank();
       if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
@@ -507,8 +507,10 @@ createApp({
     async openRegister(a) { this.register = await this.run(() => api('GET', `/companies/${this.companyId}/accounts/${a.id}/register`)); },
     async createEmployee() {
       const e = this.newEmp;
-      const stateElections = { CA: e.ca, CO: e.co.annualAllowance ? e.co : {}, DC: e.dc };
-      const w4 = { ...e.w4, dependentsCredit: e.w4.dependentsCredit || '0', extraWithholding: e.w4.extraWithholding || '0' };
+      // An exempt claim is kept with the year it covers (it lapses after February 15 of the next year).
+      const exemptOnly = (x) => { const { exempt, exemptYear, ...rest } = x; return exempt ? { ...rest, exempt: true, exemptYear } : rest; };
+      const stateElections = { CA: exemptOnly(e.ca), CO: e.co.annualAllowance ? e.co : {}, DC: e.dc };
+      const w4 = exemptOnly({ ...e.w4, dependentsCredit: e.w4.dependentsCredit || '0', extraWithholding: e.w4.extraWithholding || '0' });
       const body = { ssn: e.ssn || undefined, firstName: e.firstName, lastName: e.lastName, workState: e.workState, payFrequency: e.payFrequency, payType: e.payType, payRate: e.payRate, w4, stateElections: { [e.workState]: stateElections[e.workState] } };
       const ok = await this.run(() => api('POST', `/companies/${this.companyId}/employees`, body), 'Employee saved.');
       if (ok) { this.newEmp = blankEmployee(); this.showNewEmp = false; this.loadEmployees(); }
@@ -549,11 +551,17 @@ createApp({
     },
     async saveFamli() {
       const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { famliHeadcount: this.famliCount }), 'Saved.');
-      if (c) this.company = c;
+      if (c) this.company = { ...this.company, ...c };
     },
     async saveSui() {
       const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { suiRatePct: this.suiRate }), 'Rate saved.');
-      if (c) this.company = c;
+      if (c) this.company = { ...this.company, ...c };
+    },
+    payrollStates() { return [...new Set([this.company?.home_state, ...this.employees.map((e) => e.workState)].filter(Boolean))].sort(); },
+    editFutaCr() { this.futaCr = { ...(this.company?.futa_credit_reduction ?? {}) }; },
+    async saveFutaCr() {
+      const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { futaCreditReduction: this.futaCr }), 'Saved.');
+      if (c) { this.company = { ...this.company, ...c }; this.editFutaCr(); }
     },
     // ---------------------------------------------------------------- Importing books
     async loadImports() { this.imp.history = (await this.run(() => api('GET', `/companies/${this.companyId}/imports`))) ?? []; },

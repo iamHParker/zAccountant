@@ -375,8 +375,9 @@ export async function getTimeSummary(db, companyId, viewer, { from, to }) {
 /**
  * Hours to pay in a payroll run, from approved timesheets not yet paid. For each active employee on
  * the pay schedule who is linked to a person: regular, overtime and double-time hours (federal
- * 40-hour week; California daily rules too). Whole workweeks around the period are read so weekly
- * overtime is right when a workweek straddles two pay periods; only days inside the period are paid.
+ * 40-hour week; California daily rules too). Whole workweeks are read so weekly overtime is right
+ * when a workweek straddles two pay periods. Unpaid approved hours from before the period (approved
+ * late, or reopened by a voided paycheck) are included too, and flagged.
  */
 export async function getPayrollHours(db, companyId, { payFrequency, periodStart, periodEnd }) {
   if (!isIsoDate(periodStart) || !isIsoDate(periodEnd) || periodEnd < periodStart) throw new LedgerError('Pay period must be two dates, start on or before end');
@@ -384,9 +385,13 @@ export async function getPayrollHours(db, companyId, { payFrequency, periodStart
   const { rows: emps } = await db.query(
     `SELECT e.id, e.first_name AS "firstName", e.last_name AS "lastName", e.pay_type AS "payType", e.work_state AS "workState", e.user_id AS "userId"
        FROM employees e WHERE e.company_id = $1 AND e.active AND e.pay_frequency = $2 ORDER BY e.last_name, e.first_name`, [companyId, payFrequency]);
-  const from = workweekStart(periodStart);
-  const to = addDays(workweekStart(periodEnd), 6);
   const linked = emps.filter((e) => e.userId);
+  const { rows: [early] } = linked.length ? await db.query(
+    `SELECT to_char(min(work_date), 'YYYY-MM-DD') AS d FROM time_entries
+      WHERE company_id = $1 AND user_id = ANY($2::uuid[]) AND status = 'approved' AND paid_run_id IS NULL AND work_date < $3`,
+    [companyId, linked.map((e) => e.userId), periodStart]) : { rows: [{}] };
+  const from = workweekStart(early?.d && early.d < periodStart ? early.d : periodStart);
+  const to = addDays(workweekStart(periodEnd), 6);
   const { rows: days } = linked.length ? await db.query(
     `SELECT user_id, to_char(work_date, 'YYYY-MM-DD') AS d, status, (paid_run_id IS NOT NULL) AS paid, sum(minutes)::int AS m
        FROM time_entries WHERE company_id = $1 AND user_id = ANY($2::uuid[]) AND work_date BETWEEN $3 AND $4
@@ -409,8 +414,9 @@ export async function getPayrollHours(db, companyId, { payFrequency, periodStart
     if (paidInPeriod) row.warnings.push('some hours in this period were already paid; only the unpaid ones are included');
     const unpaidByDay = new Map();
     for (const d of mine) if (d.status === 'approved' && !d.paid) unpaidByDay.set(d.d, (unpaidByDay.get(d.d) ?? 0) + d.m);
+    let earlierMinutes = 0;
     for (const s of splitOvertime([...perDay].map(([date, minutes]) => ({ date, minutes })), { state: e.workState })) {
-      if (s.date < periodStart || s.date > periodEnd) continue;
+      if (s.date > periodEnd) continue;
       const unpaid = unpaidByDay.get(s.date) ?? 0;
       if (!unpaid) continue;
       // If part of a day was already paid, pay the remaining part at the day's highest rates.
@@ -418,7 +424,9 @@ export async function getPayrollHours(db, companyId, { payFrequency, periodStart
       const dt = Math.min(left, s.doubleTime); left -= dt;
       const ot = Math.min(left, s.overtime); left -= ot;
       row.doubleTimeMinutes += dt; row.overtimeMinutes += ot; row.regularMinutes += left;
+      if (s.date < periodStart) earlierMinutes += unpaid;
     }
+    if (earlierMinutes) row.warnings.push(`includes ${minutesToHours(earlierMinutes)} unpaid hours from before this period (approved late, or from a voided paycheck)`);
     row.waitingMinutes = mine.filter((d) => ['draft', 'submitted'].includes(d.status) && d.d >= periodStart && d.d <= periodEnd).reduce((t, d) => t + d.m, 0);
     if (row.waitingMinutes) row.warnings.push(`${minutesToHours(row.waitingMinutes)} hours in this period are not approved yet`);
     if (e.payType === 'salary' && row.overtimeMinutes + row.doubleTimeMinutes > 0) {
