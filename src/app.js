@@ -29,7 +29,8 @@ import { platformRole, appVersion } from './core/platform.js';
 import { streamBackup } from './jobs/backup.js';
 import * as plans from './services/planService.js';
 import * as invoiceSetup from './services/invoiceSetupService.js';
-import { featureForPath, FEATURES } from './core/plans.js';
+import { featureForPath, FEATURES, PLANS, ADD_ONS } from './core/plans.js';
+import * as backup from './services/backupService.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -192,6 +193,13 @@ export function createApp(pool, { log } = {}) {
     res.json({ ok: true });
   });
   app.use('/api/auth', authApi);
+
+  // The front page lists the plans and their prices from the same catalog the Admin dashboard uses, so a price
+  // set there shows here too. Public: names and prices only.
+  app.get('/api/public/plans', (req, res) => {
+    const list = (o) => Object.entries(o).map(([key, p]) => ({ key, name: p.name, monthlyCents: p.monthlyCents, note: p.note ?? null }));
+    res.json({ plans: list(PLANS), addOns: list(ADD_ONS) });
+  });
 
   // ------------------------------------------------------------------ Everything else needs a full sign-in
   const api = express.Router();
@@ -497,6 +505,14 @@ export function createApp(pool, { log } = {}) {
 
   // Reports
   api.get('/companies/:companyId/reports/dashboard', route('view_books', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  // Back up your books: the chart of accounts and every journal entry, in our import templates' layout.
+  const backupFile = (title, rowsFor) => route('view_books', async ({ db, companyId }) => {
+    const company = (await ledger.getCompany(db, companyId)).name;
+    return { [FILE]: { name: csvFileName(company, title, centralToday()), type: 'text/csv; charset=utf-8', body: toCsv(await rowsFor(db, companyId)) } };
+  });
+  api.get('/companies/:companyId/backup/accounts', backupFile('Chart of accounts', backup.chartRows));
+  api.get('/companies/:companyId/backup/journal', backupFile('All transactions', backup.journalRows));
+
   api.get('/companies/:companyId/reports/trial-balance', report('view_books', 'Trial Balance',
     ({ db, req, companyId }) => reports.getTrialBalance(db, companyId, { asOf: q(req.query.asOf) ?? today() }), statement('trial-balance')));
   api.get('/companies/:companyId/reports/balance-sheet', report('view_books', 'Balance Sheet',
@@ -577,7 +593,11 @@ export function createApp(pool, { log } = {}) {
   // Draws a picture of the screen for Beta feedback (loaded only when the dialog asks for one).
   const htmlToImagePath = fileURLToPath(new URL('../node_modules/html-to-image/dist/html-to-image.js', import.meta.url));
   app.get('/vendor/html-to-image.js', (req, res) => res.type('text/javascript').sendFile(htmlToImagePath));
-  app.use(express.static(fileURLToPath(new URL('../public/', import.meta.url))));
+  // The front page (services, prices, sign-in) is at /; the app itself is at /app.
+  const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
+  app.get('/', (req, res) => res.sendFile('welcome.html', { root: publicDir }));
+  app.get(['/app', '/app/'], (req, res) => res.sendFile('index.html', { root: publicDir }));
+  app.use(express.static(publicDir, { index: false }));
 
   // Errors -> JSON. User mistakes are 4xx with a readable message; anything else is 500 without internals.
   // eslint-disable-next-line no-unused-vars

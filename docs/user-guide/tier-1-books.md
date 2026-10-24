@@ -127,6 +127,11 @@ report ties out" when its own check passes. If you ever see ⚠, please send a �
   approves timesheets but doesn't record transactions.
 - **Departments:** group people (Accounting, Engineering, Field). A department's approver approves its timesheets.
 - **Invoice letterhead and logo**, **Invoice rates and items:** see section 4.
+- **Back up your books:** while zAccountant is in alpha testing, keep your own copy. **Download chart of accounts**
+  and **Download all transactions** give two CSV files that open in Excel. To rebuild the books, make a new
+  company and import them (Accounts → Import): the chart of accounts first, then the transactions. Every report
+  comes back the same. Invoice and bill details, customers, employees and timesheets are not in these files, so keep
+  your saved invoices and pay stubs too. Anyone who can see the books can download them.
 - **Close the books:** after a month or year is final (usually after the bank is reconciled and your accountant is
   done), close through its last day. Nothing dated on or before that day can be added or changed. Only the owner
   can reopen, with a two-step code and a reason, and that is logged.

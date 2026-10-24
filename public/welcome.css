@@ -1,0 +1,28 @@
+/* The front page (welcome.html). Builds on styles.css (colors, cards, buttons). */
+a.button.primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.welcome-top a.brand { text-decoration: none; }
+.swiss-flag { width: 26px; height: 26px; flex: none; }
+.welcome-nav { display: flex; gap: 18px; }
+.welcome-nav a { color: var(--muted); text-decoration: none; }
+.welcome-nav a:hover { color: var(--ink); }
+.welcome-signin { margin-left: auto; }
+.welcome-main { max-width: 1080px; margin: 0 auto; padding: 0 16px 40px; }
+.hero { display: grid; grid-template-columns: 1fr 1.1fr; gap: 32px; align-items: center; padding: 40px 0 24px; }
+.hero h1 { font-size: 38px; line-height: 1.15; margin: 0 0 12px; }
+.lead { font-size: 19px; }
+.hero-img { width: 100%; height: auto; }
+.welcome-main section { padding-top: 24px; }
+.welcome-main h2 { font-size: 26px; margin-bottom: 4px; }
+.cards3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 16px; }
+.cards2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 16px; }
+.cards3 h3, .cards2 h3 { margin-top: 0; }
+.price { font-size: 22px; font-weight: 700; margin: 4px 0; }
+.tag { font-size: 12px; font-weight: 600; color: var(--brand); border: 1px solid var(--brand); border-radius: 999px; padding: 1px 8px; vertical-align: middle; }
+.welcome-foot { display: flex; justify-content: space-between; max-width: 1080px; margin: 0 auto; padding: 16px; border-top: 1px solid var(--line); color: var(--muted); }
+html { scroll-behavior: smooth; }
+section[id] { scroll-margin-top: 70px; }
+@media (max-width: 800px) {
+  .hero, .cards3, .cards2 { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 30px; }
+  .welcome-nav { order: 3; width: 100%; }
+}

@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-labelledby="t">
+  <title id="t">zAccountant's Home screen: cash, income, expenses and profit, with the latest transactions</title>
+  <defs>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="115%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#1d2433" flood-opacity="0.18"/></filter>
+  </defs>
+  <rect x="10" y="10" width="620" height="396" rx="12" fill="#ffffff" stroke="#e3e6ec" filter="url(#sh)"/>
+  <!-- window bar -->
+  <path d="M10 22a12 12 0 0 1 12-12h596a12 12 0 0 1 12 12v24H10z" fill="#f6f7f9"/>
+  <line x1="10" y1="46" x2="630" y2="46" stroke="#e3e6ec"/>
+  <circle cx="30" cy="28" r="5" fill="#ff5f57"/><circle cx="46" cy="28" r="5" fill="#febc2e"/><circle cx="62" cy="28" r="5" fill="#28c840"/>
+  <!-- app header -->
+  <text x="30" y="76" font-family="system-ui, sans-serif" font-size="17" font-weight="800" fill="#1f6f5c">z<tspan fill="#1d2433" font-weight="600">Accountant</tspan></text>
+  <g font-family="system-ui, sans-serif" font-size="12" fill="#6b7385">
+    <rect x="150" y="62" width="48" height="22" rx="5" fill="#1f6f5c"/><text x="160" y="77" fill="#fff">Home</text>
+    <text x="212" y="77">Transactions</text><text x="296" y="77">Sales</text><text x="340" y="77">Bills</text>
+    <text x="380" y="77">Banking</text><text x="438" y="77">Reports</text><text x="498" y="77">Payroll</text>
+  </g>
+  <line x1="10" y1="94" x2="630" y2="94" stroke="#e3e6ec"/>
+  <!-- tiles -->
+  <g font-family="system-ui, sans-serif">
+    <rect x="30" y="110" width="135" height="66" rx="8" fill="#fff" stroke="#e3e6ec"/>
+    <text x="42" y="132" font-size="11" fill="#6b7385">Cash in the bank</text><text x="42" y="160" font-size="20" font-weight="700" fill="#1d2433">$48,210</text>
+    <rect x="177" y="110" width="135" height="66" rx="8" fill="#fff" stroke="#e3e6ec"/>
+    <text x="189" y="132" font-size="11" fill="#6b7385">Income this year</text><text x="189" y="160" font-size="20" font-weight="700" fill="#1d2433">$126,540</text>
+    <rect x="324" y="110" width="135" height="66" rx="8" fill="#fff" stroke="#e3e6ec"/>
+    <text x="336" y="132" font-size="11" fill="#6b7385">Expenses this year</text><text x="336" y="160" font-size="20" font-weight="700" fill="#1d2433">$71,385</text>
+    <rect x="471" y="110" width="135" height="66" rx="8" fill="#fff" stroke="#e3e6ec"/>
+    <text x="483" y="132" font-size="11" fill="#6b7385">Profit</text><text x="483" y="160" font-size="20" font-weight="700" fill="#1f7a3a">$55,155</text>
+  </g>
+  <!-- bar chart -->
+  <rect x="30" y="190" width="230" height="196" rx="8" fill="#fff" stroke="#e3e6ec"/>
+  <text x="42" y="212" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#1d2433">Income by month</text>
+  <g fill="#3fa58a">
+    <rect x="48" y="300" width="18" height="66" rx="2"/><rect x="80" y="276" width="18" height="90" rx="2"/>
+    <rect x="112" y="288" width="18" height="78" rx="2"/><rect x="144" y="250" width="18" height="116" rx="2"/>
+    <rect x="176" y="262" width="18" height="104" rx="2"/><rect x="208" y="232" width="18" height="134" rx="2"/>
+  </g>
+  <line x1="42" y1="366" x2="244" y2="366" stroke="#e3e6ec"/>
+  <!-- ledger table -->
+  <rect x="274" y="190" width="332" height="196" rx="8" fill="#fff" stroke="#e3e6ec"/>
+  <g font-family="system-ui, sans-serif" font-size="11.5" fill="#1d2433">
+    <text x="286" y="212" font-size="12" font-weight="600">Latest transactions</text>
+    <g fill="#6b7385"><text x="286" y="236">Date</text><text x="352" y="236">Description</text><text x="594" y="236" text-anchor="end">Amount</text></g>
+    <line x1="286" y1="243" x2="594" y2="243" stroke="#e3e6ec"/>
+    <text x="286" y="262">10/22</text><text x="352" y="262">Invoice 26-134 paid</text><text x="594" y="262" text-anchor="end" fill="#1f7a3a">+4,500.00</text>
+    <line x1="286" y1="270" x2="594" y2="270" stroke="#f0f1f4"/>
+    <text x="286" y="289">10/20</text><text x="352" y="289">Office rent</text><text x="594" y="289" text-anchor="end">-1,800.00</text>
+    <line x1="286" y1="297" x2="594" y2="297" stroke="#f0f1f4"/>
+    <text x="286" y="316">10/17</text><text x="352" y="316">Payroll, week 42</text><text x="594" y="316" text-anchor="end">-3,912.44</text>
+    <line x1="286" y1="324" x2="594" y2="324" stroke="#f0f1f4"/>
+    <text x="286" y="343">10/15</text><text x="352" y="343">Survey equipment</text><text x="594" y="343" text-anchor="end">-640.00</text>
+    <line x1="286" y1="351" x2="594" y2="351" stroke="#f0f1f4"/>
+    <text x="286" y="372" fill="#1f7a3a">✓ Your books are in balance</text>
+  </g>
+</svg>

@@ -2,7 +2,8 @@
 
 ## 1. Creating your account
 
-1. Open zAccountant and choose **Create an account**. Enter your name, email and a password (a long passphrase is
+1. Open zAccountant's front page and choose **Create an account** (or **Sign in** if you have one; the app
+   itself is at `/app`). Enter your name, email and a password (a long passphrase is
    best).
 2. **Two-step sign-in is required.** Open an authenticator app on your phone (Google or Microsoft Authenticator,
    1Password, Authy). Add an account, then scan the code on screen or type the key. Enter the 6-digit code the app
@@ -76,6 +77,9 @@ screen, including amounts from your books. Only zAccountant's developers can see
 sending.
 
 ## 6. Keeping your account safe
+
+> **Alpha testing: keep your own backup.** Download a copy of your books regularly from **Settings → Back up your
+> books** (tier 1, section 8), and keep your own records (bank statements, receipts, invoices) as well.
 
 - Never share your password or recovery codes. zAccountant staff will never ask for them.
 - Social Security numbers and authenticator secrets are encrypted before they are stored.
