@@ -59,7 +59,7 @@ createApp({
       roleLabels: { owner: 'Owner', accountant: 'Accountant', bookkeeper: 'Bookkeeper', viewer: 'Viewer (read only)' },
       months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       tabs: [
-        { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'reports', label: 'Reports' },
+        { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'bank', label: 'Banking' }, { id: 'reports', label: 'Reports' },
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
       typeLabel: { asset: 'Asset', liability: 'Liability', equity: 'Equity', revenue: 'Income', expense: 'Expense' },
@@ -84,10 +84,14 @@ createApp({
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
       lockDate: '', suiRate: '', famliCount: null, audit: null,
+      bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
+        recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
   },
   computed: {
     bankAccounts() { return this.accounts.filter((a) => a.cashFlow === 'cash'); },
+    bankLike() { return this.accounts.filter((a) => a.cashFlow === 'cash' || a.subtype === 'credit_card'); },
+    categoryChoices() { return this.accounts.filter((a) => a.id !== this.bank.accountId && a.isActive && a.key !== 'retained_earnings'); },
     quickChoices() {
       const k = this.quick.kind;
       if (k === 'out') return this.accounts.filter((a) => a.type === 'expense' || ['liability', 'equity'].includes(a.type) || (a.type === 'asset' && a.cashFlow !== 'cash'));
@@ -109,6 +113,7 @@ createApp({
       if (t === 'payroll' || t === 'settings') this.loadEmployees();
       if (t === 'settings') { this.loadMembers(); this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
+      if (t === 'bank') this.loadBank();
     },
     'quick.kind'() { this.quick.other = ''; },
   },
@@ -315,6 +320,101 @@ createApp({
     async saveSui() {
       const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { suiRatePct: this.suiRate }), 'Rate saved.');
       if (c) this.company = c;
+    },
+    // ---------------------------------------------------------------- Banking
+    async loadBank() {
+      const b = this.bank;
+      if (!this.bankLike.some((a) => a.id === b.accountId)) b.accountId = this.bankLike[0]?.id ?? '';
+      if (!b.accountId) return;
+      const base = `/companies/${this.companyId}/bank-accounts/${b.accountId}`;
+      b.txs = (await this.run(() => api('GET', `${base}/transactions?status=${b.view}`))) ?? [];
+      b.choice = Object.fromEntries(b.txs.map((t) => [t.id, t.suggestedAccountId ?? '']));
+      b.matches = {};
+      b.rules = (await this.run(() => api('GET', `/companies/${this.companyId}/bank-rules`))) ?? [];
+      b.recons = (await this.run(() => api('GET', `${base}/reconciliations`))) ?? [];
+      const open = b.recons.find((r) => r.status === 'open');
+      b.recon = open ? await this.run(() => api('GET', `/companies/${this.companyId}/reconciliations/${open.id}`)) : null;
+    },
+    acctName(id) { const a = this.accounts.find((x) => x.id === id); return a ? `${a.code} · ${a.name}` : ''; },
+    async pickStatement(ev) {
+      const f = ev.target.files[0];
+      this.bank.preview = null;
+      if (!f) return;
+      if (f.size > 5_000_000) { this.flash('That file is larger than 5 MB. Download a shorter date range.', 'bad'); return; }
+      this.bank.file = { name: f.name, content: await f.text() };
+      this.bank.preview = await this.run(() => api('POST', `/companies/${this.companyId}/bank-accounts/${this.bank.accountId}/import`,
+        { fileName: f.name, content: this.bank.file.content, preview: true }));
+    },
+    async importStatement() {
+      const b = this.bank;
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-accounts/${b.accountId}/import`, { fileName: b.file.name, content: b.file.content }));
+      if (!r) return;
+      this.flash(`Imported ${r.new} transaction${r.new === 1 ? '' : 's'}${r.duplicates ? ` (${r.duplicates} already imported, skipped)` : ''}.`);
+      b.file = null; b.preview = null; b.view = 'review';
+      if (this.$refs.statementFile) this.$refs.statementFile.value = '';
+      this.loadBank();
+    },
+    async postBankTx(t) {
+      const accountId = this.bank.choice[t.id];
+      if (!accountId) { this.flash('Choose an account first.', 'bad'); return; }
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/bank-transactions/${t.id}/post`, { accountId }))) {
+        this.bank.txs = this.bank.txs.filter((x) => x.id !== t.id);
+      }
+    },
+    async findBankMatches(t) {
+      const m = await this.run(() => api('GET', `/companies/${this.companyId}/bank-transactions/${t.id}/matches`));
+      if (m) this.bank.matches = { ...this.bank.matches, [t.id]: m };
+      if (m && !m.length) this.flash('No entry in the books has this exact amount within 10 days.', 'bad');
+    },
+    async matchBankTx(t, e) {
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/bank-transactions/${t.id}/match`, { entryId: e.id }), `Matched to entry #${e.number}.`)) {
+        this.bank.txs = this.bank.txs.filter((x) => x.id !== t.id);
+      }
+    },
+    async excludeBankTx(t) {
+      const reason = prompt('Why leave this out of the books? (e.g. "duplicate", "personal — paid back")');
+      if (!reason) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/bank-transactions/${t.id}/exclude`, { reason }))) {
+        this.bank.txs = this.bank.txs.filter((x) => x.id !== t.id);
+      }
+    },
+    async undoBankTx(t) {
+      const what = t.status === 'posted' ? `This reverses entry #${t.entryNumber} and puts the bank transaction back in the review list.` : 'This puts the bank transaction back in the review list.';
+      if (!confirm(what)) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/bank-transactions/${t.id}/undo`, {}), 'Moved back to review.')) this.loadBank();
+    },
+    async addRule() {
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-rules`, this.bank.newRule));
+      if (!r) return;
+      this.flash(r.applied ? `Rule saved. It suggested an account for ${r.applied} waiting transaction${r.applied === 1 ? '' : 's'}.` : 'Rule saved.');
+      this.bank.newRule = { matchText: '', direction: 'out', accountId: '' };
+      this.loadBank();
+    },
+    async deleteRule(r) {
+      if (await this.run(() => api('DELETE', `/companies/${this.companyId}/bank-rules/${r.id}`), 'Rule removed.')) this.loadBank();
+    },
+    async startRecon() {
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-accounts/${this.bank.accountId}/reconciliations`, this.bank.newRecon));
+      if (r) { this.bank.newRecon = { statementDate: '', endingBalance: '' }; this.loadBank(); }
+    },
+    async tickRecon(l) {
+      const b = this.bank;
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/reconciliations/${b.recon.id}/lines`, { lineIds: [l.id], cleared: !l.cleared }));
+      if (r) b.recon = r;
+    },
+    async tickAllRecon(cleared) {
+      const b = this.bank;
+      const ids = b.recon.lines.filter((l) => l.cleared !== cleared).map((l) => l.id);
+      if (!ids.length) return;
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/reconciliations/${b.recon.id}/lines`, { lineIds: ids, cleared }));
+      if (r) b.recon = r;
+    },
+    async finishRecon() {
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/reconciliations/${this.bank.recon.id}/complete`, {}), 'Reconciled. This statement is now locked in.')) this.loadBank();
+    },
+    async cancelRecon() {
+      if (!confirm('Cancel this reconciliation? Your ticks will be cleared; nothing in the books changes.')) return;
+      if (await this.run(() => api('DELETE', `/companies/${this.companyId}/reconciliations/${this.bank.recon.id}`), 'Cancelled.')) this.loadBank();
     },
     async verifyAudit() { this.audit = await this.run(() => api('GET', `/companies/${this.companyId}/audit/verify`)); },
   },

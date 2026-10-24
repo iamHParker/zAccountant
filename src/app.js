@@ -14,6 +14,7 @@ import * as ledger from './services/ledgerService.js';
 import * as reports from './services/reportService.js';
 import * as payroll from './services/payrollService.js';
 import * as auth from './services/authService.js';
+import * as bank from './services/bankService.js';
 import { AuthError } from './services/authService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
@@ -91,6 +92,8 @@ export function createApp(pool) {
     }
     next();
   });
+  // Bank statement files can be a few MB; everything else is small.
+  app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '6mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
     res.set({
@@ -175,7 +178,7 @@ export function createApp(pool) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -259,6 +262,33 @@ export function createApp(pool) {
     ledger.stopRecurring(db, companyId, req.params.recurringId, { actor })));
   api.post('/companies/:companyId/recurring/post-due', route('post', ({ db, companyId, actor }) =>
     ledger.postDueRecurring(db, companyId, { asOf: centralToday(), actor })));
+
+  // Banking
+  const B = '/companies/:companyId/bank-accounts/:bankAccountId';
+  api.post(`${B}/import`, route('post', ({ db, req, companyId, actor }) =>
+    bank.importStatement(db, companyId, { bankAccountId: req.params.bankAccountId, fileName: req.body?.fileName, content: req.body?.content, preview: req.body?.preview === true, actor })));
+  api.get(`${B}/transactions`, route('read', ({ db, req, companyId }) =>
+    bank.listBankTransactions(db, companyId, { bankAccountId: req.params.bankAccountId, status: q(req.query.status) ?? 'review' })));
+  api.get(`${B}/reconciliations`, route('read', ({ db, req, companyId }) => bank.listReconciliations(db, companyId, { bankAccountId: req.params.bankAccountId })));
+  api.post(`${B}/reconciliations`, route('post', ({ db, req, companyId, actor }) =>
+    bank.startReconciliation(db, companyId, { bankAccountId: req.params.bankAccountId, statementDate: req.body?.statementDate, endingBalance: req.body?.endingBalance, actor }), 201));
+  const T = '/companies/:companyId/bank-transactions/:bankTxId';
+  api.get(`${T}/matches`, route('read', ({ db, req, companyId }) => bank.findMatches(db, companyId, req.params.bankTxId)));
+  api.post(`${T}/post`, route('post', ({ db, req, companyId, actor }) => bank.postBankTransaction(db, companyId, req.params.bankTxId, { accountId: req.body?.accountId, memo: req.body?.memo, actor })));
+  api.post(`${T}/match`, route('post', ({ db, req, companyId, actor }) => bank.matchBankTransaction(db, companyId, req.params.bankTxId, { entryId: req.body?.entryId, actor })));
+  api.post(`${T}/exclude`, route('post', ({ db, req, companyId, actor }) => bank.excludeBankTransaction(db, companyId, req.params.bankTxId, { reason: req.body?.reason, actor })));
+  api.post(`${T}/undo`, route('post', ({ db, req, companyId, actor }) => bank.undoBankTransaction(db, companyId, req.params.bankTxId, { actor })));
+  api.get('/companies/:companyId/bank-rules', route('read', ({ db, companyId }) => bank.listRules(db, companyId)));
+  api.post('/companies/:companyId/bank-rules', route('post', ({ db, req, companyId, actor }) => {
+    const { matchText, direction, min, max, accountId, priority } = req.body ?? {};
+    return bank.createRule(db, companyId, { matchText, direction, min, max, accountId, priority: priority ?? 100, actor });
+  }, 201));
+  api.delete('/companies/:companyId/bank-rules/:ruleId', route('post', ({ db, req, companyId, actor }) => bank.deleteRule(db, companyId, req.params.ruleId, { actor })));
+  const R = '/companies/:companyId/reconciliations/:reconId';
+  api.get(R, route('read', ({ db, req, companyId }) => bank.getReconciliation(db, companyId, req.params.reconId)));
+  api.post(`${R}/lines`, route('post', ({ db, req, companyId }) => bank.setCleared(db, companyId, req.params.reconId, { lineIds: req.body?.lineIds, cleared: req.body?.cleared !== false })));
+  api.post(`${R}/complete`, route('post', ({ db, req, companyId, actor }) => bank.completeReconciliation(db, companyId, req.params.reconId, { actor })));
+  api.delete(R, route('post', ({ db, req, companyId }) => bank.cancelReconciliation(db, companyId, req.params.reconId)));
 
   // Reports
   api.get('/companies/:companyId/reports/dashboard', route('read', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));

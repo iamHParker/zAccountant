@@ -11,12 +11,16 @@ export async function grantRuntimeRole(pool, role) {
     GRANT USAGE ON SCHEMA public TO ${role};
     GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${role};
     GRANT INSERT ON companies, accounts, journal_entries, journal_lines, audit_log, employees, paychecks,
-                    recurring_entries, books_checks,
+                    recurring_entries, books_checks, bank_transactions, bank_rules, reconciliations, reconciliation_lines,
                     users, sessions, memberships TO ${role};
     GRANT UPDATE (next_entry_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount) ON companies TO ${role};
     GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash) ON users TO ${role};
     GRANT UPDATE (mfa_passed, last_seen_at, expires_at) ON sessions TO ${role};
     GRANT UPDATE (posted_count, next_date, is_active, last_error) ON recurring_entries TO ${role};
+    GRANT UPDATE (status, suggested_account_id, rule_id, journal_entry_id, note, reviewed_by, reviewed_at) ON bank_transactions TO ${role};
+    GRANT UPDATE (is_active) ON bank_rules TO ${role};
+    GRANT UPDATE (status, completed_by, completed_at) ON reconciliations TO ${role};
+    GRANT DELETE ON reconciliations, reconciliation_lines TO ${role};
     GRANT DELETE ON sessions TO ${role};
     GRANT UPDATE (role) ON memberships TO ${role};
     GRANT DELETE ON memberships TO ${role};

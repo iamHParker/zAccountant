@@ -4,7 +4,7 @@ Small-business accounting and payroll for Texas, Colorado, California and Washin
 **double-entry books that cannot silently go out of balance**, with payroll tax logic reviewed by a
 Professional Review Board.
 
-Status: **Sprint 2 (ledger completeness)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
+Status: **Sprint 3 (banking)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
 Target: public beta January 1, 2027.
 
 ## What's here
@@ -87,6 +87,11 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `POST …/entries`, `POST …/entries/simple`, `POST …/entries/:id/reverse` | post / reverse; send an `Idempotency-Key` header so a retried save posts once |
 | `GET/POST …/recurring`, `POST …/recurring/:id/stop`, `POST …/recurring/post-due` | recurring entries |
 | `GET/POST …/books-check` | latest / run the full books check |
+| `POST …/bank-accounts/:id/import` | import a CSV or OFX/QFX statement (`{fileName, content, preview}`) |
+| `GET …/bank-accounts/:id/transactions?status=review` | bank lines to review (or posted / matched / excluded) |
+| `POST …/bank-transactions/:id/{post,match,exclude,undo}`, `GET …/matches` | review a bank line |
+| `GET/POST …/bank-rules`, `DELETE …/bank-rules/:id` | categorization rules |
+| `GET/POST …/bank-accounts/:id/reconciliations`, `GET/DELETE …/reconciliations/:id`, `POST …/lines`, `POST …/complete` | bank reconciliation |
 | `POST …/lock` | close books through a date (reopening: owner + 2FA code + reason) |
 | `GET/POST/DELETE …/members` | who has access, and their role (owner, accountant, bookkeeper, viewer) |
 | `GET …/reports/{dashboard,trial-balance,balance-sheet,income-statement,cash-flow}` | statements |
