@@ -98,6 +98,12 @@
         </label>
         <button class="primary">Create company</button>
       </form>
+      <div v-if="!companies.length" class="joining">
+        <h3>Joining someone else's company?</h3>
+        <p class="hint">Don't fill this in. Ask the company's owner to add <strong>{{ auth.user?.email }}</strong> under
+          Settings → People with access, then:</p>
+        <button @click="checkAgain">Check again</button>
+      </div>
     </section>
 
     <template v-else>
