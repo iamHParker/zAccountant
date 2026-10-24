@@ -1,0 +1,74 @@
+{
+  "year": 2026,
+  "_readme": "Tax tables are DATA, not code. Dollar amounts are whole dollars per YEAR; rates are percent strings (converted to exact integer ppm). Every block carries `verified` — the payroll service refuses to FINALIZE a payroll run while any block it uses is unverified, unless the company is in calculate-only (beta) mode. Only the Professional Review Board may set verified=true, recording reviewer and source.",
+  "federal": {
+    "verified": false,
+    "source": "IRS Rev. Proc. 2025-32 (2026 brackets & standard deduction); SSA 2026 wage base; Pub 15-T Worksheet 1A method. Verify against final 2026 Pub 15-T.",
+    "standardDeduction": { "single": 16100, "married": 32200, "head": 24150 },
+    "w4Line1g": { "married": 12900, "other": 8600 },
+    "brackets": {
+      "single":  [[0, "10"], [12400, "12"], [50400, "22"], [105700, "24"], [201775, "32"], [256225, "35"], [640600, "37"]],
+      "married": [[0, "10"], [24800, "12"], [100800, "22"], [211400, "24"], [403550, "32"], [512450, "35"], [768700, "37"]],
+      "head":    [[0, "10"], [17700, "12"], [67450, "22"], [105700, "24"], [201750, "32"], [256200, "35"], [640600, "37"]]
+    },
+    "socialSecurity": { "ratePct": "6.2", "wageBase": 184500 },
+    "medicare": { "ratePct": "1.45", "additionalRatePct": "0.9", "additionalThreshold": 200000 },
+    "futa": {
+      "ratePct": "0.6",
+      "wageBase": 7000,
+      "_note": "Net rate after the full 5.4% state credit. Credit-reduction states (announced by US DOL each November) are a year-end true-up on Form 940, not a per-paycheck amount.",
+      "creditReductionPct": {}
+    }
+  },
+  "states": {
+    "TX": {
+      "verified": false,
+      "source": "Texas has no personal income tax. TWC taxable wage base $9,000; new-employer rate 2.7% (company's assigned rate overrides).",
+      "incomeTax": null,
+      "unemployment": { "wageBase": 9000, "defaultRatePct": "2.7" }
+    },
+    "CO": {
+      "verified": false,
+      "source": "CO DOR DR 1098 (flat rate x (annualized wages - DR 0004 allowance)); FAMLI 2026 premium 0.88% split 50/50, capped at SS wage base; CDLE UI wage base per SB20-207 schedule. Rate & allowance table MUST be verified against the 2026 DR 1098.",
+      "incomeTax": {
+        "method": "flat_with_allowance",
+        "ratePct": "4.4",
+        "_allowanceNote": "Annual allowance comes from the employee's DR 0004 (line 2). Default allowances for employees without a DR 0004 are null until the board enters the DR 1098 table; the engine will refuse to guess.",
+        "defaultAllowance": { "single": null, "married": null, "head": null }
+      },
+      "famli": { "totalRatePct": "0.88", "employeeSharePct": "50", "wageBase": "socialSecurity", "smallEmployerThreshold": 10 },
+      "unemployment": { "wageBase": 30600, "defaultRatePct": "1.7" }
+    },
+    "CA": {
+      "verified": false,
+      "source": "CA EDD DE 44 Method B (exact calculation). VALUES BELOW ARE 2025 DE 44 FIGURES CARRIED FORWARD — must be replaced with the 2026 DE 44. SDI 2026 1.3%, no wage cap. UI wage base $7,000; ETT 0.1%.",
+      "incomeTax": {
+        "method": "ca_method_b",
+        "lowIncomeExemption": { "single": 18252, "married_0_1": 18252, "married_2plus": 36504, "head": 36504 },
+        "standardDeduction": { "single": 5540, "married_0_1": 5540, "married_2plus": 11080, "head": 11080 },
+        "estimatedDeductionPerAllowance": 1000,
+        "exemptionCreditPerAllowance": "154.00",
+        "brackets": {
+          "single":  [[0, "1.1"], [11079, "2.2"], [26264, "4.4"], [41452, "6.6"], [57542, "8.8"], [72724, "10.23"], [371479, "11.33"], [445771, "12.43"], [742953, "13.53"], [1000000, "14.63"]],
+          "married": [[0, "1.1"], [22158, "2.2"], [52528, "4.4"], [82904, "6.6"], [115084, "8.8"], [145448, "10.23"], [742958, "11.33"], [891542, "12.43"], [1000000, "13.53"], [1485906, "14.63"]],
+          "head":    [[0, "1.1"], [22173, "2.2"], [52530, "4.4"], [67716, "6.6"], [83805, "8.8"], [98990, "10.23"], [505208, "11.33"], [606251, "12.43"], [1000000, "13.53"], [1010417, "14.63"]]
+        }
+      },
+      "sdi": { "ratePct": "1.3", "wageBase": null },
+      "unemployment": { "wageBase": 7000, "defaultRatePct": "3.4" },
+      "ett": { "ratePct": "0.1", "wageBase": 7000 }
+    },
+    "DC": {
+      "verified": false,
+      "source": "DC OTR brackets (TY2022+): 4/6/6.5/8.5/9.25/9.75/10.75%. Withholding method (standard deduction + D-4 allowances) must be verified against the current DC withholding instructions. Paid Family Leave employer-only 0.75%. DOES UI wage base $9,000 + 0.2% administrative assessment.",
+      "incomeTax": {
+        "method": "brackets_with_std_deduction",
+        "standardDeduction": "federal",
+        "allowanceValue": null,
+        "brackets": [[0, "4"], [10000, "6"], [40000, "6.5"], [60000, "8.5"], [250000, "9.25"], [500000, "9.75"], [1000000, "10.75"]]
+      },
+      "paidFamilyLeave": { "employerRatePct": "0.75" },
+      "unemployment": { "wageBase": 9000, "defaultRatePct": "2.7", "adminAssessmentPct": "0.2" }
+    }
+  }
+}

@@ -1,0 +1,181 @@
+// Database-backed ledger: companies, accounts, posting and reversing entries, closing periods.
+import { withTransaction } from '../db/pool.js';
+import { DEFAULT_CHART } from '../core/chartOfAccounts.js';
+import { validateEntry, simpleTransaction, reversingLines, LedgerError, ACCOUNT_TYPES, CASH_FLOW_CATEGORIES } from '../core/ledger.js';
+import { appendAudit } from './audit.js';
+
+const lockCompany = async (client, companyId) => {
+  const { rows } = await client.query('SELECT * FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+  if (!rows[0]) throw new LedgerError('Company not found');
+  return rows[0];
+};
+
+export async function createCompany(pool, { name, homeState, fiscalYearStartMonth = 1, actor = null }) {
+  return withTransaction(pool, async (c) => {
+    const { rows: [co] } = await c.query(
+      'INSERT INTO companies (name, home_state, fiscal_year_start_month) VALUES ($1,$2,$3) RETURNING *',
+      [name, homeState, fiscalYearStartMonth],
+    );
+    for (const a of DEFAULT_CHART) {
+      await c.query(
+        `INSERT INTO accounts (company_id, code, name, type, subtype, cash_flow, system_key)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [co.id, a.code, a.name, a.type, a.subtype ?? null, a.cashFlow ?? null, a.key ?? null],
+      );
+    }
+    await appendAudit(c, co.id, { action: 'create', entity: 'company', entityId: co.id, actor, payload: { name, homeState, fiscalYearStartMonth } });
+    return co;
+  });
+}
+
+export async function listCompanies(db) {
+  return (await db.query('SELECT * FROM companies ORDER BY created_at')).rows;
+}
+
+export async function getCompany(db, companyId) {
+  const { rows } = await db.query('SELECT * FROM companies WHERE id = $1', [companyId]);
+  if (!rows[0]) throw new LedgerError('Company not found');
+  return rows[0];
+}
+
+export async function listAccounts(db, companyId) {
+  const { rows } = await db.query(
+    `SELECT id, code, name, type, subtype, cash_flow AS "cashFlow", system_key AS "key", is_active AS "isActive"
+       FROM accounts WHERE company_id = $1 ORDER BY code`, [companyId]);
+  return rows;
+}
+
+export async function createAccount(pool, companyId, { code, name, type, subtype = null, cashFlow = null, actor = null }) {
+  const errors = [];
+  if (!code || !/^[0-9A-Za-z.-]{1,20}$/.test(code)) errors.push('code must be 1-20 letters/digits');
+  if (!name?.trim()) errors.push('name is required');
+  if (!ACCOUNT_TYPES.includes(type)) errors.push(`type must be one of ${ACCOUNT_TYPES.join(', ')}`);
+  const isBalanceSheet = ['asset', 'liability', 'equity'].includes(type);
+  if (isBalanceSheet) {
+    cashFlow ??= type === 'asset' ? 'operating' : type === 'liability' ? 'operating' : 'financing';
+    if (!CASH_FLOW_CATEGORIES.includes(cashFlow)) errors.push('invalid cash-flow category');
+  } else cashFlow = null;
+  if (subtype === 'retained_earnings') errors.push('retained earnings is a system account');
+  if (errors.length) throw new LedgerError('Account is not valid', errors);
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows: [a] } = await c.query(
+      `INSERT INTO accounts (company_id, code, name, type, subtype, cash_flow) VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, code, name, type, subtype, cash_flow AS "cashFlow"`,
+      [companyId, code, name.trim(), type, subtype, cashFlow],
+    );
+    await appendAudit(c, companyId, { action: 'create', entity: 'account', entityId: a.id, actor, payload: a });
+    return a;
+  });
+}
+
+/** Post a validated entry inside an existing transaction (company row must be locked). */
+async function insertEntry(c, companyId, entry, { source = 'manual', sourceRef = null, reversesEntryId = null, actor = null }) {
+  const company = await lockCompany(c, companyId);
+  // All accounts must exist, belong to this company, and be active.
+  const ids = [...new Set(entry.lines.map((l) => l.accountId))];
+  const { rows: accts } = await c.query('SELECT id, is_active FROM accounts WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, ids]);
+  const found = new Map(accts.map((a) => [a.id, a]));
+  const bad = ids.filter((id) => !found.has(id));
+  if (bad.length) throw new LedgerError('Journal entry is not valid', [`unknown account(s): ${bad.join(', ')}`]);
+  const inactive = ids.filter((id) => !found.get(id).is_active);
+  if (inactive.length && source !== 'reversal') throw new LedgerError('Journal entry is not valid', ['cannot post to an inactive account']);
+  if (company.locked_through && entry.date <= company.locked_through) {
+    throw new LedgerError('Journal entry is not valid', [`books are closed through ${company.locked_through}`]);
+  }
+  const number = company.next_entry_number;
+  await c.query('UPDATE companies SET next_entry_number = next_entry_number + 1 WHERE id = $1', [companyId]);
+  const { rows: [je] } = await c.query(
+    `INSERT INTO journal_entries (company_id, entry_number, entry_date, memo, source, source_ref, reverses_entry_id, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [companyId, number, entry.date, entry.memo, source, sourceRef, reversesEntryId, actor],
+  );
+  for (const l of entry.lines) {
+    await c.query(
+      `INSERT INTO journal_lines (entry_id, company_id, account_id, entry_date, debit_cents, credit_cents, memo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [je.id, companyId, l.accountId, entry.date, l.debitCents, l.creditCents, l.memo],
+    );
+  }
+  await appendAudit(c, companyId, {
+    action: 'post', entity: 'journal_entry', entityId: je.id, actor,
+    payload: { number, date: entry.date, memo: entry.memo, source, sourceRef, reversesEntryId, lines: entry.lines },
+  });
+  return { ...je, lines: entry.lines };
+}
+
+export async function postEntry(pool, companyId, rawEntry, opts = {}) {
+  const entry = validateEntry(rawEntry);
+  return withTransaction(pool, (c) => insertEntry(c, companyId, entry, opts));
+}
+
+export async function postSimple(pool, companyId, tx, opts = {}) {
+  const entry = simpleTransaction(tx);
+  return withTransaction(pool, (c) => insertEntry(c, companyId, entry, { ...opts, source: 'simple' }));
+}
+
+/** Exposed so other services (payroll) can post inside their own transaction. */
+export { insertEntry };
+
+export async function reverseEntry(pool, companyId, entryId, { date, memo, actor = null } = {}) {
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows: [orig] } = await c.query('SELECT * FROM journal_entries WHERE company_id = $1 AND id = $2', [companyId, entryId]);
+    if (!orig) throw new LedgerError('Journal entry not found');
+    if (orig.reverses_entry_id) throw new LedgerError('Journal entry is not valid', ['a reversing entry cannot itself be reversed; post a new entry']);
+    const { rows: [already] } = await c.query('SELECT entry_number FROM journal_entries WHERE reverses_entry_id = $1', [entryId]);
+    if (already) throw new LedgerError('Journal entry is not valid', [`already reversed by entry #${already.entry_number}`]);
+    const { rows: lines } = await c.query(
+      `SELECT account_id AS "accountId", debit_cents AS "debitCents", credit_cents AS "creditCents", memo
+         FROM journal_lines WHERE entry_id = $1 ORDER BY id`, [entryId]);
+    const entry = validateEntry({
+      date: date ?? orig.entry_date,
+      memo: memo ?? `Reversal of entry #${orig.entry_number}${orig.memo ? `: ${orig.memo}` : ''}`,
+      lines: reversingLines(lines),
+    });
+    return insertEntry(c, companyId, entry, { source: 'reversal', reversesEntryId: entryId, actor });
+  });
+}
+
+export async function listEntries(db, companyId, { from, to, limit = 200 } = {}) {
+  const { rows } = await db.query(
+    `SELECT e.id, e.entry_number AS "number", e.entry_date AS "date", e.memo, e.source, e.reverses_entry_id AS "reversesEntryId",
+            r.entry_number AS "reversedByNumber",
+            json_agg(json_build_object('accountId', l.account_id, 'code', a.code, 'name', a.name,
+                     'debitCents', l.debit_cents, 'creditCents', l.credit_cents, 'memo', l.memo) ORDER BY l.id) AS lines
+       FROM journal_entries e
+       JOIN journal_lines l ON l.entry_id = e.id
+       JOIN accounts a ON a.id = l.account_id
+       LEFT JOIN journal_entries r ON r.reverses_entry_id = e.id
+      WHERE e.company_id = $1 AND ($2::date IS NULL OR e.entry_date >= $2) AND ($3::date IS NULL OR e.entry_date <= $3)
+      GROUP BY e.id, r.entry_number
+      ORDER BY e.entry_date DESC, e.entry_number DESC
+      LIMIT $4`,
+    [companyId, from ?? null, to ?? null, Math.min(Number(limit) || 200, 1000)],
+  );
+  return rows;
+}
+
+/** Close the books through a date. Reopening (moving the date earlier) is allowed but audited. */
+export async function lockPeriod(pool, companyId, { through, actor = null }) {
+  if (through !== null && !/^\d{4}-\d{2}-\d{2}$/.test(through ?? '')) throw new LedgerError('Close date must be YYYY-MM-DD');
+  return withTransaction(pool, async (c) => {
+    const co = await lockCompany(c, companyId);
+    await c.query('UPDATE companies SET locked_through = $2 WHERE id = $1', [companyId, through]);
+    await appendAudit(c, companyId, { action: 'lock_period', entity: 'company', entityId: companyId, actor, payload: { from: co.locked_through, to: through } });
+    return { lockedThrough: through };
+  });
+}
+
+export async function updateCompanySettings(pool, companyId, { suiRatePct, calculateOnlyPayroll, actor = null }) {
+  if (suiRatePct != null && !/^\d{1,2}(\.\d{1,4})?$/.test(String(suiRatePct))) throw new LedgerError('Unemployment rate must be a percent like 2.7');
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows: [co] } = await c.query(
+      `UPDATE companies SET sui_rate_pct = COALESCE($2, sui_rate_pct),
+              calculate_only_payroll = COALESCE($3, calculate_only_payroll) WHERE id = $1 RETURNING *`,
+      [companyId, suiRatePct == null ? null : String(suiRatePct), calculateOnlyPayroll ?? null]);
+    await appendAudit(c, companyId, { action: 'update_settings', entity: 'company', entityId: companyId, actor, payload: { suiRatePct: suiRatePct ?? null, calculateOnlyPayroll: calculateOnlyPayroll ?? null } });
+    return co;
+  });
+}

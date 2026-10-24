@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>zAccountant</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+<div id="app" v-cloak>
+  <header class="top">
+    <div class="brand">z<span>Accountant</span></div>
+    <select v-if="companies.length" v-model="companyId" aria-label="Company">
+      <option v-for="c in companies" :value="c.id">{{ c.name }}</option>
+    </select>
+    <nav v-if="company">
+      <button v-for="t in tabs" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
+    </nav>
+  </header>
+
+  <div class="toast" v-if="message" :class="message.kind" @click="message = null">{{ message.text }}</div>
+
+  <main>
+    <!-- First run: create a company -->
+    <section v-if="!company || tab === 'new-company'" class="card narrow">
+      <h1>{{ companies.length ? 'Add a company' : 'Welcome! Let\'s set up your books' }}</h1>
+      <p class="hint">We'll create a standard chart of accounts for a small business. You can add accounts later.</p>
+      <form @submit.prevent="createCompany">
+        <label>Business name <input v-model.trim="newCompany.name" required></label>
+        <label>State
+          <select v-model="newCompany.homeState">
+            <option value="TX">Texas</option><option value="CO">Colorado</option>
+            <option value="CA">California</option><option value="DC">District of Columbia</option>
+          </select>
+        </label>
+        <label>Fiscal year starts in
+          <select v-model.number="newCompany.fiscalYearStartMonth">
+            <option v-for="(m, i) in months" :value="i + 1">{{ m }}</option>
+          </select>
+        </label>
+        <button class="primary">Create company</button>
+      </form>
+    </section>
+
+    <template v-else>
+    <!-- HOME -->
+    <section v-if="tab === 'home'">
+      <div class="tiles" v-if="dash">
+        <div class="tile"><div class="label">Cash in the bank</div><div class="value">{{ money(dash.cashCents) }}</div></div>
+        <div class="tile"><div class="label">Income this year</div><div class="value">{{ money(dash.revenueYtdCents) }}</div></div>
+        <div class="tile"><div class="label">Expenses this year</div><div class="value">{{ money(dash.expensesYtdCents) }}</div></div>
+        <div class="tile"><div class="label">Profit this year</div><div class="value" :class="{ neg: dash.netIncomeYtdCents < 0 }">{{ money(dash.netIncomeYtdCents) }}</div></div>
+      </div>
+      <p class="ok" v-if="dash && dash.booksBalanced">✓ Your books are in balance.</p>
+      <p class="bad" v-if="dash && !dash.booksBalanced">⚠ Your books are out of balance. Please contact support.</p>
+
+      <div class="card narrow">
+        <h2>Record a transaction</h2>
+        <div class="seg">
+          <button v-for="k in ['in','out','transfer']" :class="{ active: quick.kind === k }" @click="quick.kind = k" type="button">
+            {{ { in: 'Money in', out: 'Money out', transfer: 'Transfer' }[k] }}
+          </button>
+        </div>
+        <form @submit.prevent="recordQuick">
+          <label>Date <input type="date" v-model="quick.date" required></label>
+          <label>Description <input v-model.trim="quick.memo" placeholder="e.g. Office rent for March" required></label>
+          <label>Amount <input v-model.trim="quick.amount" inputmode="decimal" placeholder="0.00" required></label>
+          <label>{{ quick.kind === 'in' ? 'Deposited to' : quick.kind === 'out' ? 'Paid from' : 'From' }}
+            <select v-model="quick.bank" required><option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
+          </label>
+          <label>{{ quick.kind === 'in' ? 'What was it for? (income or source)' : quick.kind === 'out' ? 'What was it for? (expense)' : 'To' }}
+            <select v-model="quick.other" required>
+              <option v-for="a in quickChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option>
+            </select>
+          </label>
+          <button class="primary">Save</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- TRANSACTIONS -->
+    <section v-if="tab === 'journal'">
+      <div class="row">
+        <h1>Transactions</h1>
+        <button @click="showJE = !showJE">{{ showJE ? 'Close' : 'Advanced journal entry' }}</button>
+      </div>
+      <div class="card" v-if="showJE">
+        <h2>Journal entry</h2>
+        <p class="hint">Debits must equal credits. Difference: <strong :class="{ bad: jeDiff !== 0, ok: jeDiff === 0 }">{{ money(jeDiff) }}</strong></p>
+        <form @submit.prevent="postJE">
+          <div class="grid2">
+            <label>Date <input type="date" v-model="je.date" required></label>
+            <label>Memo <input v-model.trim="je.memo"></label>
+          </div>
+          <table class="lines">
+            <thead><tr><th>Account</th><th>Debit</th><th>Credit</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="(l, i) in je.lines">
+                <td><select v-model="l.accountId" required><option v-for="a in accounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
+                <td><input v-model.trim="l.debit" inputmode="decimal" @input="l.credit = l.debit ? '' : l.credit"></td>
+                <td><input v-model.trim="l.credit" inputmode="decimal" @input="l.debit = l.credit ? '' : l.debit"></td>
+                <td><button type="button" class="link" @click="je.lines.splice(i, 1)" v-if="je.lines.length > 2">remove</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <button type="button" @click="je.lines.push({ accountId: '', debit: '', credit: '' })">Add line</button>
+          <button class="primary" :disabled="jeDiff !== 0">Post entry</button>
+        </form>
+      </div>
+      <table class="data">
+        <thead><tr><th>#</th><th>Date</th><th>Description</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th><th></th></tr></thead>
+        <tbody v-for="e in entries" :key="e.id" class="entry">
+          <tr v-for="(l, i) in e.lines">
+            <td>{{ i === 0 ? e.number : '' }}</td>
+            <td>{{ i === 0 ? e.date : '' }}</td>
+            <td>{{ i === 0 ? e.memo : '' }}</td>
+            <td>{{ l.code }} · {{ l.name }}</td>
+            <td class="num">{{ l.debitCents ? money(l.debitCents) : '' }}</td>
+            <td class="num">{{ l.creditCents ? money(l.creditCents) : '' }}</td>
+            <td>
+              <template v-if="i === 0">
+                <span class="muted" v-if="e.reversedByNumber">reversed by #{{ e.reversedByNumber }}</span>
+                <span class="muted" v-else-if="e.reversesEntryId">reversal</span>
+                <button v-else class="link" @click="reverse(e)">reverse</button>
+              </template>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="hint" v-if="!entries.length">No transactions yet.</p>
+    </section>
+
+    <!-- REPORTS -->
+    <section v-if="tab === 'reports'">
+      <div class="row wrap">
+        <div class="seg">
+          <button v-for="r in reportTypes" :class="{ active: report.type === r.id }" @click="report.type = r.id; loadReport()">{{ r.label }}</button>
+        </div>
+        <label v-if="report.type === 'income-statement' || report.type === 'cash-flow'" class="inline">From <input type="date" v-model="report.from" @change="loadReport"></label>
+        <label class="inline">{{ report.type === 'income-statement' || report.type === 'cash-flow' ? 'To' : 'As of' }} <input type="date" v-model="report.to" @change="loadReport"></label>
+        <button @click="printPage">Print</button>
+      </div>
+      <div class="card statement" v-if="report.data">
+        <h2>{{ company.name }}</h2>
+        <h3>{{ reportTypes.find(r => r.id === report.type).label }}</h3>
+        <p class="muted">{{ report.data.asOf ? 'As of ' + report.data.asOf : report.data.from + ' to ' + report.data.to }}</p>
+
+        <template v-if="report.type === 'trial-balance'">
+          <table class="data">
+            <thead><tr><th>Account</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+            <tr v-for="r in report.data.rows"><td>{{ r.code }} · {{ r.name }}</td><td class="num">{{ r.debitCents ? money(r.debitCents) : '' }}</td><td class="num">{{ r.creditCents ? money(r.creditCents) : '' }}</td></tr>
+            <tr class="total"><td>Total</td><td class="num">{{ money(report.data.totalDebits) }}</td><td class="num">{{ money(report.data.totalCredits) }}</td></tr>
+          </table>
+        </template>
+
+        <template v-if="report.type === 'balance-sheet'">
+          <table class="data">
+            <tr class="head"><td colspan="2">Assets</td></tr>
+            <tr v-for="l in report.data.assets.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr class="total"><td>Total assets</td><td class="num">{{ money(report.data.assets.totalCents) }}</td></tr>
+            <tr class="head"><td colspan="2">Liabilities</td></tr>
+            <tr v-for="l in report.data.liabilities.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr class="sub"><td>Total liabilities</td><td class="num">{{ money(report.data.liabilities.totalCents) }}</td></tr>
+            <tr class="head"><td colspan="2">Equity</td></tr>
+            <tr v-for="l in report.data.equity.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr class="sub"><td>Total equity</td><td class="num">{{ money(report.data.equity.totalCents) }}</td></tr>
+            <tr class="total"><td>Total liabilities &amp; equity</td><td class="num">{{ money(report.data.liabilitiesAndEquityCents) }}</td></tr>
+          </table>
+        </template>
+
+        <template v-if="report.type === 'income-statement'">
+          <table class="data">
+            <tr class="head"><td colspan="2">Income</td></tr>
+            <tr v-for="l in report.data.revenue.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr class="sub"><td>Total income</td><td class="num">{{ money(report.data.revenue.totalCents) }}</td></tr>
+            <template v-if="report.data.cogs.lines.length">
+              <tr class="head"><td colspan="2">Cost of goods sold</td></tr>
+              <tr v-for="l in report.data.cogs.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+              <tr class="sub"><td>Gross profit</td><td class="num">{{ money(report.data.grossProfitCents) }}</td></tr>
+            </template>
+            <tr class="head"><td colspan="2">Expenses</td></tr>
+            <tr v-for="l in report.data.operatingExpenses.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr class="sub"><td>Operating income</td><td class="num">{{ money(report.data.operatingIncomeCents) }}</td></tr>
+            <template v-if="report.data.otherIncome.lines.length || report.data.otherExpenses.lines.length">
+              <tr class="head"><td colspan="2">Other income &amp; expenses</td></tr>
+              <tr v-for="l in report.data.otherIncome.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+              <tr v-for="l in report.data.otherExpenses.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(-l.amountCents) }}</td></tr>
+            </template>
+            <tr class="total"><td>Net income</td><td class="num">{{ money(report.data.netIncomeCents) }}</td></tr>
+          </table>
+        </template>
+
+        <template v-if="report.type === 'cash-flow'">
+          <table class="data">
+            <tr class="head"><td colspan="2">Operating activities</td></tr>
+            <tr><td class="ind">Net income</td><td class="num">{{ money(report.data.netIncomeCents) }}</td></tr>
+            <tr v-for="l in report.data.operating.adjustments"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr class="sub"><td>Net cash from operating activities</td><td class="num">{{ money(report.data.operating.totalCents) }}</td></tr>
+            <tr class="head"><td colspan="2">Investing activities</td></tr>
+            <tr v-for="l in report.data.investing.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr class="sub"><td>Net cash from investing activities</td><td class="num">{{ money(report.data.investing.totalCents) }}</td></tr>
+            <tr class="head"><td colspan="2">Financing activities</td></tr>
+            <tr v-for="l in report.data.financing.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr class="sub"><td>Net cash from financing activities</td><td class="num">{{ money(report.data.financing.totalCents) }}</td></tr>
+            <tr class="total"><td>Net change in cash</td><td class="num">{{ money(report.data.netChangeCents) }}</td></tr>
+            <tr><td>Cash at beginning of period</td><td class="num">{{ money(report.data.beginningCashCents) }}</td></tr>
+            <tr class="total"><td>Cash at end of period</td><td class="num">{{ money(report.data.endingCashCents) }}</td></tr>
+          </table>
+        </template>
+        <p :class="reportCheck === 0 ? 'ok' : 'bad'">{{ reportCheck === 0 ? '✓ This report ties out.' : '⚠ This report does not tie out by ' + money(reportCheck) }}</p>
+      </div>
+    </section>
+
+    <!-- ACCOUNTS -->
+    <section v-if="tab === 'accounts'">
+      <div class="row"><h1>Chart of accounts</h1><button @click="showNewAcct = !showNewAcct">{{ showNewAcct ? 'Close' : 'Add account' }}</button></div>
+      <form class="card narrow" v-if="showNewAcct" @submit.prevent="createAccount">
+        <label>Number <input v-model.trim="newAcct.code" required placeholder="e.g. 6450"></label>
+        <label>Name <input v-model.trim="newAcct.name" required></label>
+        <label>Type
+          <select v-model="newAcct.type">
+            <option value="asset">Asset (something you own)</option><option value="liability">Liability (something you owe)</option>
+            <option value="equity">Equity (owner's stake)</option><option value="revenue">Income</option><option value="expense">Expense</option>
+          </select>
+        </label>
+        <button class="primary">Add</button>
+      </form>
+      <div class="split">
+        <table class="data">
+          <thead><tr><th>#</th><th>Name</th><th>Type</th></tr></thead>
+          <tr v-for="a in accounts" @click="openRegister(a)" class="click" :class="{ sel: register && register.account.id === a.id }"><td>{{ a.code }}</td><td>{{ a.name }}</td><td class="muted">{{ typeLabel[a.type] }}</td></tr>
+        </table>
+        <div class="card" v-if="register">
+          <h2>{{ register.account.code }} · {{ register.account.name }}</h2>
+          <table class="data">
+            <thead><tr><th>Date</th><th>#</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+            <tr v-for="l in register.lines"><td>{{ l.date }}</td><td>{{ l.number }}</td><td>{{ l.memo }}</td><td class="num">{{ l.debitCents ? money(l.debitCents) : '' }}</td><td class="num">{{ l.creditCents ? money(l.creditCents) : '' }}</td><td class="num">{{ money(l.balanceCents) }}</td></tr>
+          </table>
+          <p class="hint" v-if="!register.lines.length">No activity.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- PAYROLL -->
+    <section v-if="tab === 'payroll'">
+      <p class="banner">Payroll is in <strong>calculate-only</strong> mode: we compute paychecks and record them in your books, but you (or your accountant) make the tax deposits and filings. Tax tables are awaiting Professional Review Board certification.</p>
+      <div class="row"><h1>Employees</h1><button @click="showNewEmp = !showNewEmp">{{ showNewEmp ? 'Close' : 'Add employee' }}</button></div>
+      <form class="card" v-if="showNewEmp" @submit.prevent="createEmployee">
+        <div class="grid2">
+          <label>First name <input v-model.trim="newEmp.firstName" required></label>
+          <label>Last name <input v-model.trim="newEmp.lastName" required></label>
+          <label>Works in
+            <select v-model="newEmp.workState"><option>TX</option><option>CO</option><option>CA</option><option>DC</option></select>
+          </label>
+          <label>Paid
+            <select v-model="newEmp.payFrequency"><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="semimonthly">Twice a month</option><option value="monthly">Monthly</option></select>
+          </label>
+          <label>Pay type
+            <select v-model="newEmp.payType"><option value="hourly">Hourly</option><option value="salary">Salary</option></select>
+          </label>
+          <label>{{ newEmp.payType === 'hourly' ? 'Hourly rate' : 'Salary per paycheck' }} <input v-model.trim="newEmp.payRate" inputmode="decimal" required></label>
+        </div>
+        <h3>Federal W-4</h3>
+        <div class="grid2">
+          <label>Filing status
+            <select v-model="newEmp.w4.filingStatus"><option value="single">Single or married filing separately</option><option value="married">Married filing jointly</option><option value="head">Head of household</option></select>
+          </label>
+          <label class="check"><input type="checkbox" v-model="newEmp.w4.step2"> Step 2 box checked (multiple jobs)</label>
+          <label>Step 3 dependents amount ($/yr) <input v-model.trim="newEmp.w4.dependentsCredit" inputmode="decimal" placeholder="0"></label>
+          <label>Step 4(c) extra withholding per check <input v-model.trim="newEmp.w4.extraWithholding" inputmode="decimal" placeholder="0"></label>
+        </div>
+        <template v-if="newEmp.workState === 'CA'">
+          <h3>California DE 4</h3>
+          <div class="grid2">
+            <label>Filing status <select v-model="newEmp.ca.filingStatus"><option value="single">Single / dual income married</option><option value="married">Married (one income)</option><option value="head">Head of household</option></select></label>
+            <label>Allowances <input type="number" min="0" v-model.number="newEmp.ca.allowances"></label>
+          </div>
+        </template>
+        <template v-if="newEmp.workState === 'CO'">
+          <h3>Colorado DR 0004</h3>
+          <label>Annual withholding allowance (line 2) <input v-model.trim="newEmp.co.annualAllowance" inputmode="decimal" required></label>
+        </template>
+        <template v-if="newEmp.workState === 'DC'">
+          <h3>DC D-4</h3>
+          <div class="grid2">
+            <label>Filing status <select v-model="newEmp.dc.filingStatus"><option value="single">Single</option><option value="married">Married/domestic partners filing jointly</option><option value="head">Head of household</option></select></label>
+          </div>
+        </template>
+        <button class="primary">Save employee</button>
+      </form>
+
+      <table class="data">
+        <thead><tr><th>Name</th><th>State</th><th>Pay</th><th></th></tr></thead>
+        <tr v-for="e in employees"><td>{{ e.firstName }} {{ e.lastName }}</td><td>{{ e.workState }}</td>
+          <td>{{ money(e.payRateCents) }}{{ e.payType === 'hourly' ? '/hr' : '/check' }} · {{ e.payFrequency }}</td>
+          <td><button class="link" @click="startPaycheck(e)">Run paycheck</button></td></tr>
+      </table>
+
+      <div class="card" v-if="pc.employee">
+        <h2>Paycheck for {{ pc.employee.firstName }} {{ pc.employee.lastName }}</h2>
+        <form @submit.prevent="previewPaycheck" class="grid2">
+          <label>Pay date <input type="date" v-model="pc.payDate" required></label>
+          <template v-if="pc.employee.payType === 'hourly'">
+            <label>Regular hours <input v-model.trim="pc.hours" inputmode="decimal" required></label>
+            <label>Overtime hours (1.5×) <input v-model.trim="pc.overtimeHours" inputmode="decimal" placeholder="0"></label>
+          </template>
+          <label>401(k) deduction <input v-model.trim="pc.k401" inputmode="decimal" placeholder="0"></label>
+          <div><button class="primary">Calculate</button></div>
+        </form>
+        <div v-if="pc.result" class="stub">
+          <div class="grid2">
+            <table class="data">
+              <tr class="head"><td colspan="2">Employee</td></tr>
+              <tr><td>Gross pay</td><td class="num">{{ money(pc.result.grossCents) }}</td></tr>
+              <tr v-for="d in pc.result.deductions"><td class="ind">{{ d.name }}</td><td class="num">{{ money(-d.amountCents) }}</td></tr>
+              <tr v-for="t in pc.result.employeeTaxes"><td class="ind">{{ t.label }}</td><td class="num">{{ money(-t.amountCents) }}</td></tr>
+              <tr class="total"><td>Net pay</td><td class="num">{{ money(pc.result.netPayCents) }}</td></tr>
+            </table>
+            <table class="data">
+              <tr class="head"><td colspan="2">Employer taxes</td></tr>
+              <tr v-for="t in pc.result.employerTaxes"><td class="ind">{{ t.label }}</td><td class="num">{{ money(t.amountCents) }}</td></tr>
+              <tr class="total"><td>Total employer cost</td><td class="num">{{ money(pc.result.grossCents + pc.result.employerTaxTotalCents) }}</td></tr>
+            </table>
+          </div>
+          <ul class="warn"><li v-for="w in pc.result.warnings">{{ w }}</li></ul>
+          <button class="primary" @click="postPaycheck">Record this paycheck</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section v-if="tab === 'settings'">
+      <div class="card narrow">
+        <h2>Close the books</h2>
+        <p class="hint">After you close a period, nobody can add or change transactions dated on or before that day.
+          Currently closed through: <strong>{{ company.locked_through || 'not closed' }}</strong></p>
+        <form @submit.prevent="lockBooks"><label>Close through <input type="date" v-model="lockDate" required></label><button class="primary">Close books</button></form>
+      </div>
+      <div class="card narrow">
+        <h2>State unemployment rate</h2>
+        <p class="hint">Your state assigns this rate each year (it's on your rate notice). Current: {{ company.sui_rate_pct ? company.sui_rate_pct + '%' : 'not set (using new-employer rate)' }}</p>
+        <form @submit.prevent="saveSui"><label>Rate (%) <input v-model.trim="suiRate" inputmode="decimal" placeholder="2.7" required></label><button class="primary">Save</button></form>
+      </div>
+      <div class="card narrow">
+        <h2>Audit trail</h2>
+        <p class="hint">Every change is recorded in a tamper-evident log. Check that nothing has been altered:</p>
+        <button @click="verifyAudit">Verify audit trail</button>
+        <p v-if="audit" :class="audit.ok ? 'ok' : 'bad'">{{ audit.ok ? `✓ All ${audit.rows} records verified.` : `⚠ Record ${audit.brokenAt} failed verification.` }}</p>
+      </div>
+      <button class="link" @click="tab = 'new-company'">+ Add another company</button>
+    </section>
+    </template>
+  </main>
+</div>
+</body>
+</html>
