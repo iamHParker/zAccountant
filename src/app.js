@@ -179,7 +179,7 @@ export function createApp(pool) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -394,6 +394,12 @@ export function createApp(pool) {
   api.get('/companies/:companyId/paychecks/:paycheckId/stub', route('payroll', ({ db, req, companyId }) => payroll.getPayStub(db, companyId, req.params.paycheckId)));
   api.get('/companies/:companyId/reports/payroll-liabilities', route('payroll', ({ db, req, companyId }) =>
     payroll.getPayrollLiabilities(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
+  api.post('/companies/:companyId/payroll-deposits', route('payroll', ({ db, req, companyId, actor }) => {
+    const { agency, form, periodStart, periodEnd, depositDate, paidFromAccountId, reference } = req.body ?? {};
+    return payroll.recordDeposit(db, companyId, { agency, form, periodStart, periodEnd, depositDate, paidFromAccountId, reference, idempotencyKey: idemKey(req) }, { actor });
+  }, 201));
+  api.post('/companies/:companyId/payroll-deposits/:depositId/void', route('payroll', ({ db, req, companyId, actor }) =>
+    payroll.voidDeposit(db, companyId, req.params.depositId, { date: req.body?.date, actor })));
   api.get('/companies/:companyId/paychecks', route(['view_books', 'payroll'], ({ db, req, companyId }) =>
     payroll.listPaychecks(db, companyId, { year: req.query.year ? Number(req.query.year) : undefined })));
 

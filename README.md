@@ -113,3 +113,4 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `POST …/time-entries/import` | HoursTracker (or any timesheet CSV) export: `{fileName, content, preview, userId, createJobs}`; repeated rows are skipped |
 | `GET …/reports/time-summary?from=&to=` | hours by person and job |
 | `GET …/paychecks/:id/stub`, `GET …/reports/payroll-liabilities?from=&to=` | pay stub with year-to-date; payroll taxes owed by agency (payroll role) |
+| `POST …/payroll-deposits`, `POST …/payroll-deposits/:id/void` | record a tax deposit to one agency for a date range (`{agency, form, periodStart, periodEnd, depositDate, paidFromAccountId, reference}`; pays what is still due), or void one recorded by mistake |

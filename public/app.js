@@ -127,6 +127,7 @@ createApp({
       time: { week: weekStartOf(today()), userId: '', entries: [], jobs: [], form: blankTime(), editing: null, pending: [], picked: {}, note: '',
         file: null, importFor: '', createJobs: false, preview: null, summary: null, showJobs: false, newJob: { name: '', code: '', customerId: '' }, customers: [] },
       liab: { from: today().slice(0, 8) + '01', to: today(), data: null },
+      dep: { agency: null, form: '', date: today(), paidFrom: '', reference: '', key: newKey() },
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
       lockDate: '', suiRate: '', famliCount: null, audit: null, futaCr: {},
@@ -377,6 +378,17 @@ createApp({
       if (r) { this.prun.show = false; this.prun.preview = null; this.loadEmployees(); }
     },
     async openStub(p) { this.stub = await this.run(() => api('GET', `/companies/${this.companyId}/paychecks/${p.id}/stub`)); },
+    startDeposit(a) { Object.assign(this.dep, { agency: a.agency, form: a.form, date: today(), paidFrom: this.dep.paidFrom || this.bankAccounts[0]?.id || '', reference: '', key: newKey() }); },
+    async saveDeposit() {
+      const d = this.dep;
+      const body = { agency: d.agency, form: d.form, periodStart: this.liab.from, periodEnd: this.liab.to, depositDate: d.date, paidFromAccountId: d.paidFrom, reference: d.reference };
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/payroll-deposits`, body, { 'Idempotency-Key': d.key }));
+      if (r) { this.flash(`Deposit of ${money(r.amountCents)} recorded (entry #${r.entryNumber ?? ''}).`); d.agency = null; this.loadLiab(); }
+    },
+    async voidDeposit(dp) {
+      if (!confirm(`Void the ${money(dp.amountCents)} deposit of ${dp.depositDate}? Use this only if it was recorded by mistake.`)) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/payroll-deposits/${dp.id}/void`, {}), 'Deposit voided.')) this.loadLiab();
+    },
     async loadLiab() { this.liab.data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/payroll-liabilities?from=${this.liab.from}&to=${this.liab.to}`)); },
     // ---------------------------------------------------------------- Time
     canManageTime() { return this.can('time_approve') || this.can('time_all'); },
