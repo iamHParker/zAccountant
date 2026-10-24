@@ -236,6 +236,125 @@
       <button v-if="entries.length < entriesTotal" @click="loadEntries(true)">Show more</button>
     </section>
 
+    <!-- BANKING -->
+    <section v-if="tab === 'bank'">
+      <div class="row">
+        <h1>Banking</h1>
+        <label class="inline" v-if="bankLike.length">Account
+          <select v-model="bank.accountId" @change="loadBank"><option v-for="a in bankLike" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
+        </label>
+      </div>
+      <p class="hint" v-if="!bankLike.length">Add a bank account on the Accounts page first.</p>
+      <template v-else>
+      <div class="card narrow" v-if="can('post')">
+        <h2>Import a bank statement</h2>
+        <p class="hint">In your bank's website, download transactions as <strong>CSV</strong> or <strong>QFX/OFX</strong> (Quicken). Importing the same dates twice is safe; repeats are skipped.</p>
+        <input type="file" ref="statementFile" accept=".csv,.ofx,.qfx,text/csv" @change="pickStatement">
+        <div v-if="bank.preview" class="preview">
+          <p><strong>{{ bank.preview.new }}</strong> new transaction{{ bank.preview.new === 1 ? '' : 's' }}
+            <span v-if="bank.preview.duplicates">({{ bank.preview.duplicates }} already imported)</span>
+            from {{ bank.preview.firstDate }} to {{ bank.preview.lastDate }}:
+            <span class="ok">{{ money(bank.preview.inCents) }} in</span>, <span class="bad">{{ money(bank.preview.outCents) }} out</span>.</p>
+          <button class="primary" :disabled="!bank.preview.new" @click="importStatement">Import {{ bank.preview.new }} transaction{{ bank.preview.new === 1 ? '' : 's' }}</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <h2>{{ { review: 'To review', posted: 'Added to books', matched: 'Matched', excluded: 'Excluded' }[bank.view] }}</h2>
+          <select v-model="bank.view" @change="loadBank" class="auto">
+            <option value="review">To review</option><option value="posted">Added to books</option><option value="matched">Matched</option><option value="excluded">Excluded</option>
+          </select>
+        </div>
+        <p class="hint" v-if="bank.view === 'review'">For each one: choose what it was for and <strong>Add</strong> it, or <strong>Match</strong> it to an entry you already recorded (so it isn't counted twice).</p>
+        <table class="data" v-if="bank.txs.length">
+          <thead><tr><th>Date</th><th>Bank description</th><th class="num">Amount</th><th>{{ bank.view === 'review' ? 'Account' : 'Result' }}</th><th></th></tr></thead>
+          <tbody>
+            <template v-for="t in bank.txs" :key="t.id">
+            <tr>
+              <td>{{ t.date }}</td>
+              <td>{{ t.description }}</td>
+              <td class="num" :class="t.amountCents > 0 ? 'ok' : ''">{{ money(t.amountCents) }}</td>
+              <td v-if="bank.view === 'review'">
+                <select v-model="bank.choice[t.id]"><option value="">Choose…</option><option v-for="a in categoryChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
+                <div class="muted small" v-if="t.suggestedAccountId && bank.choice[t.id] === t.suggestedAccountId">suggested by a rule</div>
+              </td>
+              <td v-else>{{ t.status === 'excluded' ? t.note : `entry #${t.entryNumber}` }}</td>
+              <td class="actions">
+                <template v-if="bank.view === 'review' && can('post')">
+                  <button class="primary small" @click="postBankTx(t)">Add</button>
+                  <button class="small" @click="findBankMatches(t)">Match</button>
+                  <button class="link" @click="excludeBankTx(t)">exclude</button>
+                </template>
+                <button v-else-if="can('post')" class="link" @click="undoBankTx(t)">undo</button>
+              </td>
+            </tr>
+            <tr v-if="bank.matches[t.id]?.length" class="matches">
+              <td></td>
+              <td colspan="4">Already in the books:
+                <span v-for="e in bank.matches[t.id]" class="match">#{{ e.number }} {{ e.date }} {{ e.memo }} <button class="link" @click="matchBankTx(t, e)">use this</button></span>
+              </td>
+            </tr>
+            </template>
+          </tbody>
+        </table>
+        <p class="hint" v-else>{{ bank.view === 'review' ? 'Nothing waiting. Import a statement to get started.' : 'None.' }}</p>
+      </div>
+
+      <div class="card">
+        <h2>Bank reconciliation</h2>
+        <template v-if="bank.recon">
+          <p class="hint">Tick every item that appears on your <strong>{{ bank.recon.statementDate }}</strong> statement. When the difference is $0.00 your books agree with the bank.</p>
+          <div class="recon-sum">
+            <div><span class="muted">Statement ending balance</span><strong>{{ money(bank.recon.endingCents) }}</strong></div>
+            <div><span class="muted">Beginning balance</span><strong>{{ money(bank.recon.beginningCents) }}</strong></div>
+            <div><span class="muted">Ticked items</span><strong>{{ money(bank.recon.clearedCents) }}</strong></div>
+            <div><span class="muted">Difference</span><strong :class="bank.recon.differenceCents === 0 ? 'ok' : 'bad'">{{ money(bank.recon.differenceCents) }}</strong></div>
+          </div>
+          <p><button class="link" @click="tickAllRecon(true)">tick all</button> · <button class="link" @click="tickAllRecon(false)">untick all</button></p>
+          <table class="data">
+            <thead><tr><th></th><th>Date</th><th>#</th><th>Description</th><th class="num">Amount</th></tr></thead>
+            <tbody>
+              <tr v-for="l in bank.recon.lines" :key="l.id" @click="tickRecon(l)" class="clickable">
+                <td><input type="checkbox" :checked="l.cleared" @click.stop="tickRecon(l)"></td>
+                <td>{{ l.date }}</td><td>{{ l.number }}</td><td>{{ l.memo }}</td>
+                <td class="num">{{ money(l.amountCents) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <button class="primary" :disabled="bank.recon.differenceCents !== 0" @click="finishRecon">Finish reconciliation</button>
+          <button class="link" @click="cancelRecon">cancel</button>
+        </template>
+        <form v-else-if="can('post')" @submit.prevent="startRecon">
+          <div class="grid2">
+            <label>Statement date <input type="date" v-model="bank.newRecon.statementDate" required></label>
+            <label>Ending balance on statement <input v-model.trim="bank.newRecon.endingBalance" inputmode="decimal" placeholder="0.00" required></label>
+          </div>
+          <button class="primary">Start reconciling</button>
+        </form>
+        <p class="hint" v-if="bank.recons.some(r => r.status === 'completed')">Reconciled through:
+          <strong>{{ bank.recons.find(r => r.status === 'completed').statementDate }}</strong></p>
+      </div>
+
+      <div class="card narrow">
+        <h2>Rules</h2>
+        <p class="hint">A rule suggests an account when a bank description contains certain words. You still confirm each one.</p>
+        <table class="data" v-if="bank.rules.length">
+          <tbody><tr v-for="r in bank.rules"><td>“{{ r.matchText }}”</td><td>{{ { in: 'money in', out: 'money out', any: 'in or out' }[r.direction] }}</td><td>→ {{ acctName(r.accountId) }}</td>
+            <td><button v-if="can('post')" class="link" @click="deleteRule(r)">remove</button></td></tr></tbody>
+        </table>
+        <form v-if="can('post')" @submit.prevent="addRule">
+          <label>When the description contains <input v-model.trim="bank.newRule.matchText" placeholder="e.g. home depot" required></label>
+          <div class="grid2">
+            <label>For <select v-model="bank.newRule.direction"><option value="out">money out</option><option value="in">money in</option><option value="any">either</option></select></label>
+            <label>Suggest <select v-model="bank.newRule.accountId" required><option v-for="a in categoryChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+          </div>
+          <button class="primary">Add rule</button>
+        </form>
+      </div>
+      </template>
+    </section>
+
     <!-- REPORTS -->
     <section v-if="tab === 'reports'">
       <div class="row wrap">

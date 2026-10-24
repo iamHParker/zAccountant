@@ -249,6 +249,39 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(stop.body.isActive, false);
   });
 
+  await t.test('banking through the restricted role: large import, post, rule, reconcile', async () => {
+    const b = `/api/companies/${co.id}/bank-accounts/${A['1000']}`;
+    // ~1.5 MB file: bigger than the normal 1 MB request limit, allowed for statement imports.
+    const rows = Array.from({ length: 30000 }, (_, i) => `11/${String((i % 28) + 1).padStart(2, '0')}/2026,STORE ${i} ${'x'.repeat(20)},-1.00`);
+    const big = await owner.c.call('POST', `${b}/import`, { fileName: 'big.csv', content: `Date,Description,Amount\n${rows.join('\n')}`, preview: true });
+    assert.equal(big.status, 400, 'over the 5,000-row limit');
+    assert.match(big.body.error, /5000/);
+    const csv = 'Date,Description,Amount\n11/02/2026,GRAINGER SUPPLY,-310.25\n11/03/2026,CLIENT DEPOSIT,5000.00\n';
+    const imp = await owner.c.call('POST', `${b}/import`, { fileName: 'nov.csv', content: csv });
+    assert.equal(imp.status, 200, JSON.stringify(imp.body));
+    assert.equal(imp.body.new, 2);
+    const rule = await owner.c.call('POST', `/api/companies/${co.id}/bank-rules`, { matchText: 'grainger', direction: 'out', accountId: A['6200'] });
+    assert.equal(rule.status, 201, JSON.stringify(rule.body));
+    assert.equal(rule.body.applied, 1);
+    const txs = (await owner.c.call('GET', `${b}/transactions`)).body;
+    assert.equal(txs.length, 2);
+    for (const tx of txs) {
+      const r = await owner.c.call('POST', `/api/companies/${co.id}/bank-transactions/${tx.id}/post`, { accountId: tx.suggestedAccountId ?? A['4000'] });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+    }
+    const rec = await owner.c.call('POST', `${b}/reconciliations`, { statementDate: '2026-11-30', endingBalance: '0' });
+    assert.equal(rec.status, 201, JSON.stringify(rec.body));
+    const sheet = (await owner.c.call('GET', `/api/companies/${co.id}/reconciliations/${rec.body.id}`)).body;
+    assert.ok(sheet.lines.length >= 2);
+    const tick = await owner.c.call('POST', `/api/companies/${co.id}/reconciliations/${rec.body.id}/lines`, { lineIds: [sheet.lines[0].id], cleared: true });
+    assert.equal(tick.status, 200, JSON.stringify(tick.body));
+    assert.equal((await owner.c.call('POST', `/api/companies/${co.id}/reconciliations/${rec.body.id}/complete`, {})).status, 400, 'difference not zero');
+    assert.equal((await owner.c.call('DELETE', `/api/companies/${co.id}/reconciliations/${rec.body.id}`, {})).status, 200);
+    // Another company's member can't see this account's bank lines.
+    const other = await newUser('banker@example.com');
+    assert.equal((await other.c.call('GET', `${b}/transactions`)).status, 404);
+  });
+
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
     const lock = `/api/companies/${co.id}/lock`;
     assert.equal((await owner.c.call('POST', lock, '{"through":null}', { 'content-type': 'text/plain' })).status, 415);

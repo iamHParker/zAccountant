@@ -41,6 +41,8 @@ export async function withTransaction(pool, fn) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    client.__inTx = true; // services called inside fn nest as savepoints in this same transaction
+    client.__spCount = 0;
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
@@ -48,6 +50,7 @@ export async function withTransaction(pool, fn) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
   } finally {
+    client.__inTx = false;
     client.release();
   }
 }

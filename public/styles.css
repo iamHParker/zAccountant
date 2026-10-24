@@ -67,3 +67,13 @@ ul.codes { columns: 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospa
 .small { font-size: 13px; }
 tr.muted td { color: var(--muted); }
 form.search { padding-bottom: 12px; }
+select.auto { width: auto; }
+button.small { padding: 4px 10px; font-size: 13px; }
+td.actions { white-space: nowrap; }
+tr.matches td { background: var(--bg, #f5f6f8); font-size: 13px; }
+.match { display: inline-block; margin: 0 12px 0 6px; }
+.recon-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 12px 0; }
+.recon-sum div { display: flex; flex-direction: column; }
+.recon-sum strong { font-size: 20px; }
+tr.clickable { cursor: pointer; }
+.preview { margin-top: 12px; }
