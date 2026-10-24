@@ -97,4 +97,38 @@ test('payroll runs, pay stubs and tax liabilities', { skip: !hasDb && 'DATABASE_
     assert.deepEqual(stub.earnings.map((e) => [e.label, e.amountCents, e.hours]), [['Regular pay', 80_000, 40], ['Overtime (1.5×)', 12_000, 4], ['Double time (2×)', 6_000, 1.5]]);
     await assert.rejects(payroll.previewPaycheck(pool, co.id, ben.id, { payDate: '2026-03-13', doubleTimeHours: '1' }), /hourly employees only/);
   });
+
+  await t.test('tax deposits: pay each agency what is due, void a mistake', async () => {
+    const mar = { periodStart: '2026-03-01', periodEnd: '2026-03-31' };
+    const before = await payroll.getPayrollLiabilities(pool, co.id, { from: mar.periodStart, to: mar.periodEnd });
+    const irs = before.agencies.find((a) => a.form.startsWith('Form 941'));
+    assert.equal(irs.dueCents, irs.totalCents);
+    assert.match(irs.dueHint, /15th of the next month/);
+    const owed = (key) => before.unpaid.find((u) => u.key === key).owedCents;
+    const d = await payroll.recordDeposit(pool, co.id, { agency: irs.agency, form: irs.form, ...mar, depositDate: '2026-04-15', paidFromAccountId: A['1000'], reference: 'EFTPS 123', idempotencyKey: 'dep-1' });
+    assert.equal(d.amountCents, irs.totalCents);
+    assert.deepEqual(d.lines.map((l) => l.liabilityKey).sort(), ['fica_payable', 'fit_payable']);
+    assert.equal((await payroll.recordDeposit(pool, co.id, { agency: irs.agency, form: irs.form, ...mar, depositDate: '2026-04-15', paidFromAccountId: A['1000'], idempotencyKey: 'dep-1' })).duplicate, true);
+    await assert.rejects(payroll.recordDeposit(pool, co.id, { agency: irs.agency, form: irs.form, ...mar, depositDate: '2026-04-15', paidFromAccountId: A['1000'] }), /Nothing is due/);
+    await assert.rejects(payroll.recordDeposit(pool, co.id, { agency: irs.agency, form: irs.form, periodStart: '2026-03-15', periodEnd: '2026-04-15', depositDate: '2026-04-20', paidFromAccountId: A['1000'] }), /overlaps/);
+    const edd = before.agencies.find((a) => a.agency === 'California EDD');
+    await assert.rejects(payroll.recordDeposit(pool, co.id, { agency: edd.agency, form: edd.form, ...mar, depositDate: '2026-04-15', paidFromAccountId: A['4000'] }), /bank accounts/);
+    const after = await payroll.getPayrollLiabilities(pool, co.id, { from: mar.periodStart, to: '2026-04-30' });
+    const irs2 = after.agencies.find((a) => a.form.startsWith('Form 941'));
+    assert.equal(irs2.dueCents, 0);
+    assert.equal(irs2.deposits[0].reference, 'EFTPS 123');
+    // The liability accounts went down by exactly what was paid.
+    const paidFit = d.lines.find((l) => l.liabilityKey === 'fit_payable').amountCents;
+    assert.equal(after.unpaid.find((u) => u.key === 'fit_payable').owedCents, owed('fit_payable') - paidFit);
+    // Void: the money comes back and the taxes are due again.
+    const v = await payroll.voidDeposit(pool, co.id, d.id, {});
+    assert.ok(v.voidRecordId);
+    await assert.rejects(payroll.voidDeposit(pool, co.id, d.id, {}), /already been voided/);
+    const again = await payroll.getPayrollLiabilities(pool, co.id, { from: mar.periodStart, to: mar.periodEnd });
+    assert.equal(again.agencies.find((a) => a.form.startsWith('Form 941')).dueCents, irs.totalCents);
+    assert.equal(again.agencies.find((a) => a.form.startsWith('Form 941')).deposits[0].voided, true);
+    assert.equal(again.unpaid.find((u) => u.key === 'fit_payable').owedCents, owed('fit_payable'));
+    const tb = await reports.getTrialBalance(pool, co.id, { asOf: '2026-12-31' });
+    assert.equal(tb.balanced, true);
+  });
 });

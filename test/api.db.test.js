@@ -526,6 +526,16 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(set.status, 200, JSON.stringify(set.body));
     assert.deepEqual(set.body.futa_credit_reduction, { CA: '1.2' });
 
+    // Payroll tax deposit through the API (runtime role, row-level security on).
+    const liab = (await owner.c.call('GET', `${base}/reports/payroll-liabilities?from=2026-11-01&to=2026-11-30`)).body;
+    const irs = liab.agencies.find((a) => a.form.startsWith('Form 941'));
+    const depBody = { agency: irs.agency, form: irs.form, periodStart: '2026-11-01', periodEnd: '2026-11-30', depositDate: '2026-12-15', paidFromAccountId: A['1000'] };
+    assert.equal((await worker.c.call('POST', `${base}/payroll-deposits`, depBody)).status, 403);
+    const dep = await owner.c.call('POST', `${base}/payroll-deposits`, depBody, { 'Idempotency-Key': 'nov-941' });
+    assert.equal(dep.status, 201, JSON.stringify(dep.body));
+    assert.equal(dep.body.amountCents, irs.dueCents);
+    assert.equal((await owner.c.call('POST', `${base}/payroll-deposits/${dep.body.id}/void`, {})).status, 200);
+
     // Hours by job.
     const sum = (await owner.c.call('GET', `${base}/reports/time-summary?from=2026-11-01&to=2026-11-15`)).body;
     assert.equal(sum.jobs.find((j) => j.jobName === 'Smith Residence').minutes, 45 * 60 + 8 * 60);

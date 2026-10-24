@@ -92,3 +92,13 @@ posting endpoints; field encryption for SSN/bank details; rate limiting; PII-fre
 **Sprint 6 payroll backlog:** CA per-period DE 44 rounding; W-4 exempt expiry (Feb 15) and DR 0004 cancellation rule;
 CA FUTA credit-reduction accrual; tax-deposit workflow; CA daily overtime; DC allowance value confirmed with OTR;
 human CPA/CPP certification of 2027 tables.
+
+## 21.8 Status (updated October 24, 2026)
+
+Built ahead of plan: S0–S5 scope (ledger, security/RLS, recurring entries, bank CSV/OFX import and reconciliation,
+QuickBooks/Excel import, AR/AP), payroll runs and pay stubs, payroll tax liabilities and deposit recording, roles with
+custom permissions and departments, timesheets with approval and HoursTracker import feeding payroll (federal and
+California overtime), and the Sprint 6 payroll backlog except the two items that need outside people: **DC allowance
+confirmation with OTR** and **CPA/CPP certification of the 2027 tables**.
+Still ahead: Plaid (waiting on keys), Railway setup with Homer (~Nov 15), pay stub/report PDFs and CSV export,
+comparative reports, help center, hardening (S8), 2027 tables (December).

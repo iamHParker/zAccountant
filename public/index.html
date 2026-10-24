@@ -1064,15 +1064,31 @@
           <button @click="loadLiab">Show</button>
           <button v-if="liab.data" @click="printPage">Print</button>
         </div>
-        <p class="hint">Taxes from paychecks dated in this range, by where they are paid. During the beta you (or your accountant) make these deposits; record each one as money moved from your bank account to the matching payroll liability account.</p>
+        <p class="hint">Taxes from paychecks dated in this range, by where they are paid. During the beta you (or your accountant) make these deposits with each agency; then press <strong>Record deposit</strong> so your books show the money paid. Choose the same dates as the deposit covers (for example one month, or one quarter).</p>
         <template v-if="liab.data">
           <p class="muted">{{ liab.data.paychecks }} paycheck{{ liab.data.paychecks === 1 ? '' : 's' }}, {{ money(liab.data.grossCents) }} gross wages</p>
           <table class="data">
             <template v-for="a in liab.data.agencies">
               <tr class="head"><td>{{ a.agency }}<span class="muted small" v-if="a.form"> · {{ a.form }}</span></td><td></td><td class="num">{{ money(a.totalCents) }}</td></tr>
               <tr v-for="l in a.lines"><td class="ind">{{ l.label }}</td><td class="muted small">{{ l.who === 'employee' ? 'withheld' : 'employer' }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+              <tr v-for="d in a.deposits"><td class="ind">Deposit {{ d.depositDate }}<span class="muted small" v-if="d.reference"> · {{ d.reference }}</span><span class="muted small" v-if="d.periodStart !== liab.data.from || d.periodEnd !== liab.data.to"> (for {{ d.periodStart }} to {{ d.periodEnd }})</span></td>
+                <td class="small">{{ d.voided ? 'voided' : '' }}<button v-if="!d.voided && can('payroll')" class="link" @click="voidDeposit(d)">void</button></td><td class="num">{{ d.voided ? '' : '(' + money(d.amountCents) + ')' }}</td></tr>
+              <tr><td class="ind"><strong>{{ a.dueCents > 0 ? 'Still to deposit' : 'Deposited in full' }}</strong><div class="muted small">{{ a.dueHint }}</div></td>
+                <td><button v-if="a.dueCents > 0 && can('payroll')" @click="startDeposit(a)">Record deposit</button></td><td class="num" :class="{ bad: a.dueCents > 0 }">{{ money(a.dueCents) }}</td></tr>
+              <tr v-if="dep.agency === a.agency && dep.form === a.form"><td colspan="3">
+                <form class="preview" @submit.prevent="saveDeposit">
+                  <p>Record {{ money(a.dueCents) }} paid to {{ a.agency }} for {{ liab.data.from }} to {{ liab.data.to }}. This moves the money from your bank account to the payroll tax accounts it pays off.</p>
+                  <div class="grid4">
+                    <label>Deposit date <input type="date" v-model="dep.date" required></label>
+                    <label>Paid from <select v-model="dep.paidFrom" required><option v-for="b in bankAccounts" :value="b.id">{{ b.code }} · {{ b.name }}</option></select></label>
+                    <label>Confirmation number <input v-model.trim="dep.reference" maxlength="100" placeholder="optional"></label>
+                  </div>
+                  <button class="primary">Record deposit</button> <button type="button" @click="dep.agency = null">Cancel</button>
+                </form>
+              </td></tr>
             </template>
             <tr class="total"><td>Total payroll taxes</td><td></td><td class="num">{{ money(liab.data.totalCents) }}</td></tr>
+            <tr class="total"><td>Still to deposit</td><td></td><td class="num">{{ money(liab.data.totalCents - liab.data.depositedCents) }}</td></tr>
           </table>
           <h3>Still unpaid as of {{ liab.data.to }}</h3>
           <table class="data"><tr v-for="u in liab.data.unpaid"><td>{{ u.code }} · {{ u.name }}</td><td class="num" :class="{ bad: u.owedCents > 0 }">{{ money(u.owedCents) }}</td></tr></table>

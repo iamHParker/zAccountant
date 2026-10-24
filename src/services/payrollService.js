@@ -453,6 +453,23 @@ const AGENCY = (code, state) => {
  * employer, grouped by the agency it is paid to; plus the balance still owed (unpaid) in each payroll
  * liability account as of `to`. Calculate-only beta: the owner makes these deposits themselves.
  */
+// When each agency's deposits are due, in words (the Board checks these; exact dates depend on the
+// deposit schedule each agency assigned the company).
+const DUE_HINT = (agency, form) => {
+  if (form.startsWith('Form 941')) return 'Monthly depositors: by the 15th of the next month. Semiweekly depositors: the Wednesday or Friday after payday. Under $2,500 for the quarter: with Form 941 (IRS Pub 15).';
+  if (form.startsWith('Form 940')) return 'Once more than $500 is owed: by the last day of the month after the quarter ends (IRS Pub 15).';
+  if (agency === 'California EDD') return 'Withholding and SDI follow a schedule based on your federal deposit schedule and amount; UI and ETT are paid with them (DE 44, DE 88).';
+  if (agency === 'Colorado Dept. of Revenue') return 'On the filing frequency Colorado DOR assigned you (weekly, monthly or quarterly).';
+  if (agency === 'Colorado FAMLI') return 'Quarterly, by the last day of the month after the quarter ends.';
+  if (agency === 'DC Office of Tax and Revenue') return 'On the filing frequency DC OTR assigned you.';
+  return 'Quarterly, by the last day of the month after the quarter ends.';
+};
+
+/**
+ * Payroll taxes for paychecks dated in a range, by agency, with deposits recorded for that range
+ * and what is still due. Each agency's amounts are also split by liability account, which is what
+ * a deposit pays down.
+ */
 export async function getPayrollLiabilities(db, companyId, { from, to }) {
   if (!isIsoDate(from) || !isIsoDate(to) || to < from) throw new LedgerError('Choose a date range (from on or before to)');
   const { rows } = await db.query(
@@ -472,13 +489,30 @@ export async function getPayrollLiabilities(db, companyId, { from, to }) {
   }
   const lines = [...byCode.values()].filter((x) => x.amountCents !== 0);
   const agencies = new Map();
+  const blank = (agency, form) => ({ agency, form, totalCents: 0, lines: [], byKey: {}, depositedCents: 0, depositedByKey: {}, deposits: [], dueCents: 0, dueHint: DUE_HINT(agency, form) });
   for (const l of lines) {
     const k = `${l.agency}|${l.form}`;
-    const a = agencies.get(k) ?? { agency: l.agency, form: l.form, totalCents: 0, lines: [] };
+    const a = agencies.get(k) ?? blank(l.agency, l.form);
     a.lines.push({ code: l.code, label: l.label, who: l.who, amountCents: l.amountCents });
     a.totalCents += l.amountCents;
+    a.byKey[l.liabilityKey] = (a.byKey[l.liabilityKey] ?? 0) + l.amountCents;
     agencies.set(k, a);
   }
+  // Deposits recorded for periods inside this range (void rows are negative and cancel their original).
+  const { rows: deps } = await db.query(
+    `SELECT d.id, d.agency, d.form, to_char(d.period_start, 'YYYY-MM-DD') AS "periodStart", to_char(d.period_end, 'YYYY-MM-DD') AS "periodEnd",
+            to_char(d.deposit_date, 'YYYY-MM-DD') AS "depositDate", d.amount_cents::bigint AS "amountCents", d.lines, d.reference, d.voids_deposit_id AS "voidsDepositId",
+            EXISTS (SELECT 1 FROM payroll_deposits v WHERE v.company_id = d.company_id AND v.voids_deposit_id = d.id) AS voided
+       FROM payroll_deposits d WHERE d.company_id = $1 AND d.period_start >= $2 AND d.period_end <= $3 ORDER BY d.deposit_date, d.created_at`, [companyId, from, to]);
+  for (const d of deps) {
+    const k = `${d.agency}|${d.form}`;
+    const a = agencies.get(k) ?? blank(d.agency, d.form);
+    a.depositedCents += Number(d.amountCents);
+    for (const l of d.lines) a.depositedByKey[l.liabilityKey] = (a.depositedByKey[l.liabilityKey] ?? 0) + l.amountCents;
+    if (!d.voidsDepositId) a.deposits.push({ id: d.id, depositDate: d.depositDate, periodStart: d.periodStart, periodEnd: d.periodEnd, amountCents: Number(d.amountCents), reference: d.reference, voided: d.voided });
+    agencies.set(k, a);
+  }
+  for (const a of agencies.values()) a.dueCents = a.totalCents - a.depositedCents;
   const { rows: bal } = await db.query(
     `SELECT a.code, a.name, a.system_key, COALESCE(sum(l.credit_cents - l.debit_cents), 0)::bigint AS owed
        FROM accounts a LEFT JOIN journal_lines l ON l.account_id = a.id AND l.entry_date <= $2
@@ -492,8 +526,89 @@ export async function getPayrollLiabilities(db, companyId, { from, to }) {
       return rank(a) - rank(b) || a.agency.localeCompare(b.agency);
     }),
     totalCents: lines.reduce((t, l) => t + l.amountCents, 0),
+    depositedCents: [...agencies.values()].reduce((t, a) => t + a.depositedCents, 0),
     unpaid: bal.map((b) => ({ code: b.code, name: b.name, key: b.system_key, owedCents: b.owed })),
   };
+}
+
+/**
+ * Record a tax deposit to one agency for a date range: pays whatever is still due for that agency
+ * and range, account by account (Dr each payroll liability, Cr the bank account).
+ */
+export async function recordDeposit(pool, companyId, { agency, form = '', periodStart, periodEnd, depositDate, paidFromAccountId, reference, idempotencyKey }, { actor = null } = {}) {
+  const key = idempotencyKey ? String(idempotencyKey).slice(0, 120) : null;
+  if (!isIsoDate(depositDate)) throw new PayrollError('Deposit date must be YYYY-MM-DD');
+  if (isIsoDate(periodStart) && depositDate < periodStart) throw new PayrollError('The deposit date can\'t be before the period starts');
+  const ref = typeof reference === 'string' && reference.trim() ? reference.trim().slice(0, 100) : null;
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    if (key) {
+      const { rows: [dup] } = await c.query('SELECT id FROM payroll_deposits WHERE company_id = $1 AND idempotency_key = $2', [companyId, key]);
+      if (dup) return { id: dup.id, duplicate: true };
+    }
+    const report = await getPayrollLiabilities(c, companyId, { from: periodStart, to: periodEnd });
+    // A deposit already recorded for a period that straddles this one would be counted in neither.
+    const { rows: [straddle] } = await c.query(
+      `SELECT to_char(period_start, 'YYYY-MM-DD') AS s, to_char(period_end, 'YYYY-MM-DD') AS e FROM payroll_deposits d
+        WHERE company_id = $1 AND agency = $2 AND form = $3 AND voids_deposit_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM payroll_deposits v WHERE v.company_id = d.company_id AND v.voids_deposit_id = d.id)
+          AND period_start <= $5 AND period_end >= $4 AND NOT (period_start >= $4 AND period_end <= $5) LIMIT 1`,
+      [companyId, agency, form ?? '', periodStart, periodEnd]);
+    if (straddle) throw new PayrollError(`A deposit to ${agency} for ${straddle.s} to ${straddle.e} overlaps this period; record deposits for whole periods that don't cross`);
+    const a = report.agencies.find((x) => x.agency === agency && x.form === (form ?? ''));
+    if (!a) throw new PayrollError('No payroll taxes for that agency in this period');
+    const due = Object.entries(a.byKey).map(([liabilityKey, owed]) => ({ liabilityKey, amountCents: owed - (a.depositedByKey[liabilityKey] ?? 0) }))
+      .filter((l) => l.amountCents !== 0);
+    const total = due.reduce((t, l) => t + l.amountCents, 0);
+    if (total <= 0 || due.some((l) => l.amountCents < 0)) throw new PayrollError('Nothing is due to that agency for this period');
+    const { rows: [bank] } = await c.query(`SELECT id FROM accounts WHERE company_id = $1 AND id::text = $2 AND cash_flow = 'cash' AND is_active`, [companyId, String(paidFromAccountId ?? '')]);
+    if (!bank) throw new PayrollError('"Paid from" must be one of your bank accounts');
+    const { rows: accts } = await c.query('SELECT id, system_key FROM accounts WHERE company_id = $1 AND system_key IS NOT NULL', [companyId]);
+    const byKey = new Map(accts.map((x) => [x.system_key, x.id]));
+    const jl = due.map((l) => {
+      const accountId = byKey.get(l.liabilityKey);
+      if (!accountId) throw new PayrollError(`Company is missing system account "${l.liabilityKey}"`);
+      return { accountId, debitCents: l.amountCents, creditCents: 0 };
+    });
+    jl.push({ accountId: bank.id, debitCents: 0, creditCents: total });
+    const label = `${agency}${form ? ` (${form})` : ''}`;
+    const entry = validateEntry({ date: depositDate, memo: `Payroll tax deposit: ${label}, ${periodStart} to ${periodEnd}${ref ? ` · ${ref}` : ''}`.slice(0, 500), lines: jl });
+    const je = await insertEntry(c, companyId, entry, { source: 'payroll', sourceRef: 'deposit', actor });
+    const { rows: [d] } = await c.query(
+      `INSERT INTO payroll_deposits (company_id, agency, form, period_start, period_end, deposit_date, paid_from_account_id, amount_cents, lines, reference, journal_entry_id, idempotency_key, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      [companyId, agency, form ?? '', periodStart, periodEnd, depositDate, bank.id, total, JSON.stringify(due), ref, je.id, key, actor]);
+    await appendAudit(c, companyId, { action: 'create', entity: 'payroll_deposit', entityId: d.id, actor, payload: { agency, form, periodStart, periodEnd, depositDate, amountCents: total, journalEntryId: je.id } });
+    return { id: d.id, amountCents: total, lines: due, journalEntryId: je.id, entryNumber: je.entry_number };
+  });
+}
+
+/** Undo a deposit recorded by mistake: reversing entry plus a negative deposit row. */
+export async function voidDeposit(pool, companyId, depositId, { date, actor = null } = {}) {
+  if (typeof depositId !== 'string' || !/^[0-9a-f-]{36}$/i.test(depositId)) throw new LedgerError('Deposit not found');
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    const { rows: [d] } = await c.query('SELECT * FROM payroll_deposits WHERE company_id = $1 AND id = $2', [companyId, depositId]);
+    if (!d) throw new LedgerError('Deposit not found');
+    if (d.voids_deposit_id) throw new PayrollError('This is already a void record');
+    const { rows: [already] } = await c.query('SELECT 1 FROM payroll_deposits WHERE company_id = $1 AND voids_deposit_id = $2', [companyId, d.id]);
+    if (already) throw new PayrollError('This deposit has already been voided');
+    const depDate = d.deposit_date instanceof Date ? d.deposit_date.toISOString().slice(0, 10) : String(d.deposit_date);
+    const voidDate = date ?? depDate;
+    if (!isIsoDate(voidDate) || voidDate < depDate) throw new PayrollError('Void date must be on or after the deposit date');
+    const { rows: lines } = await c.query(
+      `SELECT account_id AS "accountId", credit_cents AS "debitCents", debit_cents AS "creditCents"
+         FROM journal_lines WHERE company_id = $1 AND entry_id = $2 ORDER BY id`, [companyId, d.journal_entry_id]);
+    const entry = validateEntry({ date: voidDate, memo: `Void payroll tax deposit: ${d.agency}`, lines });
+    const je = await insertEntry(c, companyId, entry, { source: 'reversal', reversesEntryId: d.journal_entry_id, actor });
+    const { rows: [v] } = await c.query(
+      `INSERT INTO payroll_deposits (company_id, agency, form, period_start, period_end, deposit_date, paid_from_account_id, amount_cents, lines, reference, journal_entry_id, voids_deposit_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      [companyId, d.agency, d.form, d.period_start, d.period_end, voidDate, d.paid_from_account_id, -Number(d.amount_cents),
+        JSON.stringify(d.lines.map((l) => ({ ...l, amountCents: -l.amountCents }))), d.reference, je.id, d.id, actor]);
+    await appendAudit(c, companyId, { action: 'void', entity: 'payroll_deposit', entityId: d.id, actor, payload: { voidRecordId: v.id, journalEntryId: je.id } });
+    return { voidRecordId: v.id, journalEntryId: je.id };
+  });
 }
 
 export { PAY_PERIODS };
