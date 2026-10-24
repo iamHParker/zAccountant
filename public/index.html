@@ -272,11 +272,17 @@
         </div>
         <h3>Federal W-4</h3>
         <div class="grid2">
+          <label>W-4 version
+            <select v-model.number="newEmp.w4.formYear"><option :value="2020">2020 or later</option><option :value="2019">2019 or earlier (allowances)</option></select>
+          </label>
+          <label v-if="newEmp.w4.formYear === 2019">Allowances <input type="number" min="0" v-model.number="newEmp.w4.allowances"></label>
           <label>Filing status
             <select v-model="newEmp.w4.filingStatus"><option value="single">Single or married filing separately</option><option value="married">Married filing jointly</option><option value="head">Head of household</option></select>
           </label>
+          <template v-if="newEmp.w4.formYear !== 2019">
           <label class="check"><input type="checkbox" v-model="newEmp.w4.step2"> Step 2 box checked (multiple jobs)</label>
           <label>Step 3 dependents amount ($/yr) <input v-model.trim="newEmp.w4.dependentsCredit" inputmode="decimal" placeholder="0"></label>
+          </template>
           <label>Step 4(c) extra withholding per check <input v-model.trim="newEmp.w4.extraWithholding" inputmode="decimal" placeholder="0"></label>
         </div>
         <template v-if="newEmp.workState === 'CA'">
@@ -288,12 +294,13 @@
         </template>
         <template v-if="newEmp.workState === 'CO'">
           <h3>Colorado DR 0004</h3>
-          <label>Annual withholding allowance (line 2) <input v-model.trim="newEmp.co.annualAllowance" inputmode="decimal" required></label>
+          <label>Annual withholding allowance (line 2) — leave blank if no DR 0004 <input v-model.trim="newEmp.co.annualAllowance" inputmode="decimal"></label>
         </template>
         <template v-if="newEmp.workState === 'DC'">
           <h3>DC D-4</h3>
           <div class="grid2">
             <label>Filing status <select v-model="newEmp.dc.filingStatus"><option value="single">Single</option><option value="married">Married/domestic partners filing jointly</option><option value="head">Head of household</option></select></label>
+            <label>Allowances <input type="number" min="0" v-model.number="newEmp.dc.allowances"></label>
           </div>
         </template>
         <button class="primary">Save employee</button>
@@ -370,11 +377,16 @@
         <p class="hint">Your state assigns this rate each year (it's on your rate notice). Current: {{ company.sui_rate_pct ? company.sui_rate_pct + '%' : 'not set (using new-employer rate)' }}</p>
         <form @submit.prevent="saveSui"><label>Rate (%) <input v-model.trim="suiRate" inputmode="decimal" placeholder="2.7" required></label><button class="primary">Save</button></form>
       </div>
+      <div class="card narrow" v-if="company.home_state === 'CO' || employees.some(e => e.workState === 'CO')">
+        <h2>Colorado FAMLI employer size</h2>
+        <p class="hint">Employers with fewer than 10 employees don't pay the employer half of FAMLI. Enter the count you reported to FAMLI for this year. Current: {{ company.famli_headcount ?? 'not set (employer share is charged)' }}</p>
+        <form @submit.prevent="saveFamli"><label>Employees <input type="number" min="0" v-model.number="famliCount" required></label><button class="primary">Save</button></form>
+      </div>
       <div class="card narrow">
         <h2>Audit trail</h2>
         <p class="hint">Every change is recorded in a tamper-evident log. Check that nothing has been altered:</p>
         <button @click="verifyAudit">Verify audit trail</button>
-        <p v-if="audit" :class="audit.ok ? 'ok' : 'bad'">{{ audit.ok ? `✓ All ${audit.rows} records verified.` : `⚠ Record ${audit.brokenAt} failed verification.` }}</p>
+        <p v-if="audit" :class="audit.ok ? 'ok' : 'bad'">{{ audit.ok ? `✓ All ${audit.rows} records verified, and the ledger matches them.` : (audit.brokenAt ? `⚠ Audit record ${audit.brokenAt} failed verification.` : `⚠ Ledger entries ${audit.ledgerMismatches.join(', ')} do not match the audit trail.`) }}</p>
       </div>
       <button class="link" @click="tab = 'new-company'">+ Add another company</button>
     </section>

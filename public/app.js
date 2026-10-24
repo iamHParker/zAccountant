@@ -31,8 +31,8 @@ async function api(method, url, body) {
 
 const blankEmployee = () => ({
   firstName: '', lastName: '', workState: 'TX', payFrequency: 'biweekly', payType: 'hourly', payRate: '',
-  w4: { filingStatus: 'single', step2: false, dependentsCredit: '', extraWithholding: '' },
-  ca: { filingStatus: 'single', allowances: 1 }, co: { annualAllowance: '' }, dc: { filingStatus: 'single' },
+  w4: { formYear: 2020, allowances: 0, filingStatus: 'single', step2: false, dependentsCredit: '', extraWithholding: '' },
+  ca: { filingStatus: 'single', allowances: 1 }, co: { annualAllowance: '' }, dc: { filingStatus: 'single', allowances: 0 },
 });
 
 createApp({
@@ -65,7 +65,7 @@ createApp({
       paychecks: [],
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
-      lockDate: '', suiRate: '', audit: null,
+      lockDate: '', suiRate: '', famliCount: null, audit: null,
     };
   },
   computed: {
@@ -88,7 +88,7 @@ createApp({
     tab(t) {
       if (t === 'reports') this.loadReport();
       if (t === 'journal') this.loadEntries();
-      if (t === 'payroll') this.loadEmployees();
+      if (t === 'payroll' || t === 'settings') this.loadEmployees();
       if (t === 'home') this.loadDash();
     },
     'quick.kind'() { this.quick.other = ''; },
@@ -159,7 +159,7 @@ createApp({
     async openRegister(a) { this.register = await this.run(() => api('GET', `/companies/${this.companyId}/accounts/${a.id}/register`)); },
     async createEmployee() {
       const e = this.newEmp;
-      const stateElections = { CA: e.ca, CO: e.co, DC: e.dc };
+      const stateElections = { CA: e.ca, CO: e.co.annualAllowance ? e.co : {}, DC: e.dc };
       const w4 = { ...e.w4, dependentsCredit: e.w4.dependentsCredit || '0', extraWithholding: e.w4.extraWithholding || '0' };
       const body = { firstName: e.firstName, lastName: e.lastName, workState: e.workState, payFrequency: e.payFrequency, payType: e.payType, payRate: e.payRate, w4, stateElections: { [e.workState]: stateElections[e.workState] } };
       const ok = await this.run(() => api('POST', `/companies/${this.companyId}/employees`, body), 'Employee saved.');
@@ -196,6 +196,10 @@ createApp({
       if (!reason) return;
       const r = await this.run(() => api('POST', `/companies/${this.companyId}/lock`, { through: null, reason }), 'Books reopened.');
       if (r) this.company.locked_through = null;
+    },
+    async saveFamli() {
+      const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { famliHeadcount: this.famliCount }), 'Saved.');
+      if (c) this.company = c;
     },
     async saveSui() {
       const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { suiRatePct: this.suiRate }), 'Rate saved.');

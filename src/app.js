@@ -74,13 +74,19 @@ export function createApp(pool) {
     res.status(201).json(await ledger.createCompany(pool, { name, homeState, fiscalYearStartMonth }));
   });
   api.get('/companies/:companyId', async (req, res) => res.json(await ledger.getCompany(pool, req.params.companyId)));
-  api.patch('/companies/:companyId/settings', async (req, res) => res.json(await ledger.updateCompanySettings(pool, req.params.companyId, req.body ?? {})));
+  api.patch('/companies/:companyId/settings', async (req, res) => {
+    const { suiRatePct, calculateOnlyPayroll, famliHeadcount } = req.body ?? {};
+    res.json(await ledger.updateCompanySettings(pool, req.params.companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount }));
+  });
   api.post('/companies/:companyId/lock', async (req, res) =>
     res.json(await ledger.lockPeriod(pool, req.params.companyId, { through: req.body?.through ?? null, reason: req.body?.reason ?? null })));
 
   // Accounts
   api.get('/companies/:companyId/accounts', async (req, res) => res.json(await ledger.listAccounts(pool, req.params.companyId)));
-  api.post('/companies/:companyId/accounts', async (req, res) => res.status(201).json(await ledger.createAccount(pool, req.params.companyId, req.body ?? {})));
+  api.post('/companies/:companyId/accounts', async (req, res) => {
+    const { code, name, type, subtype } = req.body ?? {};
+    res.status(201).json(await ledger.createAccount(pool, req.params.companyId, { code, name, type, subtype }));
+  });
   api.get('/companies/:companyId/accounts/:accountId/register', async (req, res) =>
     res.json(await reports.getAccountRegister(pool, req.params.companyId, req.params.accountId, { from: q(req.query.from), to: q(req.query.to) })));
 

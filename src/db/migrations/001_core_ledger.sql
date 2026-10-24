@@ -13,6 +13,7 @@ CREATE TABLE companies (
   locked_through         date,               -- books closed through this date (inclusive)
   calculate_only_payroll boolean NOT NULL DEFAULT true,
   sui_rate_pct           text,               -- assigned state unemployment rate, e.g. '2.7'
+  famli_headcount        integer CHECK (famli_headcount >= 0),  -- CO FAMLI employer-size count (null = unknown)
   next_entry_number      integer NOT NULL DEFAULT 1,
   created_at             timestamptz NOT NULL DEFAULT now()
 );

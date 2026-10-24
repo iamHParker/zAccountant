@@ -206,15 +206,18 @@ export async function lockPeriod(pool, companyId, { through, reason = null, acto
   });
 }
 
-export async function updateCompanySettings(pool, companyId, { suiRatePct, calculateOnlyPayroll, actor = null }) {
+export async function updateCompanySettings(pool, companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount, actor = null }) {
   if (suiRatePct != null && !/^\d{1,2}(\.\d{1,4})?$/.test(String(suiRatePct))) throw new LedgerError('Unemployment rate must be a percent like 2.7');
+  if (famliHeadcount != null && !(Number.isInteger(famliHeadcount) && famliHeadcount >= 0)) throw new LedgerError('FAMLI headcount must be a whole number');
+  if (calculateOnlyPayroll != null && typeof calculateOnlyPayroll !== 'boolean') throw new LedgerError('calculateOnlyPayroll must be true or false');
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     const { rows: [co] } = await c.query(
       `UPDATE companies SET sui_rate_pct = COALESCE($2, sui_rate_pct),
-              calculate_only_payroll = COALESCE($3, calculate_only_payroll) WHERE id = $1 RETURNING *`,
-      [companyId, suiRatePct == null ? null : String(suiRatePct), calculateOnlyPayroll ?? null]);
-    await appendAudit(c, companyId, { action: 'update_settings', entity: 'company', entityId: companyId, actor, payload: { suiRatePct: suiRatePct ?? null, calculateOnlyPayroll: calculateOnlyPayroll ?? null } });
+              calculate_only_payroll = COALESCE($3, calculate_only_payroll),
+              famli_headcount = COALESCE($4, famli_headcount) WHERE id = $1 RETURNING *`,
+      [companyId, suiRatePct == null ? null : String(suiRatePct), calculateOnlyPayroll ?? null, famliHeadcount ?? null]);
+    await appendAudit(c, companyId, { action: 'update_settings', entity: 'company', entityId: companyId, actor, payload: { suiRatePct: suiRatePct ?? null, calculateOnlyPayroll: calculateOnlyPayroll ?? null, famliHeadcount: famliHeadcount ?? null } });
     return co;
   });
 }

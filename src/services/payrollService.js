@@ -82,19 +82,25 @@ async function compute(db, companyId, employeeId, input) {
   if (!emp.active) throw new PayrollError('Employee is inactive');
   const year = Number(input.payDate.slice(0, 4)); // taxes follow the PAY date, not the work period
   const { ytd, lastPayDate } = await ytdFor(db, companyId, employeeId, year);
-  const { rows: [{ n }] } = await db.query('SELECT count(*)::int AS n FROM employees WHERE company_id = $1 AND active', [companyId]);
   let gross = grossFor(emp, input);
+  let overtime = null;
   if (input.overtimeHours != null && input.overtimeHours !== '') {
     if (emp.payType !== 'hourly') throw new PayrollError('overtime hours apply to hourly employees only');
-    gross += Number((BigInt(emp.payRateCents) * 3n * BigInt(hundredthsOfHours(input.overtimeHours, 'overtime hours')) + 100n) / 200n); // 1.5x, rounded half-up
+    const h = hundredthsOfHours(input.overtimeHours, 'overtime hours');
+    const otPay = Number((BigInt(emp.payRateCents) * 3n * BigInt(h) + 100n) / 200n); // 1.5x, rounded half-up
+    // The 0.5x premium is tracked separately: needed for year-end reporting of qualified overtime.
+    const premium = Number((BigInt(emp.payRateCents) * BigInt(h) + 100n) / 200n);
+    overtime = { hundredthsOfHours: h, payCents: otPay, premiumCents: premium };
+    gross += otPay;
   }
   const result = calculatePaycheck({
     year, payFrequency: emp.payFrequency, grossCents: gross,
     preTaxDeductions: input.preTaxDeductions ?? [],
     employee: { workState: emp.workState, w4: emp.w4, stateElections: emp.stateElections },
     ytd,
-    company: { suiRatePct: company.sui_rate_pct ?? undefined, employeeCount: n },
+    company: { suiRatePct: company.sui_rate_pct ?? undefined, famliHeadcount: company.famli_headcount },
   });
+  result.overtime = overtime;
   return { company, emp, result, lastPayDate };
 }
 

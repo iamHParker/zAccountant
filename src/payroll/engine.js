@@ -60,22 +60,36 @@ export function underCap(currentCents, ytdCents, capCents) {
 }
 
 // ---------------------------------------------------------------- Federal income tax (Pub 15-T 1A)
+/** Annual Percentage Method table lookup, exactly as Pub 15-T prints it: tentative + rate × (wage − over). */
+export function percentageTableTax(adjustedCents, rows) {
+  if (adjustedCents <= 0) return 0;
+  let row = rows[0];
+  for (const r of rows) if (adjustedCents >= dollars(r[0])) row = r;
+  const excess = BigInt(adjustedCents - dollars(row[0]));
+  return toCents(row[1]) + Number(divRoundHalfUp(excess * BigInt(pct(row[2])), 1_000_000n));
+}
+
 export function federalIncomeTax({ taxableWagesCents, periods, w4, fed }) {
   if (w4?.exempt) return 0;
-  if (w4?.formYear && w4.formYear < 2020) throw new PayrollError('Pre-2020 Form W-4 not supported yet; employee must submit a 2020+ W-4');
   const status = w4?.filingStatus ?? 'single';
-  const key = status === 'married' ? 'married' : status === 'head' ? 'head' : 'single';
-  const annualWages = taxableWagesCents * periods;                              // 1c
-  const plusOther = annualWages + toCents(w4?.otherIncome ?? 0);                 // 1e
-  const line1g = w4?.step2 ? 0 : dollars(key === 'married' ? fed.w4Line1g.married : fed.w4Line1g.other);
-  const adjusted = Math.max(0, plusOther - toCents(w4?.deductions ?? 0) - line1g); // 1i
-  // Pub 15-T tables start where the standard deduction (net of line 1g) is used up.
-  // Step 2 checked: brackets and standard deduction are halved.
-  const scale = w4?.step2 ? 0.5 : 1;
-  const zeroBand = w4?.step2
-    ? Math.round(dollars(fed.standardDeduction[key]) / 2)
-    : dollars(fed.standardDeduction[key]) - line1g;
-  const annualTax = bracketTax(adjusted - zeroBand, fed.brackets[key], scale);
+  const tables = fed.percentageMethodTables;
+  const annualWages = taxableWagesCents * periods;                               // 1c
+  let adjusted;
+  let table;
+  if (w4?.formYear && w4.formYear < 2020) {
+    // Form W-4 from 2019 or earlier: lines 1j-1l. Single or Married only.
+    const allowances = w4.allowances ?? 0;
+    if (!Number.isInteger(allowances) || allowances < 0) throw new PayrollError('W-4 allowances must be a whole number');
+    adjusted = Math.max(0, annualWages - dollars(fed.pre2020W4.allowanceValue) * allowances);
+    table = tables.standard[status === 'married' ? 'married' : 'single'];
+  } else {
+    const key = status === 'married' ? 'married' : status === 'head' ? 'head' : 'single';
+    const plusOther = annualWages + toCents(w4?.otherIncome ?? 0);              // 1e
+    const line1g = w4?.step2 ? 0 : dollars(key === 'married' ? fed.w4Line1g.married : fed.w4Line1g.other);
+    adjusted = Math.max(0, plusOther - toCents(w4?.deductions ?? 0) - line1g);  // 1i
+    table = (w4?.step2 ? tables.step2Checkbox : tables.standard)[key];
+  }
+  const annualTax = percentageTableTax(adjusted, table);
   let tax = perPeriod(annualTax, periods);                                       // 2h
   tax = Math.max(0, tax - perPeriod(toCents(w4?.dependentsCredit ?? 0), periods)); // step 3
   return tax + toCents(w4?.extraWithholding ?? 0);                               // step 4(c)
@@ -97,8 +111,9 @@ function caIncomeTax({ taxableWagesCents, periods, el, ca }) {
   return perPeriod(Math.max(0, gross - credit), periods) + toCents(el?.extraWithholding ?? 0);
 }
 
-function coIncomeTax({ taxableWagesCents, periods, el, co, filingStatus }) {
-  if (el?.exempt) return 0;
+function coIncomeTax({ taxableWagesCents, periods, el, co, filingStatus, federalExempt }) {
+  // DR 1098: an employee exempt from federal withholding on the W-4 is exempt from Colorado withholding too.
+  if (el?.exempt || federalExempt) return 0;
   let allowance = el?.annualAllowance;
   if (allowance == null) allowance = co.defaultAllowance[filingStatus === 'married' ? 'married' : filingStatus === 'head' ? 'head' : 'single'];
   if (allowance == null) {
@@ -108,16 +123,12 @@ function coIncomeTax({ taxableWagesCents, periods, el, co, filingStatus }) {
   return perPeriod(applyRate(taxable, pct(co.ratePct)), periods) + toCents(el?.extraWithholding ?? 0);
 }
 
-function dcIncomeTax({ taxableWagesCents, periods, el, dc, fed }) {
+// DC Code §47-1812.08(b)(1A): no standard deduction in withholding; subtract D-4 allowances only.
+function dcIncomeTax({ taxableWagesCents, periods, el, dc }) {
   if (el?.exempt) return 0;
-  const status = el?.filingStatus ?? 'single';
-  const key = status === 'married' ? 'married' : status === 'head' ? 'head' : 'single';
   const allowances = el?.allowances ?? 0;
-  if (allowances > 0 && dc.allowanceValue == null) {
-    throw new PayrollError('DC: D-4 allowance value has not been entered/verified by the Review Board');
-  }
-  const stdDed = dc.standardDeduction === 'federal' ? fed.standardDeduction[key] : dc.standardDeduction[key];
-  const taxable = Math.max(0, taxableWagesCents * periods - dollars(stdDed) - dollars(dc.allowanceValue ?? 0) * allowances);
+  if (!Number.isInteger(allowances) || allowances < 0) throw new PayrollError('DC: D-4 allowances must be a whole number');
+  const taxable = Math.max(0, taxableWagesCents * periods - dollars(dc.allowanceValue) * allowances);
   return perPeriod(bracketTax(taxable, dc.brackets), periods) + toCents(el?.extraWithholding ?? 0);
 }
 
@@ -130,7 +141,7 @@ function dcIncomeTax({ taxableWagesCents, periods, el, dc, fed }) {
  * @param {Array}  [p.preTaxDeductions]  [{ name, amountCents, kind: 'retirement_401k' | 'section125' }]
  * @param {object} p.employee            { workState, w4:{filingStatus, step2, dependentsCredit, otherIncome, deductions, extraWithholding, exempt}, stateElections:{...} }
  * @param {object} [p.ytd]               { grossCents, ficaWagesCents, medicareWagesCents, futaWagesCents, suiWagesCents, stateInsWagesCents }
- * @param {object} [p.company]           { suiRatePct, employeeCount }
+ * @param {object} [p.company]           { suiRatePct, famliHeadcount }
  */
 export function calculatePaycheck(p) {
   const tables = loadTables(p.year);
@@ -203,17 +214,19 @@ export function calculatePaycheck(p) {
     const ettTaxable = underCap(ficaWages, ytd.suiWagesCents, dollars(st.ett.wageBase));
     add(employerTaxes, 'CA_ETT', 'California ETT', applyRate(ettTaxable, pct(st.ett.ratePct)), 'suta_payable', ettTaxable);
   } else if (state === 'CO') {
-    add(employeeTaxes, 'CO_PIT', 'Colorado income tax', coIncomeTax({ taxableWagesCents: incomeTaxWages, periods, el, co: st.incomeTax, filingStatus: p.employee.w4?.filingStatus }), 'state_wh_payable', incomeTaxWages);
+    add(employeeTaxes, 'CO_PIT', 'Colorado income tax', coIncomeTax({ taxableWagesCents: incomeTaxWages, periods, el, co: st.incomeTax, filingStatus: p.employee.w4?.filingStatus, federalExempt: Boolean(p.employee.w4?.exempt) }), 'state_wh_payable', incomeTaxWages);
     const f = st.famli;
     const cap = f.wageBase === 'socialSecurity' ? dollars(fed.socialSecurity.wageBase) : dollars(f.wageBase);
     const famliTaxable = underCap(ficaWages, ytd.stateInsWagesCents, cap);
     const total = applyRate(famliTaxable, pct(f.totalRatePct));
     const eeShare = Number(divRoundHalfUp(BigInt(total) * BigInt(pct(f.employeeSharePct)), 1_000_000n));
     add(employeeTaxes, 'CO_FAMLI', 'Colorado FAMLI (employee)', eeShare, 'state_ins_payable', famliTaxable);
-    const smallEmployer = company.employeeCount != null && company.employeeCount < f.smallEmployerThreshold;
+    // FAMLI: employers with fewer than 10 employees (nationwide, counted per FAMLI's annual rule) pay no
+    // employer share. company.famliHeadcount is entered by the employer; if unknown we charge the share.
+    const smallEmployer = company.famliHeadcount != null && company.famliHeadcount < f.smallEmployerThreshold;
     if (!smallEmployer) add(employerTaxes, 'CO_FAMLI_ER', 'Colorado FAMLI (employer)', total - eeShare, 'state_ins_payable', famliTaxable);
   } else if (state === 'DC') {
-    add(employeeTaxes, 'DC_PIT', 'DC income tax', dcIncomeTax({ taxableWagesCents: incomeTaxWages, periods, el, dc: st.incomeTax, fed }), 'state_wh_payable', incomeTaxWages);
+    add(employeeTaxes, 'DC_PIT', 'DC income tax', dcIncomeTax({ taxableWagesCents: incomeTaxWages, periods, el, dc: st.incomeTax }), 'state_wh_payable', incomeTaxWages);
     add(employerTaxes, 'DC_PFL', 'DC Paid Family Leave', applyRate(ficaWages, pct(st.paidFamilyLeave.employerRatePct)), 'state_ins_payable', ficaWages);
   }
   // TX: no state income tax, no employee state taxes.

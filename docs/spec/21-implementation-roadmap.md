@@ -80,3 +80,15 @@ tables** (CA EDD, CO DOR, DC OTR — December), Plaid production approval (2–4
 | #2 | end of S5 | full alpha walkthrough with real-world scenarios | alpha may continue |
 | #3 | end of S8 | go/no-go for public beta | beta launch |
 | Per-state | Feb–Apr | each state payroll engine + current-year tables, golden paychecks | state goes live |
+
+## 21.7 Carried forward from Review Board #1 (see docs/board/review-1.md)
+
+**Sprint 1 security must-haves:** company membership check on every `:companyId` route (roles, real `actor` on every
+write); PostgreSQL row-level security on `company_id`; separate migration-owner and runtime DB roles (runtime cannot
+alter/disable triggers); `__Host-` SameSite=Strict session cookies + CSRF token; reopening periods requires owner role
++ MFA; audit HMAC key in a cloud KMS and daily external anchoring of each company's chain head; idempotency keys on all
+posting endpoints; field encryption for SSN/bank details; rate limiting; PII-free structured logs.
+
+**Sprint 6 payroll backlog:** CA per-period DE 44 rounding; W-4 exempt expiry (Feb 15) and DR 0004 cancellation rule;
+CA FUTA credit-reduction accrual; tax-deposit workflow; CA daily overtime; DC allowance value confirmed with OTR;
+human CPA/CPP certification of 2027 tables.
