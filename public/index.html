@@ -19,6 +19,7 @@
         <button v-for="t in tabs.filter(t => canTab(t.id))" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
       </nav>
       <div class="who" v-if="auth.user">
+        <button v-if="company" class="help-btn" :class="{ active: tab === 'help' }" @click="openHelp" :title="tab === 'help' ? 'Back' : 'Help for this screen'" >? Help</button>
         <span class="muted">{{ auth.user.name }}<template v-if="company"> · {{ company.roleName }}</template></span>
         <button class="link" @click="signOut">Sign out</button>
       </div>
@@ -694,6 +695,25 @@
           </table>
         </template>
         <p v-if="report.type !== 'payroll-register'" :class="reportCheck === 0 ? 'ok' : 'bad'">{{ reportCheck === 0 ? '✓ This report ties out.' : '⚠ This report does not tie out by ' + money(reportCheck) }}</p>
+      </div>
+    </section>
+
+    <!-- HELP -->
+    <section v-if="tab === 'help'">
+      <h1>Help</h1>
+      <div class="split">
+        <div class="card">
+          <input type="search" v-model="help.q" placeholder="Search help (e.g. overtime, reconcile, 941)" aria-label="Search help">
+          <ul class="help-list">
+            <li v-for="h in helpList" :key="h.id"><button class="link" :class="{ sel: h.id === helpArticle.id }" @click="help.id = h.id">{{ h.title }}</button></li>
+          </ul>
+          <p class="hint" v-if="!helpList.length">Nothing found. Try fewer or simpler words.</p>
+        </div>
+        <article class="card help-article print-me">
+          <h2>{{ helpArticle.title }}</h2>
+          <div v-html="helpArticle.html" @click="helpClick"></div>
+          <p class="hint">Still stuck? Ask your accountant, or contact zAccountant support.</p>
+        </article>
       </div>
     </section>
 
