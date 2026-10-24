@@ -41,10 +41,11 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(s.body.next, 'mfa_setup');
     const setup = await c.call('POST', '/api/auth/mfa/setup', {});
     assert.match(setup.body.otpauthUri, /^otpauth:\/\/totp\//);
-    const en = await c.call('POST', '/api/auth/mfa/enable', { code: code(setup.body.secret) });
+    const enabledAt = Date.now();
+    const en = await c.call('POST', '/api/auth/mfa/enable', { code: totpCode(setup.body.secret, enabledAt) });
     assert.equal(en.status, 200, JSON.stringify(en.body));
     assert.equal(en.body.recoveryCodes.length, 8);
-    return { c, secret: setup.body.secret, recoveryCodes: en.body.recoveryCodes };
+    return { c, secret: setup.body.secret, recoveryCodes: en.body.recoveryCodes, enabledAt };
   }
 
   const owner = await newUser('owner@example.com');
@@ -68,9 +69,10 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const l = await c.call('POST', '/api/auth/login', { email: 'OWNER@example.com', password: 'a long enough passphrase' });
     assert.equal(l.body.next, 'mfa_verify');
     assert.equal((await c.call('GET', '/api/companies')).status, 401);
-    // The code used to enable 2FA (current window) was already used → rejected; next window works.
-    assert.equal((await c.call('POST', '/api/auth/mfa/verify', { code: code(owner.secret) })).status, 401);
-    assert.equal((await c.call('POST', '/api/auth/mfa/verify', { code: code(owner.secret, 1) })).status, 200);
+    // The code used to enable 2FA was already used → rejected; the next 30-second window works.
+    // (Codes are taken from the enable time, not "now", so a window boundary can't make this flaky.)
+    assert.equal((await c.call('POST', '/api/auth/mfa/verify', { code: totpCode(owner.secret, owner.enabledAt) })).status, 401);
+    assert.equal((await c.call('POST', '/api/auth/mfa/verify', { code: totpCode(owner.secret, owner.enabledAt + 30_000) })).status, 200);
     assert.equal((await c.call('GET', '/api/companies')).body.length, 1);
     // Recovery codes work once
     const c2 = client();
@@ -103,10 +105,10 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
   });
 
   await t.test('an unbalanced entry is rejected at the savepoint and nothing is saved', async () => {
-    const before = (await owner.c.call('GET', `/api/companies/${co.id}/entries`)).body.length;
+    const before = (await owner.c.call('GET', `/api/companies/${co.id}/entries`)).body.entries.length;
     const r = await owner.c.call('POST', `/api/companies/${co.id}/entries`, { date: '2026-01-06', lines: [{ accountId: A['1000'], debit: '5' }, { accountId: A['4000'], credit: '4' }] });
     assert.equal(r.status, 400);
-    assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/entries`)).body.length, before);
+    assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/entries`)).body.entries.length, before);
   });
 
   await t.test('other users cannot see or touch a company they do not belong to', async () => {
@@ -196,6 +198,55 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
       assert.ok(r.body?.error, `${p} has error text`);
       assert.doesNotMatch(r.body.error, /violates|constraint|relation|syntax/i, 'no raw database text');
     }
+  });
+
+  await t.test('recurring entries, search, duplicate-safe saves and the books check (restricted role)', async () => {
+    const base2 = `/api/companies/${co.id}`;
+    const rec = await owner.c.call('POST', `${base2}/recurring`, {
+      name: 'Office rent', frequency: 'monthly', startDate: '2026-08-01', endDate: '2026-10-01', memo: 'Rent',
+      lines: [{ accountId: A['6300'], debit: '1800' }, { accountId: A['1000'], credit: '1800' }] });
+    assert.equal(rec.status, 201, JSON.stringify(rec.body));
+    const bad = await owner.c.call('POST', `${base2}/recurring`, { name: 'Bad', frequency: 'monthly', startDate: '2026-08-01',
+      lines: [{ accountId: A['6300'], debit: '1' }, { accountId: A['1000'], credit: '2' }] });
+    assert.equal(bad.status, 400);
+    const due = await owner.c.call('POST', `${base2}/recurring/post-due`, {});
+    assert.deepEqual(due.body.posted.map((p) => p.date), ['2026-08-01', '2026-09-01', '2026-10-01']);
+    assert.equal((await owner.c.call('POST', `${base2}/recurring/post-due`, {})).body.posted.length, 0, 'never posts twice');
+    const list = (await owner.c.call('GET', `${base2}/recurring`)).body;
+    assert.equal(list[0].postedCount, 3);
+    assert.equal(list[0].nextDate, null);
+
+    // Search
+    const found = (await owner.c.call('GET', `${base2}/entries?text=rent&source=recurring`)).body;
+    assert.equal(found.total, 3);
+    const ranged = (await owner.c.call('GET', `${base2}/entries?accountId=${A['6300']}&from=2026-09-01&to=2026-09-30&min=1800&max=1800`)).body;
+    assert.equal(ranged.total, 1);
+    const byNumber = (await owner.c.call('GET', `${base2}/entries?text=%23${found.entries[0].number}`)).body;
+    assert.equal(byNumber.entries[0].number, found.entries[0].number);
+    assert.equal((await owner.c.call('GET', `${base2}/entries?min=abc`)).status, 400);
+    assert.equal((await owner.c.call('GET', `${base2}/entries?text=100%25`)).body.total, 0, '% is literal');
+
+    // Same Idempotency-Key twice = one entry
+    const body = { date: '2026-10-02', memo: 'Retry me', fromAccountId: A['4000'], toAccountId: A['1000'], amount: '50' };
+    const h = { 'idempotency-key': 'save-click-0001' };
+    const r1 = await owner.c.call('POST', `${base2}/entries/simple`, body, h);
+    const r2 = await owner.c.call('POST', `${base2}/entries/simple`, body, h);
+    assert.equal(r1.status, 201); assert.equal(r2.status, 201);
+    assert.equal(r1.body.id, r2.body.id);
+    assert.equal(r2.body.replayed, true);
+    assert.equal((await owner.c.call('GET', `${base2}/entries?text=Retry`)).body.total, 1);
+
+    // Books check: runs as the restricted role and records an anchor
+    const chk = await owner.c.call('POST', `${base2}/books-check`, {});
+    assert.equal(chk.status, 200, JSON.stringify(chk.body));
+    assert.equal(chk.body.ok, true, JSON.stringify(chk.body.problems));
+    const latest = (await owner.c.call('GET', `${base2}/books-check`)).body;
+    assert.equal(latest.ok, true);
+    assert.equal(latest.anchorSeq, chk.body.anchor.seq);
+
+    // Stop
+    const stop = await owner.c.call('POST', `${base2}/recurring/${list[0].id}/stop`, {});
+    assert.equal(stop.body.isActive, false);
   });
 
   await t.test('cross-site requests and foreign Host headers are refused', async () => {

@@ -2,6 +2,7 @@
 import { createPool } from './db/pool.js';
 import { migrate } from './db/migrate.js';
 import { createApp } from './app.js';
+import { startNightlyScheduler } from './jobs/booksCheck.js';
 
 const production = process.env.NODE_ENV === 'production';
 if (production) {
@@ -21,11 +22,14 @@ if (production) {
 // Migrations run with the owner role; the app itself connects with the restricted runtime role.
 const ownerPool = createPool(process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL);
 const applied = await migrate(ownerPool);
-await ownerPool.end();
 if (applied.length) console.log(`Applied migrations: ${applied.join(', ')}`);
 if (!process.env.MIGRATION_DATABASE_URL) {
   console.warn('Note: running with a single database role (development). Row-level security is not enforced for the table owner.');
 }
+
+// The nightly books check works across all companies, so it uses the owner connection.
+if (process.env.NIGHTLY_JOB !== 'off') startNightlyScheduler(ownerPool);
+else await ownerPool.end();
 
 const pool = createPool();
 const port = Number(process.env.PORT ?? 3000);

@@ -63,3 +63,7 @@ ul.warn { color: var(--muted); font-size: 13px; }
 .who { margin-left: auto; display: flex; gap: 10px; align-items: center; }
 .secret { font: 600 20px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; background: var(--bg); padding: 10px 14px; border-radius: 8px; word-break: break-all; }
 ul.codes { columns: 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0 12px; }
+.small { font-size: 13px; }
+tr.muted td { color: var(--muted); }
+form.search { padding-bottom: 12px; }

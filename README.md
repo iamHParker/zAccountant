@@ -4,7 +4,7 @@ Small-business accounting and payroll for Texas, Colorado, California and Washin
 **double-entry books that cannot silently go out of balance**, with payroll tax logic reviewed by a
 Professional Review Board.
 
-Status: **Sprint 1 (sign-in and security)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
+Status: **Sprint 2 (ledger completeness)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
 Target: public beta January 1, 2027.
 
 ## What's here
@@ -67,6 +67,10 @@ app (Google/Microsoft Authenticator, 1Password, Authy). `npm run seed` also crea
 In production, create the app login and give it only the rights it needs with `npm run db:grant`
 (see `src/db/grant.js`). Locally one login is fine; the server refuses to start in production without these.
 
+**Nightly books check:** the server runs it at about 2 a.m. Central (set `NIGHTLY_JOB=off` to disable, e.g. when a
+separate cron runs `npm run job:nightly`). It posts due recurring entries, re-verifies the audit trail and the
+ledger, confirms the statements balance, and logs a fingerprint of each company's audit chain.
+
 Tests: `npm run test:unit` (no database needed) or `npm test` (all, needs `DATABASE_URL`;
 each test file creates and deletes its own temporary database).
 
@@ -79,7 +83,10 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 |---|---|
 | `POST /api/companies` | create company + default chart of accounts |
 | `GET/POST …/accounts`, `GET …/accounts/:id/register` | chart of accounts, account register |
-| `GET/POST …/entries`, `POST …/entries/simple`, `POST …/entries/:id/reverse` | journal |
+| `GET …/entries?text=&from=&to=&accountId=&min=&max=&source=&limit=&offset=` | journal search (returns `{entries,total}`) |
+| `POST …/entries`, `POST …/entries/simple`, `POST …/entries/:id/reverse` | post / reverse; send an `Idempotency-Key` header so a retried save posts once |
+| `GET/POST …/recurring`, `POST …/recurring/:id/stop`, `POST …/recurring/post-due` | recurring entries |
+| `GET/POST …/books-check` | latest / run the full books check |
 | `POST …/lock` | close books through a date (reopening: owner + 2FA code + reason) |
 | `GET/POST/DELETE …/members` | who has access, and their role (owner, accountant, bookkeeper, viewer) |
 | `GET …/reports/{dashboard,trial-balance,balance-sheet,income-statement,cash-flow}` | statements |
