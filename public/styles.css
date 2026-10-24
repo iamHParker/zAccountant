@@ -65,6 +65,8 @@ img.report-picture { display: block; max-width: 100%; border: 1px solid var(--li
 blockquote.tester-note { margin: 8px 0 12px; padding: 10px 14px; border-left: 4px solid var(--brand); background: var(--bg); white-space: pre-wrap; }
 textarea.claude-text { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .tiles .value.small { font-size: 15px; padding-top: 6px; }
+.label-like { display: block; margin: 8px 0 4px; font-weight: 500; }
+input.search-small { max-width: 260px; margin: 0; }
 .joining { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
 .ok { color: var(--ok); } .bad { color: var(--bad); } .neg { color: var(--bad); }
 .banner { background: var(--warn-bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
