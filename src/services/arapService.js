@@ -14,6 +14,7 @@ import { LedgerError, isIsoDate, validateEntry, MAX_LINE_CENTS } from '../core/l
 import { toCents, divRoundHalfUp, applyRate, percentToPpm } from '../core/money.js';
 import { insertEntry, reverseEntry, cleanIdempotencyKey } from './ledgerService.js';
 import { appendAudit } from './audit.js';
+import { blockText } from './invoiceSetupService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SIDE = {
@@ -160,7 +161,7 @@ const docOut = (d, today) => {
   const status = d.status === 'void' ? 'void' : balance === 0 ? 'paid' : (today && d.due_date < today ? 'overdue' : (paid > 0 ? 'partial' : 'open'));
   return {
     id: d.id, kind: d.kind, contactId: d.contact_id, contactName: d.contact_name, number: d.number, date: d.doc_date, dueDate: d.due_date,
-    memo: d.memo, subtotalCents: d.subtotal_cents, taxRate: d.tax_rate, taxCents: d.tax_cents, totalCents: d.total_cents,
+    memo: d.memo, project: d.project ?? null, subtotalCents: d.subtotal_cents, taxRate: d.tax_rate, taxCents: d.tax_cents, totalCents: d.total_cents,
     paidCents: paid, balanceCents: balance, status, voidDate: d.void_date, journalEntryId: d.journal_entry_id, entryNumber: d.entry_number ?? null,
   };
 };
@@ -174,6 +175,7 @@ const DOC_SELECT = `
 /**
  * Validate the lines of an invoice or bill. Each line: { accountId, description, quantity, unitPrice }
  * (or just { accountId, description, amount }), and taxable: true for invoice lines that carry sales tax.
+ * Optional: serviceDate (the day the work was done or the cost incurred) and itemId (the saved rate it came from).
  */
 async function cleanLines(c, companyId, kind, rawLines, errors) {
   if (!Array.isArray(rawLines) || rawLines.length === 0) { errors.push('add at least one line'); return []; }
@@ -181,6 +183,9 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
   const ids = [...new Set(rawLines.map((l) => l?.accountId).filter((x) => typeof x === 'string' && UUIDISH.test(x)))];
   const { rows: accts } = await c.query('SELECT * FROM accounts WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, ids]);
   const byId = new Map(accts.map((a) => [a.id, a]));
+  const itemIds = [...new Set(rawLines.map((l) => l?.itemId).filter((x) => typeof x === 'string' && UUIDISH.test(x)))];
+  const { rows: items } = itemIds.length ? await c.query('SELECT id FROM invoice_items WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, itemIds]) : { rows: [] };
+  const itemSet = new Set(items.map((x) => x.id));
   return rawLines.map((l, i) => {
     const n = `line ${i + 1}`;
     const a = byId.get(l?.accountId);
@@ -188,6 +193,10 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
     else if (a.cash_flow === 'cash' || ['accounts_receivable', 'accounts_payable', 'retained_earnings', 'sales_tax_payable'].includes(a.system_key)) {
       errors.push(`${n}: ${a.name} can't be used on ${kind === 'invoice' ? 'an invoice' : 'a bill'} line`);
     }
+    const serviceDate = l?.serviceDate == null || l.serviceDate === '' ? null : l.serviceDate;
+    if (serviceDate != null && !isIsoDate(serviceDate)) errors.push(`${n}: the date must be a real date (YYYY-MM-DD)`);
+    const itemId = l?.itemId == null || l.itemId === '' ? null : l.itemId;
+    if (itemId != null && !itemSet.has(itemId)) errors.push(`${n}: that saved rate was not found`);
     let unit = l?.unitPrice ?? l?.amount;
     unit = unit == null || unit === '' ? null : money(unit, `${n} price`, errors);
     if (unit == null) { if (!errors.some((e) => e.startsWith(n))) errors.push(`${n}: enter a price or amount`); return null; }
@@ -196,12 +205,12 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
     try { amount = lineAmount(l.quantity ?? '1', unit); } catch (e) { errors.push(`${n}: ${e.message}`); return null; }
     if (amount > MAX_LINE_CENTS) { errors.push(`${n}: amount is too large`); return null; }
     return { accountId: l.accountId, description: text(l.description, 300), quantity: String(l.quantity ?? '1').trim(), unitPriceCents: unit, amountCents: amount,
-      taxable: kind === 'invoice' && l.taxable === true };
+      taxable: kind === 'invoice' && l.taxable === true, serviceDate, itemId };
   });
 }
 
 /** Create and post an invoice (kind 'invoice') or a bill (kind 'bill'). */
-export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, taxRate, lines, idempotencyKey = null, actor = null }) {
+export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, idempotencyKey = null, actor = null }) {
   const side = SIDE[kind];
   if (!side) throw new LedgerError('kind must be invoice or bill');
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
@@ -216,6 +225,9 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     if (!isIsoDate(date)) errors.push('date must be a real date (YYYY-MM-DD)');
     if (dueDate != null && dueDate !== '' && (!isIsoDate(dueDate) || (isIsoDate(date) && dueDate < date))) errors.push('due date must be on or after the date');
     const cleanMemoText = text(memo, 500);
+    let projectText = null;
+    try { projectText = blockText(project, 300, 'project'); } catch (e) { errors.push(e.message.replace(/^Keep/, 'keep')); }
+    if (projectText && kind !== 'invoice') errors.push('the project block is for invoices');
     const clean = await cleanLines(c, companyId, kind, lines, errors);
     let ppm = 0;
     let rate = null;
@@ -266,14 +278,14 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     const { rows: [{ id: docId }] } = await c.query('SELECT gen_random_uuid() AS id');
     const je = await insertEntry(c, companyId, entry, { source: kind, sourceRef: docId, actor });
     await c.query(
-      `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, subtotal, rate, tax, total, je.id, idempotencyKey, actor]);
+      `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, project, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor]);
     for (const l of clean) {
       await c.query(
-        `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [companyId, docId, l.accountId, l.description, l.quantity, l.unitPriceCents, l.amountCents, l.taxable]);
+        `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable, service_date, item_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [companyId, docId, l.accountId, l.description, l.quantity, l.unitPriceCents, l.amountCents, l.taxable, l.serviceDate, l.itemId]);
     }
     await appendAudit(c, companyId, { action: 'create', entity: kind, entityId: docId, actor,
       payload: { number: num, contactId: contact.id, date, dueDate: due, subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
@@ -286,17 +298,19 @@ export async function getDocument(db, companyId, docId, { today = null } = {}) {
   const { rows: [d] } = await db.query(`${DOC_SELECT} WHERE d.company_id = $1 AND d.id = $2`, [companyId, docId]);
   if (!d) throw new LedgerError('Invoice or bill not found');
   const { rows: lines } = await db.query(
-    `SELECT l.*, a.code, a.name AS account_name FROM document_lines l JOIN accounts a ON a.id = l.account_id
+    `SELECT l.*, a.code, a.name AS account_name, i.name AS item_name, i.kind AS item_kind
+       FROM document_lines l JOIN accounts a ON a.id = l.account_id LEFT JOIN invoice_items i ON i.id = l.item_id
       WHERE l.document_id = $1 ORDER BY l.id`, [d.id]);
   const { rows: pays } = await db.query(
     `SELECT p.id, p.pay_date, p.method, p.reference, p.status, a.amount_cents FROM payment_applications a JOIN payments p ON p.id = a.payment_id
       WHERE a.document_id = $1 ORDER BY p.pay_date, p.created_at`, [d.id]);
-  const { rows: [ct] } = await db.query('SELECT name, email, phone, address FROM contacts WHERE id = $1', [d.contact_id]);
+  const { rows: [ct] } = await db.query('SELECT name, email, phone, address, terms_days AS "termsDays" FROM contacts WHERE id = $1', [d.contact_id]);
   return {
     ...docOut(d, today),
     contact: ct,
     lines: lines.map((l) => ({ accountId: l.account_id, accountCode: l.code, accountName: l.account_name, description: l.description,
-      quantity: l.quantity, unitPriceCents: l.unit_price_cents, amountCents: l.amount_cents, taxable: l.taxable })),
+      quantity: l.quantity, unitPriceCents: l.unit_price_cents, amountCents: l.amount_cents, taxable: l.taxable,
+      serviceDate: l.service_date, itemId: l.item_id, itemName: l.item_name ?? null, itemKind: l.item_kind ?? null })),
     payments: pays.map((p) => ({ id: p.id, date: p.pay_date, method: p.method, reference: p.reference, status: p.status, amountCents: p.amount_cents })),
   };
 }

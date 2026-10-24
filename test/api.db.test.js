@@ -340,6 +340,65 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal((await outsider.c.call('GET', `${base}/invoices`)).status, 404);
   });
 
+  await t.test('professional-services invoice: saved rates, line dates, project, letterhead, logo, pinned tax rate', async () => {
+    const base = `/api/companies/${co.id}`;
+    const cust = (await owner.c.call('POST', `${base}/customers`, { name: 'Pool Builder Inc', address: '1 Main St\nIrving, TX 75061', termsDays: 20 })).body;
+    const starter = await owner.c.call('POST', `${base}/invoice-items/starter`, { accountId: A['4100'] });
+    assert.equal(starter.status, 200, JSON.stringify(starter.body));
+    assert.equal(starter.body.added, 10);
+    assert.equal((await owner.c.call('POST', `${base}/invoice-items/starter`, { accountId: A['4100'] })).body.added, 0, 'no duplicates');
+    const std = starter.body.items.find((x) => x.name === 'Eng Std Rate');
+    const upd = await owner.c.call('PATCH', `${base}/invoice-items/${std.id}`, { rate: '425', taxable: true });
+    assert.equal(upd.body.rateCents, 42500);
+    const rent = starter.body.items.find((x) => x.name === 'Equipment rental');
+    assert.equal((await owner.c.call('POST', `${base}/invoice-items`, { name: 'Bad', accountId: A['5000'] })).status, 400, 'must be an income account');
+
+    const pin = await owner.c.call('PUT', `${base}/default-tax-rate`, { rate: '8.25' });
+    assert.equal(pin.status, 200, JSON.stringify(pin.body));
+    assert.equal((await owner.c.call('GET', base)).body.default_sales_tax_rate, '8.25');
+    assert.equal((await owner.c.call('PUT', `${base}/default-tax-rate`, { rate: '25' })).status, 400);
+    const lh = await owner.c.call('PUT', `${base}/letterhead`, { address: '1 Woodrock Dr\r\nRound Rock TX 78681', note: 'TAX ID# 00-0000000\nTX Firm 000', footer: 'Thank you' });
+    assert.equal(lh.body.address, '1 Woodrock Dr\nRound Rock TX 78681');
+
+    // A 1×1 PNG as the logo; members read it back as a picture (not a download).
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    assert.equal((await owner.c.call('PUT', `${base}/logo`, { picture: 'data:image/png;base64,AAAA' })).status, 400, 'not really a PNG');
+    assert.equal((await owner.c.call('PUT', `${base}/logo`, { picture: `data:image/png;base64,${png}` })).status, 200);
+    assert.ok((await owner.c.call('GET', base)).body.logoVersion);
+    const logo = await owner.c.call('GET', `${base}/logo`);
+    assert.equal(logo.headers['content-type'], 'image/png');
+    assert.match(logo.headers['content-disposition'], /^inline/);
+
+    // Homer's sample: 2.5 h at a special rate of $531.25 (1.25 × $425), taxable at 8.25%, plus equipment rent (not taxed).
+    //   2.5 × 531.25 = 1,328.125 → $1,328.13 (half-up);  tax 8.25% × 1,328.13 = 109.5707 → $109.57
+    //   rent 1 × 350.00 = $350.00;  total 1,328.13 + 350.00 + 109.57 = $1,787.70
+    const i = await owner.c.call('POST', `${base}/invoices`, {
+      contactId: cust.id, number: '26-134', date: '2026-10-14', taxRate: '8.25', project: 'Project name\n4424 Main Ave\nAustin, Texas 78731',
+      lines: [
+        { itemId: std.id, serviceDate: '2026-10-14', accountId: A['4100'], description: 'Report', quantity: '2.5', unitPrice: '531.25', taxable: true },
+        { itemId: rent.id, serviceDate: '2026-10-13', accountId: A['4100'], description: 'Crack monitor rent', quantity: '1', unitPrice: '350' },
+      ] });
+    assert.equal(i.status, 201, JSON.stringify(i.body));
+    assert.deepEqual([i.body.subtotalCents, i.body.taxCents, i.body.totalCents], [167813, 10957, 178770]);
+    assert.equal(i.body.project, 'Project name\n4424 Main Ave\nAustin, Texas 78731');
+    assert.deepEqual(i.body.lines.map((l) => [l.serviceDate, l.itemName, l.amountCents]), [['2026-10-14', 'Eng Std Rate', 132813], ['2026-10-13', 'Equipment rental', 35000]]);
+    assert.equal(i.body.contact.termsDays, 20);
+    assert.equal((await owner.c.call('POST', `${base}/invoices`, { contactId: cust.id, date: '2026-10-14',
+      lines: [{ accountId: A['4100'], amount: '1', serviceDate: '2026-02-30' }] })).status, 400, 'not a real date');
+
+    // Staff may pin the tax rate (they write invoices) but not change rates, the letterhead or the logo.
+    const staff = await newUser('inv-staff@example.com');
+    await owner.c.call('POST', `${base}/members`, { email: 'inv-staff@example.com', role: 'staff' });
+    assert.equal((await staff.c.call('GET', `${base}/invoice-items`)).body.length, 10);
+    assert.equal((await staff.c.call('PUT', `${base}/default-tax-rate`, { rate: '' })).status, 200);
+    assert.equal((await staff.c.call('PATCH', `${base}/invoice-items/${std.id}`, { rate: '1' })).status, 403);
+    assert.equal((await staff.c.call('PUT', `${base}/letterhead`, { address: 'x' })).status, 403);
+    assert.equal((await staff.c.call('PUT', `${base}/logo`, { picture: null })).status, 403);
+    assert.equal((await staff.c.call('GET', `${base}/logo`)).status, 200);
+    const outsider = await newUser('logo-outsider@example.com');
+    assert.equal((await outsider.c.call('GET', `${base}/logo`)).status, 404);
+  });
+
   await t.test('payroll run, pay stub and tax liabilities through the restricted role', async () => {
     const base = `/api/companies/${co.id}`;
     const body = { payFrequency: 'monthly', periodStart: '2026-12-01', periodEnd: '2026-12-31', payDate: '2026-12-31', paidFromAccountId: A['1000'] };

@@ -47,7 +47,27 @@ automatically each night, or press <em>Post due entries now</em>.</p>
 </ol>
 <p><strong>Aging report</strong> shows who owes you and how late, in 30-day buckets, and checks that it agrees with Accounts
 Receivable in your books. Download it as CSV or print it.</p>
-<p>An invoice with no payments can be <strong>voided</strong>; it stays on record marked void. To undo a payment, void the payment first.</p>`,
+<p>An invoice with no payments can be <strong>voided</strong>; it stays on record marked void. To undo a payment, void the payment first.</p>
+<p>Billing by the hour? See <a href="#" data-help="invoice-setup">Invoice rates, letterhead and logo</a>.</p>`,
+  },
+  {
+    id: 'invoice-setup', tab: null, title: 'Invoice rates, letterhead and logo',
+    words: 'invoice rate hourly engineering drafting overtime equipment rental lodging motel airfare logo letterhead tax id firm sales tax default project',
+    html: `
+<p>Set these up once in <strong>Settings</strong> (owners and anyone with company settings):</p>
+<ul>
+  <li><strong>Invoice letterhead and logo</strong>: upload your logo, type your address, and a note for every invoice
+      (for example your tax ID and engineering firm registration number). The closing line prints at the bottom.</li>
+  <li><strong>Invoice rates and items</strong>: your hourly rates (Eng Std Rate, Drafting…) and costs you pass on
+      (equipment rental, lodging, rental car, airfare). <em>Start with an engineering firm's list</em> adds the usual names;
+      then press <em>edit</em> on each and type your price. Leave the price empty for costs that differ every time.</li>
+</ul>
+<p>On a <strong>new invoice</strong>, pick a rate in <em>Rate or item</em> and the line fills in its rate, tax and income account.
+Type the date, the task (Report, Site visit…) and the hours. A one-off rate (say 1.25 × your standard rate) is typed right over the rate.
+Changing a saved rate never changes invoices already saved.</p>
+<p>The <em>Project</em> box prints the project name and site address beside Bill to.</p>
+<p><strong>Sales tax</strong>: type the rate, then press <em>📌 Save … as the default</em> and every new invoice starts with it.
+Only lines with <em>Tax</em> ticked are taxed.</p>`,
   },
   {
     id: 'bills', tab: 'bills', title: 'Bills and paying vendors',

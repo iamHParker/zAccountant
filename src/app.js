@@ -28,6 +28,7 @@ import * as feedback from './services/feedbackService.js';
 import { platformRole, appVersion } from './core/platform.js';
 import { streamBackup } from './jobs/backup.js';
 import * as plans from './services/planService.js';
+import * as invoiceSetup from './services/invoiceSetupService.js';
 import { featureForPath, FEATURES } from './core/plans.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -119,6 +120,7 @@ export function createApp(pool, { log } = {}) {
   app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '6mb' }));
   app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
   app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
+  app.use(/^\/api\/companies\/[^/]+\/logo$/, express.json({ limit: '2mb' })); // the logo, as base64 (1 MB at most)
   app.use('/api/feedback', express.json({ limit: '6mb' })); // a picture of the screen, as base64
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
@@ -232,7 +234,7 @@ export function createApp(pool, { log } = {}) {
     });
     if (body?.[FILE]) {
       const f = body[FILE];
-      return res.status(status).type(f.type).set('Content-Disposition', `attachment; filename="${f.name}"`).send(f.body);
+      return res.status(status).type(f.type).set('Content-Disposition', `${f.inline ? 'inline' : 'attachment'}; filename="${f.name}"`).send(f.body);
     }
     res.status(status).json(body);
   };
@@ -311,7 +313,32 @@ export function createApp(pool, { log } = {}) {
   api.get('/companies/:companyId', route('member', async ({ db, companyId, access }) => ({
     ...(await ledger.getCompany(db, companyId)), role: access.role, roleName: access.roleName, permissions: [...access.permissions], departmentId: access.departmentId,
     ...(await plans.getCompanyPlan(db, companyId)),
+    logoVersion: await invoiceSetup.hasLogo(db, companyId), // null when there is no logo; changes when it does
   })));
+
+  // Invoice setup: saved rates and items, the usual sales tax rate, the letterhead and the logo.
+  api.get('/companies/:companyId/invoice-items', route(['invoices', 'view_books', 'admin'], ({ db, req, companyId }) =>
+    invoiceSetup.listItems(db, companyId, { includeInactive: req.query.all === '1' })));
+  api.post('/companies/:companyId/invoice-items', route('admin', ({ db, req, companyId, actor }) => {
+    const { name, kind, rate, taxable, accountId } = req.body ?? {};
+    return invoiceSetup.createItem(db, companyId, { name, kind, rate, taxable, accountId, actor });
+  }, 201));
+  api.post('/companies/:companyId/invoice-items/starter', route('admin', ({ db, req, companyId, actor }) =>
+    invoiceSetup.addStarterItems(db, companyId, { accountId: req.body?.accountId, actor })));
+  api.patch('/companies/:companyId/invoice-items/:itemId', route('admin', ({ db, req, companyId, actor }) => {
+    const { name, kind, rate, taxable, accountId, isActive } = req.body ?? {};
+    return invoiceSetup.updateItem(db, companyId, req.params.itemId, { name, kind, rate, taxable, accountId, isActive, actor });
+  }));
+  // Anyone who writes invoices may pin the rate they use most (it only fills in the box on new invoices).
+  api.put('/companies/:companyId/default-tax-rate', route('invoices', ({ db, req, companyId, actor }) =>
+    invoiceSetup.setDefaultTaxRate(db, companyId, { rate: req.body?.rate, actor })));
+  api.put('/companies/:companyId/letterhead', route('admin', ({ db, req, companyId, actor }) => {
+    const { address, note, footer } = req.body ?? {};
+    return invoiceSetup.setLetterhead(db, companyId, { address, note, footer, actor });
+  }));
+  api.put('/companies/:companyId/logo', route('admin', ({ db, req, companyId, actor }) =>
+    invoiceSetup.setLogo(db, companyId, { picture: req.body?.picture ?? null, actor })));
+  api.get('/companies/:companyId/logo', route('member', async ({ db, companyId }) => ({ [FILE]: await invoiceSetup.getLogo(db, companyId) })));
   api.patch('/companies/:companyId/settings', route('admin', ({ db, req, companyId, actor }) => {
     const { suiRatePct, calculateOnlyPayroll, famliHeadcount, futaCreditReduction } = req.body ?? {};
     return ledger.updateCompanySettings(db, companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount, futaCreditReduction, actor });
@@ -432,8 +459,8 @@ export function createApp(pool, { log } = {}) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
       arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
-      const { contactId, number, date, dueDate, memo, taxRate, lines } = req.body ?? {};
-      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, taxRate, lines, idempotencyKey: idemKey(req), actor });
+      const { contactId, number, date, dueDate, memo, project, taxRate, lines } = req.body ?? {};
+      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, idempotencyKey: idemKey(req), actor });
     }, 201));
   }
   api.get('/companies/:companyId/documents/:documentId', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {

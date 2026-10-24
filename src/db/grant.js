@@ -13,8 +13,10 @@ export async function grantRuntimeRole(pool, role) {
     GRANT INSERT ON companies, accounts, journal_entries, journal_lines, audit_log, employees, paychecks,
                     recurring_entries, books_checks, bank_transactions, bank_rules, reconciliations, reconciliation_lines, import_batches,
                     contacts, documents, document_lines, payments, payment_applications, payroll_runs, company_roles, departments, jobs, time_entries, payroll_deposits,
-                    users, sessions, memberships, feedback_reports, company_plans, plan_changes TO ${role};
-    GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount, futa_credit_reduction) ON companies TO ${role};
+                    users, sessions, memberships, feedback_reports, company_plans, plan_changes,
+                    company_logos, invoice_items TO ${role};
+    GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount, futa_credit_reduction, default_sales_tax_rate,
+                  invoice_address, invoice_note, invoice_footer) ON companies TO ${role};
     GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash) ON users TO ${role};
     GRANT UPDATE (mfa_passed, last_seen_at, expires_at) ON sessions TO ${role};
     GRANT UPDATE (posted_count, next_date, is_active, last_error) ON recurring_entries TO ${role};
@@ -36,6 +38,9 @@ export async function grantRuntimeRole(pool, role) {
     GRANT DELETE ON time_entries TO ${role};
     GRANT UPDATE (status, claude_text, developer_note, updated_at, updated_by) ON feedback_reports TO ${role};
     GRANT UPDATE (plan, add_ons, updated_at, updated_by) ON company_plans TO ${role};
+    GRANT UPDATE (picture, picture_type, updated_at, updated_by) ON company_logos TO ${role};
+    GRANT DELETE ON company_logos TO ${role};
+    GRANT UPDATE (name, kind, rate_cents, taxable, account_id, is_active) ON invoice_items TO ${role};
     GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO ${role};
     REVOKE ALL ON schema_migrations FROM ${role};`;
   await pool.query(sql);

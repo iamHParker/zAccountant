@@ -77,7 +77,7 @@ ul.warn { color: var(--muted); font-size: 13px; }
 @media print {
   :root { --bg: #fff; --card: #fff; --ink: #000; --muted: #555; --line: #bbb; --ok: #000; --bad: #000; }
   @page { margin: 0.6in; }
-  .top, nav, .seg, button, label.inline, .toast, .hint { display: none !important; }
+  .top, nav, .seg, button, label.inline, .toast, .hint, .no-print { display: none !important; }
   body { background: #fff; font-size: 11pt; }
   main { max-width: none; padding: 0; }
   .card { border: 0; padding: 0; margin: 0; }
@@ -132,3 +132,18 @@ ul.help-list button { text-align: left; }
 ul.help-list button.sel { font-weight: 700; text-decoration: none; color: var(--ink); }
 .help-article a[data-help] { color: var(--brand); text-decoration: underline; cursor: pointer; }
 .help-article li { margin: 4px 0; }
+/* Invoices: letterhead with logo, invoice number box, bill-to and project, lines with date and tax mark. */
+.pre-line { white-space: pre-line; }
+.letterhead { display: flex; gap: 16px; align-items: flex-start; margin: 8px 0 16px; }
+.letterhead .company-name { font-size: 18px; }
+img.invoice-logo { max-height: 90px; max-width: 220px; object-fit: contain; }
+table.invoice-box { width: auto; border-collapse: collapse; }
+table.invoice-box th, table.invoice-box td { border: 1px solid var(--line); padding: 3px 10px; text-align: center; font-size: 13px; }
+table.invoice-box th { color: var(--muted); font-weight: 600; }
+.invoice-parties { margin-bottom: 16px; align-items: start; }
+.invoice-parties .boxed { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+.invoice-note { margin-top: 8px; }
+.invoice-footer { margin-top: 16px; font-style: italic; }
+table.invoice-lines thead th { background: var(--bg); }
+.logo-row { align-items: center; gap: 12px; margin-bottom: 4px; }
+.letterhead .grow { flex: 1; }
