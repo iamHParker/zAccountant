@@ -1,5 +1,6 @@
 // Database-backed ledger: companies, accounts, posting and reversing entries, closing periods.
-import { withTransaction } from '../db/pool.js';
+import { randomUUID } from 'node:crypto';
+import { withTransaction, setScopeCompany } from '../db/pool.js';
 import { DEFAULT_CHART } from '../core/chartOfAccounts.js';
 import { validateEntry, simpleTransaction, reversingLines, LedgerError, ACCOUNT_TYPES, isIsoDate } from '../core/ledger.js';
 import { appendAudit } from './audit.js';
@@ -10,12 +11,21 @@ const lockCompany = async (client, companyId) => {
   return rows[0];
 };
 
-export async function createCompany(pool, { name, homeState, fiscalYearStartMonth = 1, actor = null }) {
+/** Create a company with the default chart of accounts. If ownerUserId is given, that user becomes its owner. */
+export async function createCompany(pool, { name, homeState, fiscalYearStartMonth = 1, actor = null, ownerUserId = null }) {
+  const errors = [];
+  if (typeof name !== 'string' || !name.trim() || name.length > 120) errors.push('business name is required (up to 120 characters)');
+  if (!['TX', 'CO', 'CA', 'DC'].includes(homeState)) errors.push('state must be TX, CO, CA or DC');
+  if (!Number.isInteger(fiscalYearStartMonth) || fiscalYearStartMonth < 1 || fiscalYearStartMonth > 12) errors.push('fiscal year start month must be 1-12');
+  if (errors.length) throw new LedgerError('Company is not valid', errors);
   return withTransaction(pool, async (c) => {
+    const id = randomUUID();
+    if (c.__inTx) await setScopeCompany(c, id);
     const { rows: [co] } = await c.query(
-      'INSERT INTO companies (name, home_state, fiscal_year_start_month) VALUES ($1,$2,$3) RETURNING *',
-      [name, homeState, fiscalYearStartMonth],
+      'INSERT INTO companies (id, name, home_state, fiscal_year_start_month) VALUES ($1,$2,$3,$4) RETURNING *',
+      [id, name.trim(), homeState, fiscalYearStartMonth],
     );
+    if (ownerUserId) await c.query("INSERT INTO memberships (company_id, user_id, role) VALUES ($1,$2,'owner')", [id, ownerUserId]);
     for (const a of DEFAULT_CHART) {
       await c.query(
         `INSERT INTO accounts (company_id, code, name, type, subtype, cash_flow, system_key)
@@ -28,8 +38,19 @@ export async function createCompany(pool, { name, homeState, fiscalYearStartMont
   });
 }
 
-export async function listCompanies(db) {
-  return (await db.query('SELECT * FROM companies ORDER BY created_at')).rows;
+/** Record an audit event that has no ledger change (e.g. membership changes). */
+export async function auditOnly(pool, companyId, event) {
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    return appendAudit(c, companyId, event);
+  });
+}
+
+export async function listCompanies(db, { userId = null } = {}) {
+  if (!userId) return (await db.query('SELECT * FROM companies ORDER BY created_at')).rows;
+  return (await db.query(
+    `SELECT c.*, m.role FROM companies c JOIN memberships m ON m.company_id = c.id
+      WHERE m.user_id = $1 ORDER BY c.created_at`, [userId])).rows;
 }
 
 export async function getCompany(db, companyId) {

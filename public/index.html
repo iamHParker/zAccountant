@@ -11,17 +11,73 @@
 <div id="app" v-cloak>
   <header class="top">
     <div class="brand">z<span>Accountant</span></div>
-    <select v-if="companies.length" v-model="companyId" aria-label="Company">
-      <option v-for="c in companies" :value="c.id">{{ c.name }}</option>
-    </select>
-    <nav v-if="company">
-      <button v-for="t in tabs" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
-    </nav>
+    <template v-if="!auth.screen">
+      <select v-if="companies.length" v-model="companyId" aria-label="Company">
+        <option v-for="c in companies" :value="c.id">{{ c.name }}</option>
+      </select>
+      <nav v-if="company">
+        <button v-for="t in tabs" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
+      </nav>
+      <div class="who" v-if="auth.user">
+        <span class="muted">{{ auth.user.name }}<template v-if="company"> · {{ roleLabels[company.role] }}</template></span>
+        <button class="link" @click="signOut">Sign out</button>
+      </div>
+    </template>
   </header>
 
   <div class="toast" v-if="message" :class="message.kind" @click="message = null">{{ message.text }}</div>
 
   <main>
+    <!-- SIGN-IN SCREENS -->
+    <section v-if="auth.screen === 'loading'" class="card narrow"><p class="hint">Loading…</p></section>
+    <section v-else-if="auth.screen === 'signin'" class="card narrow">
+      <h1>Sign in</h1>
+      <form @submit.prevent="signIn">
+        <label>Email <input type="email" v-model.trim="auth.email" autocomplete="username" required></label>
+        <label>Password <input type="password" v-model="auth.password" autocomplete="current-password" required></label>
+        <button class="primary">Sign in</button>
+      </form>
+      <p class="hint">New to zAccountant? <button class="link" @click="auth.screen = 'signup'">Create an account</button></p>
+    </section>
+    <section v-else-if="auth.screen === 'signup'" class="card narrow">
+      <h1>Create your account</h1>
+      <form @submit.prevent="signUp">
+        <label>Your name <input v-model.trim="auth.name" autocomplete="name" required></label>
+        <label>Email <input type="email" v-model.trim="auth.email" autocomplete="username" required></label>
+        <label>Password (at least 12 characters; a short sentence works well)
+          <input type="password" v-model="auth.password" autocomplete="new-password" minlength="12" required></label>
+        <button class="primary">Create account</button>
+      </form>
+      <p class="hint">Already have an account? <button class="link" @click="auth.screen = 'signin'">Sign in</button></p>
+    </section>
+    <section v-else-if="auth.screen === 'mfa_setup'" class="card narrow">
+      <h1>Protect your account</h1>
+      <p>zAccountant requires two-step sign-in. Install an authenticator app on your phone (Google Authenticator,
+        Microsoft Authenticator, 1Password, Authy…), choose <strong>add account → enter a setup key</strong>, and type this key:</p>
+      <p class="secret" v-if="auth.setup">{{ auth.setup.secret.match(/.{1,4}/g).join(' ') }}</p>
+      <p class="hint" v-if="auth.setup">On a phone? <a :href="auth.setup.otpauthUri">Open in your authenticator app</a></p>
+      <form @submit.prevent="enableMfa">
+        <label>Then enter the 6-digit code it shows <input v-model.trim="auth.code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+        <button class="primary">Turn on two-step sign-in</button>
+      </form>
+    </section>
+    <section v-else-if="auth.screen === 'recovery_codes'" class="card narrow">
+      <h1>Save your recovery codes</h1>
+      <p>If you lose your phone, each of these codes lets you sign in once. Print them or store them somewhere safe — they won't be shown again.</p>
+      <ul class="codes"><li v-for="c in auth.recoveryCodes">{{ c }}</li></ul>
+      <button class="primary" @click="enterApp">I've saved them — continue</button>
+    </section>
+    <section v-else-if="auth.screen === 'mfa_verify'" class="card narrow">
+      <h1>Two-step sign-in</h1>
+      <form @submit.prevent="verifyMfa">
+        <label>{{ auth.useRecovery ? 'Recovery code' : '6-digit code from your authenticator app' }}
+          <input v-model.trim="auth.code" :inputmode="auth.useRecovery ? 'text' : 'numeric'" autocomplete="one-time-code" required></label>
+        <button class="primary">Continue</button>
+      </form>
+      <button class="link" @click="auth.useRecovery = !auth.useRecovery; auth.code = ''">{{ auth.useRecovery ? 'Use authenticator code instead' : 'Lost your phone? Use a recovery code' }}</button>
+    </section>
+
+    <template v-else>
     <!-- First run: create a company -->
     <section v-if="!company || tab === 'new-company'" class="card narrow">
       <h1>{{ companies.length ? 'Add a company' : 'Welcome! Let\'s set up your books' }}</h1>
@@ -55,7 +111,7 @@
       <p class="ok" v-if="dash && dash.booksBalanced">✓ Your books are in balance.</p>
       <p class="bad" v-if="dash && !dash.booksBalanced">⚠ Your books are out of balance. Please contact support.</p>
 
-      <div class="card narrow">
+      <div class="card narrow" v-if="can('post')">
         <h2>Record a transaction</h2>
         <div class="seg">
           <button v-for="k in ['in','out','transfer']" :class="{ active: quick.kind === k }" @click="quick.kind = k" type="button">
@@ -83,7 +139,7 @@
     <section v-if="tab === 'journal'">
       <div class="row">
         <h1>Transactions</h1>
-        <button @click="showJE = !showJE">{{ showJE ? 'Close' : 'Advanced journal entry' }}</button>
+        <button v-if="can('post')" @click="showJE = !showJE">{{ showJE ? 'Close' : 'Advanced journal entry' }}</button>
       </div>
       <div class="card" v-if="showJE">
         <h2>Journal entry</h2>
@@ -122,7 +178,7 @@
               <template v-if="i === 0">
                 <span class="muted" v-if="e.reversedByNumber">reversed by #{{ e.reversedByNumber }}</span>
                 <span class="muted" v-else-if="e.reversesEntryId">reversal</span>
-                <button v-else class="link" @click="reverse(e)">reverse</button>
+                <button v-else-if="can('post') && e.source !== 'payroll'" class="link" @click="reverse(e)">reverse</button>
               </template>
             </td>
           </tr>
@@ -218,7 +274,7 @@
 
     <!-- ACCOUNTS -->
     <section v-if="tab === 'accounts'">
-      <div class="row"><h1>Chart of accounts</h1><button @click="showNewAcct = !showNewAcct">{{ showNewAcct ? 'Close' : 'Add account' }}</button></div>
+      <div class="row"><h1>Chart of accounts</h1><button v-if="can('accounts')" @click="showNewAcct = !showNewAcct">{{ showNewAcct ? 'Close' : 'Add account' }}</button></div>
       <form class="card narrow" v-if="showNewAcct" @submit.prevent="createAccount">
         <label>Number <input v-model.trim="newAcct.code" required placeholder="e.g. 6450"></label>
         <label>Name <input v-model.trim="newAcct.name" required></label>
@@ -254,7 +310,7 @@
     <!-- PAYROLL -->
     <section v-if="tab === 'payroll'">
       <p class="banner">Payroll is in <strong>calculate-only</strong> mode: we compute paychecks and record them in your books, but you (or your accountant) make the tax deposits and filings. Tax tables are awaiting Professional Review Board certification.</p>
-      <div class="row"><h1>Employees</h1><button @click="showNewEmp = !showNewEmp">{{ showNewEmp ? 'Close' : 'Add employee' }}</button></div>
+      <div class="row"><h1>Employees</h1><button v-if="can('payroll')" @click="showNewEmp = !showNewEmp">{{ showNewEmp ? 'Close' : 'Add employee' }}</button></div>
       <form class="card" v-if="showNewEmp" @submit.prevent="createEmployee">
         <div class="grid2">
           <label>First name <input v-model.trim="newEmp.firstName" required></label>
@@ -269,6 +325,7 @@
             <select v-model="newEmp.payType"><option value="hourly">Hourly</option><option value="salary">Salary</option></select>
           </label>
           <label>{{ newEmp.payType === 'hourly' ? 'Hourly rate' : 'Salary per paycheck' }} <input v-model.trim="newEmp.payRate" inputmode="decimal" required></label>
+          <label>Social Security number (stored encrypted) <input v-model.trim="newEmp.ssn" inputmode="numeric" autocomplete="off" placeholder="123-45-6789"></label>
         </div>
         <h3>Federal W-4</h3>
         <div class="grid2">
@@ -294,7 +351,7 @@
         </template>
         <template v-if="newEmp.workState === 'CO'">
           <h3>Colorado DR 0004</h3>
-          <label>Annual withholding allowance (line 2) — leave blank if no DR 0004 <input v-model.trim="newEmp.co.annualAllowance" inputmode="decimal"></label>
+            <label>Annual withholding allowance (line 2) — leave blank if no DR 0004 <input v-model.trim="newEmp.co.annualAllowance" inputmode="decimal"></label>
         </template>
         <template v-if="newEmp.workState === 'DC'">
           <h3>DC D-4</h3>
@@ -308,9 +365,9 @@
 
       <table class="data">
         <thead><tr><th>Name</th><th>State</th><th>Pay</th><th></th></tr></thead>
-        <tr v-for="e in employees"><td>{{ e.firstName }} {{ e.lastName }}</td><td>{{ e.workState }}</td>
+        <tr v-for="e in employees"><td>{{ e.firstName }} {{ e.lastName }}<span class="muted" v-if="e.ssnLast4"> · SSN •••-••-{{ e.ssnLast4 }}</span></td><td>{{ e.workState }}</td>
           <td>{{ money(e.payRateCents) }}{{ e.payType === 'hourly' ? '/hr' : '/check' }} · {{ e.payFrequency }}</td>
-          <td><button class="link" @click="startPaycheck(e)">Run paycheck</button></td></tr>
+          <td><button v-if="can('payroll')" class="link" @click="startPaycheck(e)">Run paycheck</button></td></tr>
       </table>
 
       <template v-if="paychecks.length">
@@ -320,7 +377,7 @@
           <tr v-for="p in paychecks.slice(0, 20)">
             <td>{{ p.payDate }}</td><td>{{ p.employee }}</td><td class="num">{{ money(p.grossCents) }}</td><td class="num">{{ money(p.netPayCents) }}</td>
             <td><span class="muted" v-if="p.voidsPaycheckId">void record</span><span class="muted" v-else-if="p.voided">voided</span>
-              <button v-else class="link" @click="voidPaycheck(p)">void</button></td>
+              <button v-else-if="can('payroll')" class="link" @click="voidPaycheck(p)">void</button></td>
           </tr>
         </table>
       </template>
@@ -366,23 +423,44 @@
     <!-- SETTINGS -->
     <section v-if="tab === 'settings'">
       <div class="card narrow">
+        <h2>People with access</h2>
+        <table class="data">
+          <tr v-for="m in members"><td>{{ m.name }}<br><span class="muted">{{ m.email }}</span></td><td>{{ roleLabels[m.role] }}</td>
+            <td><button v-if="can('admin') && m.id !== auth.user.id" class="link" @click="removeMember(m)">remove</button></td></tr>
+        </table>
+        <form v-if="can('admin')" @submit.prevent="addMember">
+          <h3>Add someone</h3>
+          <p class="hint">They need to create a zAccountant account first.</p>
+          <label>Their email <input type="email" v-model.trim="newMember.email" required></label>
+          <label>Role
+            <select v-model="newMember.role">
+              <option value="accountant">Accountant — everything except settings and people</option>
+              <option value="bookkeeper">Bookkeeper — record transactions, see reports</option>
+              <option value="viewer">Viewer — see reports only</option>
+              <option value="owner">Owner — full control</option>
+            </select>
+          </label>
+          <button class="primary">Add</button>
+        </form>
+      </div>
+      <div class="card narrow" v-if="can('close')">
         <h2>Close the books</h2>
         <p class="hint">After you close a period, nobody can add or change transactions dated on or before that day.
           Currently closed through: <strong>{{ company.locked_through || 'not closed' }}</strong></p>
         <form @submit.prevent="lockBooks"><label>Close through <input type="date" v-model="lockDate" required></label><button class="primary">Close books</button></form>
-        <button v-if="company.locked_through" class="link" @click="reopenBooks">Reopen closed periods…</button>
+        <button v-if="company.locked_through && company.role === 'owner'" class="link" @click="reopenBooks">Reopen closed periods…</button>
       </div>
-      <div class="card narrow">
+      <div class="card narrow" v-if="can('admin')">
         <h2>State unemployment rate</h2>
         <p class="hint">Your state assigns this rate each year (it's on your rate notice). Current: {{ company.sui_rate_pct ? company.sui_rate_pct + '%' : 'not set (using new-employer rate)' }}</p>
         <form @submit.prevent="saveSui"><label>Rate (%) <input v-model.trim="suiRate" inputmode="decimal" placeholder="2.7" required></label><button class="primary">Save</button></form>
       </div>
-      <div class="card narrow" v-if="company.home_state === 'CO' || employees.some(e => e.workState === 'CO')">
+      <div class="card narrow" v-if="can('admin') && (company.home_state === 'CO' || employees.some(e => e.workState === 'CO'))">
         <h2>Colorado FAMLI employer size</h2>
         <p class="hint">Employers with fewer than 10 employees don't pay the employer half of FAMLI. Enter the count you reported to FAMLI for this year. Current: {{ company.famli_headcount ?? 'not set (employer share is charged)' }}</p>
         <form @submit.prevent="saveFamli"><label>Employees <input type="number" min="0" v-model.number="famliCount" required></label><button class="primary">Save</button></form>
       </div>
-      <div class="card narrow">
+      <div class="card narrow" v-if="can('audit')">
         <h2>Audit trail</h2>
         <p class="hint">Every change is recorded in a tamper-evident log. Check that nothing has been altered:</p>
         <button @click="verifyAudit">Verify audit trail</button>
@@ -390,6 +468,7 @@
       </div>
       <button class="link" @click="tab = 'new-company'">+ Add another company</button>
     </section>
+    </template>
     </template>
   </main>
 </div>

@@ -5,14 +5,29 @@ import { validateEntry, isIsoDate, LedgerError } from '../core/ledger.js';
 import { toCents } from '../core/money.js';
 import { insertEntry, getCompany } from './ledgerService.js';
 import { appendAudit } from './audit.js';
+import { encryptField } from '../security/crypto.js';
 
 const EMP_COLS = `id, first_name AS "firstName", last_name AS "lastName", work_state AS "workState",
   pay_frequency AS "payFrequency", pay_type AS "payType", pay_rate_cents AS "payRateCents",
-  w4, state_elections AS "stateElections", active`;
+  w4, state_elections AS "stateElections", active, ssn_last4 AS "ssnLast4"`;
+
+/** Validate a Social Security number (format and IRS/SSA never-issued ranges). Returns 9 digits or throws. */
+export function cleanSsn(ssn) {
+  const d = String(ssn).replace(/[\s-]/g, '');
+  if (!/^\d{9}$/.test(d)) throw new LedgerError('Employee is not valid', ['SSN must be 9 digits']);
+  const area = d.slice(0, 3), group = d.slice(3, 5), serial = d.slice(5);
+  if (area === '000' || area === '666' || area[0] === '9' || group === '00' || serial === '0000') {
+    throw new LedgerError('Employee is not valid', ['that is not a valid SSN']);
+  }
+  return d;
+}
 
 export async function createEmployee(pool, companyId, e, { actor = null } = {}) {
   const errors = [];
-  if (!e.firstName?.trim() || !e.lastName?.trim()) errors.push('first and last name are required');
+  const okName = (n) => typeof n === 'string' && n.trim().length > 0 && n.length <= 100;
+  if (!okName(e.firstName) || !okName(e.lastName)) errors.push('first and last name are required (up to 100 characters)');
+  if (e.w4 != null && (typeof e.w4 !== 'object' || Array.isArray(e.w4))) errors.push('w4 must be an object');
+  if (e.stateElections != null && (typeof e.stateElections !== 'object' || Array.isArray(e.stateElections))) errors.push('stateElections must be an object');
   if (!SUPPORTED_STATES.includes(e.workState)) errors.push('work state must be TX, CO, CA or DC');
   if (!['weekly', 'biweekly', 'semimonthly', 'monthly'].includes(e.payFrequency)) errors.push('invalid pay frequency');
   if (!['salary', 'hourly'].includes(e.payType)) errors.push('pay type must be salary or hourly');
@@ -20,13 +35,16 @@ export async function createEmployee(pool, companyId, e, { actor = null } = {}) 
   try { rate = toCents(e.payRate); } catch (err) { errors.push(`pay rate: ${err.message}`); }
   if (rate != null && (rate <= 0 || rate > 100_000_000)) errors.push('pay rate must be between $0.01 and $1,000,000');
   if (errors.length) throw new LedgerError('Employee is not valid', errors);
+  // SSN is encrypted with a key held outside the database; only the last 4 digits are stored readable.
+  const ssn = e.ssn ? cleanSsn(e.ssn) : null;
   return withTransaction(pool, async (c) => {
     await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
     const { rows: [emp] } = await c.query(
-      `INSERT INTO employees (company_id, first_name, last_name, work_state, pay_frequency, pay_type, pay_rate_cents, w4, state_elections)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING ${EMP_COLS}`,
+      `INSERT INTO employees (company_id, first_name, last_name, work_state, pay_frequency, pay_type, pay_rate_cents, w4, state_elections, ssn_enc, ssn_last4)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${EMP_COLS}`,
       [companyId, e.firstName.trim(), e.lastName.trim(), e.workState, e.payFrequency, e.payType, rate,
-        JSON.stringify(e.w4 ?? {}), JSON.stringify(e.stateElections ?? {})],
+        JSON.stringify(e.w4 ?? {}), JSON.stringify(e.stateElections ?? {}),
+        ssn ? encryptField(ssn, `company:${companyId}`) : null, ssn ? ssn.slice(5) : null],
     );
     await appendAudit(c, companyId, { action: 'create', entity: 'employee', entityId: emp.id, actor, payload: { name: `${emp.firstName} ${emp.lastName}`, workState: emp.workState } });
     return emp;

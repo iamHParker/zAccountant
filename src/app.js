@@ -1,31 +1,84 @@
 // HTTP API (Express). ℹ️ A "route" is like a subroutine the browser calls by URL:
 //   GET  = read something, POST = create something, PATCH = change a setting.
 // All money in requests may be decimal strings ("1234.56"); all money in responses is integer cents.
+//
+// Every /api route except sign-in requires: a valid session cookie, a completed two-factor check,
+// and (for company routes) a membership whose role allows the action. Each request then runs in one
+// database transaction tagged with the user and company, which row-level security enforces.
 import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { LedgerError } from './core/ledger.js';
 import { PayrollError } from './payroll/engine.js';
+import { withScope } from './db/pool.js';
 import * as ledger from './services/ledgerService.js';
 import * as reports from './services/reportService.js';
 import * as payroll from './services/payrollService.js';
+import * as auth from './services/authService.js';
+import { AuthError } from './services/authService.js';
 import { verifyChain } from './services/audit.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
+const q = (v) => (typeof v === 'string' && v !== '' ? v : null); // ignore repeated (?a=1&a=2) or empty params
+
+/** What each role may do. Reading is allowed for every member. */
+export const PERMISSIONS = Object.freeze({
+  read: ['owner', 'accountant', 'bookkeeper', 'viewer'],
+  post: ['owner', 'accountant', 'bookkeeper'],            // record & reverse transactions
+  accounts: ['owner', 'accountant'],                      // change the chart of accounts
+  close: ['owner', 'accountant'],                         // close periods (reopening: owner + fresh 2FA code)
+  payroll: ['owner', 'accountant'],                       // employees, paychecks
+  audit: ['owner', 'accountant'],
+  admin: ['owner'],                                       // settings, members
+});
 
 // Host names this server answers to. Anything else is refused, which blocks "DNS rebinding"
-// (a malicious web page tricking the browser into talking to this local server).
+// (a malicious web page tricking the browser into talking to this server).
 const allowedHosts = () => new Set((process.env.ALLOWED_HOSTS ?? 'localhost,127.0.0.1').split(',').map((h) => h.trim().toLowerCase()));
+
+const secureCookies = () => process.env.NODE_ENV === 'production';
+const COOKIE = () => (secureCookies() ? '__Host-zacc_session' : 'zacc_session');
+
+function readCookie(req, name) {
+  for (const part of (req.headers.cookie ?? '').split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(v.join('='));
+  }
+  return null;
+}
+function setSessionCookie(res, token) {
+  const attrs = ['Path=/', 'HttpOnly', 'SameSite=Strict', `Max-Age=${12 * 3600}`];
+  if (secureCookies()) attrs.push('Secure');
+  res.append('Set-Cookie', `${COOKIE()}=${encodeURIComponent(token)}; ${attrs.join('; ')}`);
+}
+function clearSessionCookie(res) {
+  res.append('Set-Cookie', `${COOKIE()}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secureCookies() ? '; Secure' : ''}`);
+}
+
+/** Tiny in-memory rate limiter (per IP + bucket). A shared store (Redis) replaces it when we run >1 server. */
+function rateLimiter({ windowMs, max }) {
+  const hits = new Map();
+  return (req, res, next) => {
+    const key = req.ip;
+    const now = Date.now();
+    const h = hits.get(key);
+    if (!h || now - h.start > windowMs) hits.set(key, { start: now, n: 1 });
+    else if (++h.n > max) return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
+    if (hits.size > 10_000) for (const [k, v] of hits) if (now - v.start > windowMs) hits.delete(k);
+    return next();
+  };
+}
 
 export function createApp(pool) {
   const app = express();
   const hosts = allowedHosts();
   app.disable('x-powered-by');
+  if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
   app.use((req, res, next) => {
     const host = (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
     if (!hosts.has(host)) return res.status(421).json({ error: 'Unknown host' });
-    // Cross-site request forgery guard: anything that changes data must be JSON and, if the browser
-    // says where it came from (Origin), it must come from this same site.
+    // Cross-site request forgery guard (with SameSite=Strict cookies): anything that changes data must
+    // be JSON and, if the browser says where it came from (Origin), it must come from this same site.
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.path.startsWith('/api/')) {
       if (!req.is('application/json')) return res.status(415).json({ error: 'Send data as application/json' });
       const origin = req.headers.origin;
@@ -47,6 +100,7 @@ export function createApp(pool) {
       // it goes away when the UI gets a build step (Sprint 7).
       'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     });
+    if (secureCookies()) res.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     next();
   });
@@ -56,70 +110,158 @@ export function createApp(pool) {
     try { await pool.query('SELECT 1'); res.json({ ok: true }); } catch { res.status(503).json({ ok: false }); }
   });
 
-  const api = express.Router();
-  api.param('companyId', async (req, res, next, id) => {
-    if (!UUID.test(id)) return res.status(404).json({ error: 'Company not found' });
-    const { rowCount } = await pool.query('SELECT 1 FROM companies WHERE id = $1', [id]);
-    return rowCount ? next() : res.status(404).json({ error: 'Company not found' });
+  // ------------------------------------------------------------------ Sign-in (no session needed)
+  const authApi = express.Router();
+  authApi.use(rateLimiter({ windowMs: 5 * 60_000, max: Number(process.env.AUTH_RATE_LIMIT ?? 30) }));
+  const session = async (req) => auth.getSession(pool, readCookie(req, COOKIE()));
+
+  authApi.post('/signup', async (req, res) => {
+    const { email, password, name } = req.body ?? {};
+    const r = await auth.signup(pool, { email, password, name });
+    setSessionCookie(res, r.token);
+    res.status(201).json({ user: r.user, next: r.next });
   });
-  api.param('paycheckId', (req, res, next, id) => (UUID.test(id) ? next() : res.status(404).json({ error: 'Paycheck not found' })));
-  api.param('accountId', (req, res, next, id) => (UUID.test(id) ? next() : res.status(404).json({ error: 'Account not found' })));
-  api.param('entryId', (req, res, next, id) => (UUID.test(id) ? next() : res.status(404).json({ error: 'Entry not found' })));
-  api.param('employeeId', (req, res, next, id) => (UUID.test(id) ? next() : res.status(404).json({ error: 'Employee not found' })));
+  authApi.post('/login', async (req, res) => {
+    const { email, password } = req.body ?? {};
+    const r = await auth.login(pool, { email, password });
+    setSessionCookie(res, r.token);
+    res.json({ user: r.user, next: r.next });
+  });
+  authApi.post('/logout', async (req, res) => {
+    await auth.logout(pool, readCookie(req, COOKIE()));
+    clearSessionCookie(res);
+    res.json({ ok: true });
+  });
+  authApi.get('/me', async (req, res) => {
+    const s = await session(req);
+    if (!s) return res.status(401).json({ error: 'Not signed in' });
+    const next = s.session.mfa_passed ? null : (s.user.mfaEnabled ? 'mfa_verify' : 'mfa_setup');
+    res.json({ user: s.user, next });
+  });
+  authApi.post('/mfa/setup', async (req, res) => {
+    const s = await session(req);
+    if (!s) return res.status(401).json({ error: 'Not signed in' });
+    res.json(await auth.mfaSetup(pool, s.user.id));
+  });
+  authApi.post('/mfa/enable', async (req, res) => {
+    const s = await session(req);
+    if (!s) return res.status(401).json({ error: 'Not signed in' });
+    res.json(await auth.mfaEnable(pool, s.user.id, s.session.token_hash, req.body?.code));
+  });
+  authApi.post('/mfa/verify', async (req, res) => {
+    const s = await session(req);
+    if (!s) return res.status(401).json({ error: 'Not signed in' });
+    const r = await auth.mfaVerify(pool, s.user.id, s.session.token_hash, { code: req.body?.code, recoveryCode: req.body?.recoveryCode });
+    setSessionCookie(res, r.token);
+    res.json({ ok: true });
+  });
+  app.use('/api/auth', authApi);
+
+  // ------------------------------------------------------------------ Everything else needs a full sign-in
+  const api = express.Router();
+  api.use(async (req, res, next) => {
+    const s = await session(req);
+    if (!s) return res.status(401).json({ error: 'Please sign in' });
+    if (!s.session.mfa_passed) return res.status(401).json({ error: 'Enter your two-factor code to continue', next: s.user.mfaEnabled ? 'mfa_verify' : 'mfa_setup' });
+    req.user = s.user;
+    next();
+  });
+
+  /**
+   * Wrap a handler: checks the role for company routes, runs it in a request transaction scoped to the
+   * user and company, commits, then responds. handler({ db, req, companyId, role, actor }) returns the body.
+   */
+  const route = (permission, handler, status = 200) => async (req, res) => {
+    const companyId = req.params.companyId ?? null;
+    if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId']) {
+      if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
+    }
+    const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
+      let role = null;
+      if (companyId) {
+        role = await auth.getRole(db, req.user.id, companyId);
+        if (!role) throw new AuthError('Company not found', 404); // don't reveal that other companies exist
+        if (!PERMISSIONS[permission].includes(role)) throw new AuthError(`Your role (${role}) can't do that. Ask the company owner.`, 403);
+      }
+      return handler({ db, req, companyId, role, actor: req.user.email });
+    });
+    res.status(status).json(body);
+  };
 
   // Companies
-  api.get('/companies', async (req, res) => res.json(await ledger.listCompanies(pool)));
-  api.post('/companies', async (req, res) => {
+  api.get('/companies', route(null, ({ db, req }) => ledger.listCompanies(db, { userId: req.user.id })));
+  api.post('/companies', route(null, ({ db, req, actor }) => {
     const { name, homeState, fiscalYearStartMonth } = req.body ?? {};
-    res.status(201).json(await ledger.createCompany(pool, { name, homeState, fiscalYearStartMonth }));
-  });
-  api.get('/companies/:companyId', async (req, res) => res.json(await ledger.getCompany(pool, req.params.companyId)));
-  api.patch('/companies/:companyId/settings', async (req, res) => {
+    return ledger.createCompany(db, { name, homeState, fiscalYearStartMonth, actor, ownerUserId: req.user.id });
+  }, 201));
+  api.get('/companies/:companyId', route('read', async ({ db, companyId, role }) => ({ ...(await ledger.getCompany(db, companyId)), role })));
+  api.patch('/companies/:companyId/settings', route('admin', ({ db, req, companyId, actor }) => {
     const { suiRatePct, calculateOnlyPayroll, famliHeadcount } = req.body ?? {};
-    res.json(await ledger.updateCompanySettings(pool, req.params.companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount }));
-  });
-  api.post('/companies/:companyId/lock', async (req, res) =>
-    res.json(await ledger.lockPeriod(pool, req.params.companyId, { through: req.body?.through ?? null, reason: req.body?.reason ?? null })));
+    return ledger.updateCompanySettings(db, companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount, actor });
+  }));
+  api.post('/companies/:companyId/lock', route('close', async ({ db, req, companyId, role, actor }) => {
+    const through = req.body?.through ?? null;
+    const co = await ledger.getCompany(db, companyId);
+    const reopening = co.locked_through && (through === null || through < co.locked_through);
+    if (reopening) {
+      // Reopening closed books: owner only, with a fresh two-factor code.
+      if (role !== 'owner') throw new AuthError('Only the company owner can reopen closed books', 403);
+      await auth.checkSecondFactor(db, req.user.id, { code: req.body?.mfaCode });
+    }
+    return ledger.lockPeriod(db, companyId, { through, reason: req.body?.reason ?? null, actor });
+  }));
+
+  // Members
+  api.get('/companies/:companyId/members', route('read', ({ db, companyId }) => auth.listMembers(db, companyId)));
+  api.post('/companies/:companyId/members', route('admin', async ({ db, req, companyId, actor }) => {
+    const m = await auth.addMember(db, companyId, { email: req.body?.email, role: req.body?.role });
+    await ledger.auditOnly(db, companyId, { action: 'set_member', entity: 'membership', entityId: m.id, actor, payload: { email: m.email, role: m.role } });
+    return m;
+  }, 201));
+  api.delete('/companies/:companyId/members/:userId', route('admin', async ({ db, req, companyId, actor }) => {
+    await auth.removeMember(db, companyId, req.params.userId);
+    await ledger.auditOnly(db, companyId, { action: 'remove_member', entity: 'membership', entityId: req.params.userId, actor, payload: {} });
+    return { ok: true };
+  }));
 
   // Accounts
-  api.get('/companies/:companyId/accounts', async (req, res) => res.json(await ledger.listAccounts(pool, req.params.companyId)));
-  api.post('/companies/:companyId/accounts', async (req, res) => {
+  api.get('/companies/:companyId/accounts', route('read', ({ db, companyId }) => ledger.listAccounts(db, companyId)));
+  api.post('/companies/:companyId/accounts', route('accounts', ({ db, req, companyId, actor }) => {
     const { code, name, type, subtype } = req.body ?? {};
-    res.status(201).json(await ledger.createAccount(pool, req.params.companyId, { code, name, type, subtype }));
-  });
-  api.get('/companies/:companyId/accounts/:accountId/register', async (req, res) =>
-    res.json(await reports.getAccountRegister(pool, req.params.companyId, req.params.accountId, { from: q(req.query.from), to: q(req.query.to) })));
+    return ledger.createAccount(db, companyId, { code, name, type, subtype, actor });
+  }, 201));
+  api.get('/companies/:companyId/accounts/:accountId/register', route('read', ({ db, req, companyId }) =>
+    reports.getAccountRegister(db, companyId, req.params.accountId, { from: q(req.query.from), to: q(req.query.to) })));
 
   // Journal
-  api.get('/companies/:companyId/entries', async (req, res) =>
-    res.json(await ledger.listEntries(pool, req.params.companyId, { from: q(req.query.from), to: q(req.query.to), limit: q(req.query.limit) })));
-  api.post('/companies/:companyId/entries', async (req, res) => res.status(201).json(await ledger.postEntry(pool, req.params.companyId, req.body ?? {})));
-  api.post('/companies/:companyId/entries/simple', async (req, res) => res.status(201).json(await ledger.postSimple(pool, req.params.companyId, req.body ?? {})));
-  api.post('/companies/:companyId/entries/:entryId/reverse', async (req, res) =>
-    res.status(201).json(await ledger.reverseEntry(pool, req.params.companyId, req.params.entryId, { date: req.body?.date, memo: req.body?.memo })));
+  api.get('/companies/:companyId/entries', route('read', ({ db, req, companyId }) =>
+    ledger.listEntries(db, companyId, { from: q(req.query.from), to: q(req.query.to), limit: q(req.query.limit) })));
+  api.post('/companies/:companyId/entries', route('post', ({ db, req, companyId, actor }) => ledger.postEntry(db, companyId, req.body ?? {}, { actor }), 201));
+  api.post('/companies/:companyId/entries/simple', route('post', ({ db, req, companyId, actor }) => ledger.postSimple(db, companyId, req.body ?? {}, { actor }), 201));
+  api.post('/companies/:companyId/entries/:entryId/reverse', route('post', ({ db, req, companyId, actor }) =>
+    ledger.reverseEntry(db, companyId, req.params.entryId, { date: req.body?.date, memo: req.body?.memo, actor }), 201));
 
   // Reports
-  const id = (req) => req.params.companyId;
-  const q = (v) => (typeof v === 'string' && v !== '' ? v : null); // ignore repeated (?a=1&a=2) or empty params
-  api.get('/companies/:companyId/reports/dashboard', async (req, res) => res.json(await reports.getDashboard(pool, id(req), { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/trial-balance', async (req, res) => res.json(await reports.getTrialBalance(pool, id(req), { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/balance-sheet', async (req, res) => res.json(await reports.getBalanceSheet(pool, id(req), { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/income-statement', async (req, res) => res.json(await reports.getIncomeStatement(pool, id(req), { from: q(req.query.from), to: q(req.query.to) })));
-  api.get('/companies/:companyId/reports/cash-flow', async (req, res) => res.json(await reports.getCashFlow(pool, id(req), { from: q(req.query.from), to: q(req.query.to) })));
-  api.get('/companies/:companyId/audit/verify', async (req, res) => res.json(await verifyChain(pool, id(req))));
+  api.get('/companies/:companyId/reports/dashboard', route('read', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  api.get('/companies/:companyId/reports/trial-balance', route('read', ({ db, req, companyId }) => reports.getTrialBalance(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  api.get('/companies/:companyId/reports/balance-sheet', route('read', ({ db, req, companyId }) => reports.getBalanceSheet(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  api.get('/companies/:companyId/reports/income-statement', route('read', ({ db, req, companyId }) => reports.getIncomeStatement(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
+  api.get('/companies/:companyId/reports/cash-flow', route('read', ({ db, req, companyId }) => reports.getCashFlow(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
+  api.get('/companies/:companyId/audit/verify', route('audit', ({ db, companyId }) => verifyChain(db, companyId)));
 
   // Payroll
-  api.get('/companies/:companyId/employees', async (req, res) => res.json(await payroll.listEmployees(pool, id(req))));
-  api.post('/companies/:companyId/employees', async (req, res) => res.status(201).json(await payroll.createEmployee(pool, id(req), req.body ?? {})));
-  api.post('/companies/:companyId/employees/:employeeId/paychecks/preview', async (req, res) =>
-    res.json(await payroll.previewPaycheck(pool, id(req), req.params.employeeId, req.body ?? {})));
-  api.post('/companies/:companyId/employees/:employeeId/paychecks', async (req, res) =>
-    res.status(201).json(await payroll.postPaycheck(pool, id(req), req.params.employeeId,
-      { ...req.body, idempotencyKey: req.get('Idempotency-Key') ?? req.body?.idempotencyKey })));
-  api.post('/companies/:companyId/paychecks/:paycheckId/void', async (req, res) =>
-    res.status(201).json(await payroll.voidPaycheck(pool, id(req), req.params.paycheckId, { date: req.body?.date, reason: req.body?.reason })));
-  api.get('/companies/:companyId/paychecks', async (req, res) =>
-    res.json(await payroll.listPaychecks(pool, id(req), { year: req.query.year ? Number(req.query.year) : undefined })));
+  api.get('/companies/:companyId/employees', route('read', ({ db, companyId }) => payroll.listEmployees(db, companyId)));
+  api.post('/companies/:companyId/employees', route('payroll', ({ db, req, companyId, actor }) => payroll.createEmployee(db, companyId, req.body ?? {}, { actor }), 201));
+  api.post('/companies/:companyId/employees/:employeeId/paychecks/preview', route('payroll', ({ db, req, companyId }) =>
+    payroll.previewPaycheck(db, companyId, req.params.employeeId, req.body ?? {})));
+  api.post('/companies/:companyId/employees/:employeeId/paychecks', route('payroll', ({ db, req, companyId, actor }) =>
+    payroll.postPaycheck(db, companyId, req.params.employeeId,
+      { ...req.body, idempotencyKey: req.get('Idempotency-Key') ?? req.body?.idempotencyKey }, { actor }), 201));
+  api.post('/companies/:companyId/paychecks/:paycheckId/void', route('payroll', ({ db, req, companyId, actor }) =>
+    payroll.voidPaycheck(db, companyId, req.params.paycheckId, { date: req.body?.date, reason: req.body?.reason, actor }), 201));
+  api.get('/companies/:companyId/paychecks', route('read', ({ db, req, companyId }) =>
+    payroll.listPaychecks(db, companyId, { year: req.query.year ? Number(req.query.year) : undefined })));
 
   app.use('/api', api);
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
@@ -129,9 +271,10 @@ export function createApp(pool) {
   app.get('/vendor/vue.js', (req, res) => res.type('text/javascript').sendFile(vuePath));
   app.use(express.static(fileURLToPath(new URL('../public/', import.meta.url))));
 
-  // Errors -> JSON. User mistakes are 400 with a readable message; anything else is 500 without internals.
+  // Errors -> JSON. User mistakes are 4xx with a readable message; anything else is 500 without internals.
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
+    if (err instanceof AuthError) return res.status(err.status).json({ error: err.message });
     if (err instanceof LedgerError || err instanceof PayrollError) {
       const status = /not found/i.test(err.message) ? 404 : 400;
       return res.status(status).json({ error: err.message, details: err.details ?? [] });
@@ -150,11 +293,12 @@ export function createApp(pool) {
       22021: 'Text contains characters that are not allowed',
       22007: 'One of the dates is not valid',
       22008: 'One of the dates is not valid',
-      42501: 'Posted history cannot be changed; post a reversing entry instead',
+      42501: 'That change is not allowed',
     };
     if (pgMessages[err.code]) return res.status(400).json({ error: pgMessages[err.code] });
-    console.error(JSON.stringify({ level: 'error', msg: err.message, path: req.path }));
+    console.error(JSON.stringify({ level: 'error', msg: err.message, code: err.code, path: req.path }));
     res.status(500).json({ error: 'Something went wrong on our side. Nothing was saved.' });
   });
   return app;
 }
+
