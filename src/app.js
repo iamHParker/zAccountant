@@ -27,6 +27,8 @@ import { createMetrics, bearerMatches } from './metrics.js';
 import * as feedback from './services/feedbackService.js';
 import { platformRole, appVersion } from './core/platform.js';
 import { streamBackup } from './jobs/backup.js';
+import * as plans from './services/planService.js';
+import { featureForPath, FEATURES } from './core/plans.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -219,6 +221,11 @@ export function createApp(pool, { log } = {}) {
           throw new AuthError(`Your role (${access.roleName}) can't do that. Ask the company owner.`, 403);
         }
       }
+      // Plan gate: payroll and timesheets are features a company's plan switches on (src/core/plans.js).
+      const feature = companyId ? featureForPath(req.path.replace(/^\/companies\/[^/]+/, '')) : null;
+      if (feature && !(await plans.getCompanyPlan(db, companyId)).features.includes(feature)) {
+        throw new AuthError(`${FEATURES[feature].split(' (')[0]} isn't in this company's plan. Ask zAccountant to add it.`, 402);
+      }
       const can = (p) => Boolean(access?.permissions.has(p));
       const viewer = { userId: req.user.id, can, departmentId: access?.departmentId ?? null };
       return handler({ db, req, companyId, role: access?.role ?? null, access, can, viewer, actor: req.user.email });
@@ -285,6 +292,16 @@ export function createApp(pool, { log } = {}) {
   api.get('/developer/reports/:reportId/picture', dev(async ({ db, req }) => ({ [FILE]: await feedback.getPicture(db, req.params.reportId) })));
   api.patch('/developer/reports/:reportId', dev(({ db, req }) => feedback.updateReport(db, req.params.reportId, req.body ?? {}, { actor: req.user.email })));
 
+  // ------------------------------------------------------------------ Admin dashboard (plans; platform admins and developers)
+  const admin = (handler) => async (req, res) => {
+    if (!['admin', 'developer'].includes(req.user.platformRole)) return res.status(403).json({ error: 'The Admin dashboard is for zAccountant admins.' });
+    if (req.params.targetId !== undefined && !UUID.test(req.params.targetId)) return res.status(404).json({ error: 'Company not found' });
+    res.json(await withScope(pool, { userId: req.user.id, platformRole: req.user.platformRole }, (db) => handler({ db, req })));
+  };
+  api.get('/admin/companies', admin(({ db }) => plans.listCompanies(db)));
+  api.get('/admin/plan-changes', admin(({ db }) => plans.listPlanChanges(db)));
+  api.put('/admin/companies/:targetId/plan', admin(({ db, req }) => plans.setCompanyPlan(db, req.params.targetId, req.body ?? {}, { actor: req.user.email })));
+
   // Companies
   api.get('/companies', route(null, ({ db, req }) => ledger.listCompanies(db, { userId: req.user.id })));
   api.post('/companies', route(null, ({ db, req, actor }) => {
@@ -293,6 +310,7 @@ export function createApp(pool, { log } = {}) {
   }, 201));
   api.get('/companies/:companyId', route('member', async ({ db, companyId, access }) => ({
     ...(await ledger.getCompany(db, companyId)), role: access.role, roleName: access.roleName, permissions: [...access.permissions], departmentId: access.departmentId,
+    ...(await plans.getCompanyPlan(db, companyId)),
   })));
   api.patch('/companies/:companyId/settings', route('admin', ({ db, req, companyId, actor }) => {
     const { suiRatePct, calculateOnlyPayroll, famliHeadcount, futaCreditReduction } = req.body ?? {};

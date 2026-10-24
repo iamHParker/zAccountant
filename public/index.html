@@ -21,6 +21,7 @@
       <div class="who" v-if="auth.user">
         <button class="help-btn beta-btn" @click="openFeedback" title="Something wrong or confusing? Tell the zAccountant team">🐞 Beta feedback</button>
         <button v-if="company" class="help-btn" :class="{ active: tab === 'help' }" @click="openHelp" :title="tab === 'help' ? 'Back' : 'Help for this screen'" >? Help</button>
+        <button v-if="['admin', 'developer'].includes(auth.user.platformRole)" class="help-btn" :class="{ active: tab === 'admin' }" @click="openAdmin" :title="tab === 'admin' ? 'Back' : 'Admin dashboard: plans'">Admin</button>
         <button v-if="auth.user.platformRole === 'developer'" class="help-btn" :class="{ active: tab === 'developer' }" @click="openDeveloper" :title="tab === 'developer' ? 'Back' : 'Developer dashboard'">Developer</button>
         <span class="muted">{{ auth.user.name }}<template v-if="company"> · {{ company.roleName }}</template></span>
         <button class="link" @click="signOut">Sign out</button>
@@ -106,8 +107,64 @@
     </section>
 
     <template v-else>
+    <!-- ADMIN DASHBOARD (plans; platform admins and developers; the server checks every request) -->
+    <section v-if="tab === 'admin'">
+      <div class="row"><h1>Admin dashboard</h1><button @click="loadAdmin">Refresh</button></div>
+      <p class="hint">Payments are by hand for now: you bill customers yourself and set their plan here. Card payments (Stripe)
+        switch plans on their own once they go in, in December. The server refuses any feature a company's plan doesn't include.</p>
+      <template v-if="adm.data">
+        <div class="tiles">
+          <div class="tile" v-for="p in adm.data.plans"><div class="label">{{ p.name }} · {{ planPrice(p.monthlyCents) }}</div>
+            <div class="value">{{ adm.data.planCounts[p.key] || 0 }}</div><div class="muted small">{{ p.note }}</div></div>
+          <div class="tile" v-for="a in adm.data.addOns"><div class="label">Add-on: {{ a.name }} · {{ planPrice(a.monthlyCents) }}</div>
+            <div class="value">{{ adm.data.companies.filter(c => c.addOns.includes(a.key)).length }}</div><div class="muted small">{{ adm.data.features[a.features[0]] }}</div></div>
+        </div>
+
+        <div class="card" v-if="adm.edit">
+          <h2>Change plan: {{ adm.edit.name }}</h2>
+          <div class="grid2">
+            <label>Plan
+              <select v-model="adm.edit.plan"><option v-for="p in adm.data.plans" :value="p.key">{{ p.name }} ({{ planPrice(p.monthlyCents) }})</option></select></label>
+            <div><span class="label-like">Add-ons</span>
+              <label class="check" v-for="a in adm.data.addOns"><input type="checkbox" :value="a.key" v-model="adm.edit.addOns"> {{ a.name }} ({{ planPrice(a.monthlyCents) }})</label>
+              <p class="hint small" v-if="adm.edit.plan === 'beta'">Beta tester already includes everything.</p></div>
+          </div>
+          <label>Reason (goes in the change log and the company's audit trail)
+            <input v-model="adm.edit.reason" maxlength="500" placeholder="e.g. Paid by check for November"></label>
+          <button class="primary" @click="savePlan">Save plan</button> <button class="link" @click="adm.edit = null">Cancel</button>
+        </div>
+
+        <div class="card">
+          <div class="row"><h2>Companies ({{ adm.data.companies.length }})</h2>
+            <input class="search-small" type="search" v-model="adm.q" placeholder="Find a company or owner" aria-label="Find a company or owner"></div>
+          <div class="scroll-x">
+          <table class="data">
+            <thead><tr><th>Company</th><th>Owner</th><th>State</th><th class="num">People</th><th class="num">Employees</th><th>Last active</th><th>Plan</th><th></th></tr></thead>
+            <tr v-for="c in adm.data.companies.filter(c => !adm.q || (c.name + ' ' + c.owners).toLowerCase().includes(adm.q.toLowerCase()))">
+              <td>{{ c.name }}<br><span class="muted small">since {{ c.createdAt.slice(0, 10) }}</span></td>
+              <td class="small">{{ c.owners }}</td><td>{{ c.homeState }}</td><td class="num">{{ c.members }}</td><td class="num">{{ c.employees }}</td>
+              <td class="small">{{ c.lastActivity ? new Date(c.lastActivity).toLocaleDateString('en-US', { timeZone: 'America/Chicago' }) : '—' }}</td>
+              <td>{{ c.planName }}<span class="muted small" v-if="c.planIsDefault"> (default)</span><span v-if="c.addOns.length"> + {{ c.addOns.join(', ') }}</span></td>
+              <td><button class="link" @click="editPlan(c)">change</button></td>
+            </tr>
+          </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Plan changes</h2>
+          <p class="hint" v-if="!adm.changes.length">No changes yet. Every company is on the default plan.</p>
+          <table class="data small" v-else>
+            <thead><tr><th>When</th><th>Company</th><th>From</th><th>To</th><th>Reason</th><th>By</th></tr></thead>
+            <tr v-for="x in adm.changes"><td>{{ new Date(x.at).toLocaleString('en-US', { timeZone: 'America/Chicago', dateStyle: 'short', timeStyle: 'short' }) }}</td>
+              <td>{{ x.companyName }}</td><td>{{ x.from }}</td><td>{{ x.to }}</td><td>{{ x.reason }}</td><td>{{ x.by }}</td></tr>
+          </table>
+        </div>
+      </template>
+    </section>
+
     <!-- DEVELOPER DASHBOARD (platform developers only; the server checks every request) -->
-    <section v-if="tab === 'developer'">
+    <section v-else-if="tab === 'developer'">
       <div class="row"><h1>Developer dashboard</h1><button @click="loadDev">Refresh</button></div>
       <div class="tiles" v-if="dev.summary">
         <div class="tile"><div class="label">People signed up</div><div class="value">{{ dev.summary.counts.users }}</div></div>
@@ -697,7 +754,7 @@
     <section v-if="tab === 'reports'">
       <div class="row wrap">
         <div class="seg">
-          <button v-for="r in reportTypes.filter((r) => can(r.perm))" :class="{ active: report.type === r.id }" @click="report.type = r.id; loadReport()">{{ r.label }}</button>
+          <button v-for="r in reportTypes.filter((r) => can(r.perm) && (!r.feature || has(r.feature)))" :class="{ active: report.type === r.id }" @click="report.type = r.id; loadReport()">{{ r.label }}</button>
         </div>
         <label v-if="reportIsRange" class="inline">From <input type="date" v-model="report.from" @change="loadReport"></label>
         <label class="inline">{{ reportIsRange ? 'To' : 'As of' }} <input type="date" v-model="report.to" @change="loadReport"></label>

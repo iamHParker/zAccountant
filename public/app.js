@@ -88,6 +88,9 @@ const TAB_PERMS = {
   reports: ['view_books', 'payroll'], accounts: ['view_books'], payroll: ['view_books', 'payroll'], time: ['time_own', 'time_approve', 'time_all'],
 };
 
+// Tabs that need a feature of the company's plan (src/core/plans.js on the server).
+const TAB_FEATURE = { payroll: 'payroll', time: 'timesheets' };
+
 /** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
 function weekStartOf(iso) {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -125,6 +128,7 @@ createApp({
       help: { q: '', id: 'start', from: 'home' },
       version: '',
       fb: { open: false, note: '', picture: null, pictureSource: null, busy: false, error: '' },
+      adm: { from: 'home', data: null, changes: [], edit: null, q: '' },
       dev: { from: 'home', summary: null, status: 'new', list: null, report: null, text: '', note: '', copied: false },
       roles: { permissions: [], presets: [], custom: [] }, departments: [], newDept: '',
       roleEdit: null,
@@ -136,7 +140,7 @@ createApp({
       reportTypes: [
         { id: 'balance-sheet', label: 'Balance Sheet', perm: 'view_books' }, { id: 'income-statement', label: 'Profit & Loss', perm: 'view_books', range: true },
         { id: 'cash-flow', label: 'Cash Flow', perm: 'view_books', range: true }, { id: 'trial-balance', label: 'Trial Balance', perm: 'view_books' },
-        { id: 'payroll-register', label: 'Payroll Register', perm: 'payroll', range: true },
+        { id: 'payroll-register', label: 'Payroll Register', perm: 'payroll', feature: 'payroll', range: true },
       ],
       report: { type: 'balance-sheet', from: yearStart(), to: today(), compare: 'none', data: null },
       showNewAcct: false, newAcct: { code: '', name: '', type: 'expense', subtype: 'operating' }, register: null,
@@ -220,7 +224,7 @@ createApp({
     tab(t) {
       if (t === 'reports') this.loadReport();
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
-      if ((t === 'payroll' || t === 'settings') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
+      if ((t === 'payroll' || t === 'settings') && this.has('payroll') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
       if (t === 'settings') { this.editFutaCr(); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
@@ -245,7 +249,13 @@ createApp({
   methods: {
     money,
     can(perm) { return Boolean(this.company?.permissions?.includes(perm)); },
-    canTab(id) { const need = TAB_PERMS[id]; return !need || need.some((p) => this.can(p)); },
+    /** Features come from the company's plan (the server refuses the rest). */
+    has(feature) { return Boolean(this.company?.features?.includes(feature)); },
+    canTab(id) {
+      const need = TAB_PERMS[id];
+      if (TAB_FEATURE[id] && !this.has(TAB_FEATURE[id])) return false;
+      return !need || need.some((p) => this.can(p));
+    },
     async goAuth(screen) {
       this.auth.screen = screen; this.auth.code = '';
       if (screen === 'mfa_setup' && !this.auth.setup) {
@@ -369,6 +379,27 @@ createApp({
       } catch (e) { f.error = e.message; }
       f.busy = false;
     },
+    /** Admin dashboard: plans for every company (platform admins and developers; the server checks too). */
+    openAdmin() {
+      if (this.tab === 'admin') { this.tab = this.adm.from; return; }
+      this.adm.from = ['help', 'developer'].includes(this.tab) ? this.dev.from : this.tab;
+      this.tab = 'admin';
+      this.loadAdmin();
+    },
+    async loadAdmin() {
+      this.adm.data = await this.run(() => api('GET', '/admin/companies'));
+      this.adm.changes = (await this.run(() => api('GET', '/admin/plan-changes'))) ?? [];
+    },
+    editPlan(c) { this.adm.edit = { id: c.id, name: c.name, plan: c.plan, addOns: [...c.addOns], reason: '' }; },
+    async savePlan() {
+      const e = this.adm.edit;
+      const ok = await this.run(() => api('PUT', `/admin/companies/${e.id}/plan`, { plan: e.plan, addOns: e.addOns, reason: e.reason }), `${e.name}: plan saved.`);
+      if (!ok) return;
+      this.adm.edit = null;
+      await this.loadAdmin();
+      if (e.id === this.companyId) this.loadCompany(); // your own company: switch tabs on or off now
+    },
+    planPrice(cents) { return cents == null ? 'price not set' : cents === 0 ? 'free' : `${money(cents)}/month`; },
     /** Developer dashboard (platform developers only; the server checks too). */
     openDeveloper() {
       if (this.tab === 'developer') { this.tab = this.dev.from; return; }

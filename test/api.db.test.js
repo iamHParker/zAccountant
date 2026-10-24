@@ -10,6 +10,7 @@ import { totpCode } from '../src/security/totp.js';
 
 process.env.AUTH_RATE_LIMIT = '1000';
 process.env.DEVELOPER_EMAILS = 'dev@example.com';
+process.env.ADMIN_EMAILS = 'admin@example.com';
 
 test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
   const db = await freshDatabase({ withAppRole: true });
@@ -664,6 +665,52 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     } finally {
       delete process.env.MIGRATION_DATABASE_URL;
     }
+  });
+
+  await t.test('plans: admins switch features per company and the server refuses what the plan leaves out', async () => {
+    const coInfo = (await owner.c.call('GET', `/api/companies/${co.id}`)).body;
+    assert.deepEqual([coInfo.plan, coInfo.features], ['beta', ['payroll', 'timesheets']], 'every company starts on Beta tester with everything');
+    assert.equal((await owner.c.call('GET', '/api/admin/companies')).status, 403);
+    assert.equal((await owner.c.call('PUT', `/api/admin/companies/${co.id}/plan`, { plan: 'basic', reason: 'x' })).status, 403);
+
+    const adm = await newUser('admin@example.com');
+    assert.equal((await adm.c.call('GET', '/api/developer/reports')).status, 403, 'an admin is not a developer');
+    const list = await adm.c.call('GET', '/api/admin/companies');
+    assert.equal(list.status, 200);
+    const row = list.body.companies.find((c) => c.id === co.id);
+    assert.deepEqual([row.name, row.owners, row.plan, row.planIsDefault], ['API Co', 'owner@example.com', 'beta', true]);
+    assert.ok(!JSON.stringify(list.body.companies).includes('Cents"'), 'no amounts from anyone\'s books');
+
+    const put = (body) => adm.c.call('PUT', `/api/admin/companies/${co.id}/plan`, body);
+    assert.equal((await put({ plan: 'gold', reason: 'x' })).status, 400);
+    assert.equal((await put({ plan: 'basic', addOns: ['bank'], reason: 'x' })).status, 400);
+    assert.equal((await put({ plan: 'basic' })).status, 400, 'a reason is required');
+    const set = await put({ plan: 'basic', addOns: ['timesheets'], reason: 'Paid by check for November' });
+    assert.equal(set.status, 200, JSON.stringify(set.body));
+    assert.deepEqual(set.body.features, ['timesheets']);
+
+    // Payroll is now refused by the server, books and timesheets still work.
+    const pr = await owner.c.call('GET', `/api/companies/${co.id}/employees`);
+    assert.equal(pr.status, 402);
+    assert.match(pr.body.error, /Payroll isn't in this company's plan/);
+    assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/reports/payroll-register?from=2026-01-01&to=2026-12-31`)).status, 402);
+    assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/time-entries`)).status, 200);
+    assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/reports/balance-sheet?asOf=2026-12-31`)).status, 200);
+
+    // Members can read their plan but can't write one, even in raw SQL as the app's login.
+    const ownerId = (await owner.c.call('GET', '/api/auth/me')).body.user.id;
+    await assert.rejects(withScope(db.appPool, { userId: ownerId, companyId: co.id },
+      (c) => c.query("UPDATE company_plans SET plan = 'beta' WHERE company_id = $1 RETURNING 1", [co.id]).then((r) => { if (!r.rowCount) throw new Error('row-level security: no rows'); })),
+      /row-level security/);
+    await assert.rejects(withScope(db.appPool, { userId: ownerId }, (c) => c.query('SELECT * FROM zacc_admin_companies()')), /Only zAccountant admins/);
+
+    // Logged in the change log and in the company's own (verifiable) audit trail.
+    const changes = (await adm.c.call('GET', '/api/admin/plan-changes')).body;
+    assert.deepEqual([changes[0].companyName, changes[0].from, changes[0].to, changes[0].by], ['API Co', 'Beta tester (default)', 'Basic + timesheets', 'admin@example.com']);
+    assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/audit/verify`)).body.ok, true);
+
+    assert.equal((await put({ plan: 'beta', reason: 'Back to testing' })).status, 200);
+    assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/employees`)).status, 200);
   });
 
   await t.test('cross-site requests and foreign Host headers are refused', async () => {

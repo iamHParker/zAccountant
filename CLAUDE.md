@@ -64,6 +64,9 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 - Beta feedback + Developer dashboard (modelled on wri-eng's Report a problem): `public/feedback.js` (recorder, pictures),
   `src/services/feedbackService.js`, table `feedback_reports` (RLS: sender or platform developer). Platform roles come only
   from `DEVELOPER_EMAILS` / `ADMIN_EMAILS` (`src/core/platform.js`). Never log a report's note or picture.
+- Plans (Admin dashboard): catalog + path gates in `src/core/plans.js`, `src/services/planService.js`, tables
+  `company_plans` / `plan_changes` (migration 015). `route()` refuses a gated path with 402. No row = Beta tester (all on).
+  Prices are null until Homer sets them; don't invent prices.
 - Ops: request logs/metrics in `src/metrics.js`; restore drill and load test in `src/jobs/`; how to run them and
   the results log: `docs/runbooks/operations.md`.
 
