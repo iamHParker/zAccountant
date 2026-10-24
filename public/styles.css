@@ -53,6 +53,7 @@ table.lines td { padding: 4px; }
 .statement h2, .statement h3 { text-align: center; margin: 0; }
 .statement > p.muted { text-align: center; }
 .muted, .hint { color: var(--muted); }
+.joining { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
 .ok { color: var(--ok); } .bad { color: var(--bad); } .neg { color: var(--bad); }
 .banner { background: var(--warn-bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
 ul.warn { color: var(--muted); font-size: 13px; }

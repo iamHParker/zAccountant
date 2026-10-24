@@ -550,6 +550,12 @@ createApp({
     async closeJob(j) {
       if (await this.run(() => api('PATCH', `/companies/${this.companyId}/jobs/${j.id}`, { name: j.name, code: j.code, customerId: j.customerId, isActive: false }), 'Job closed.')) this.loadTime(true);
     },
+    async checkAgain() {
+      const list = await this.run(() => api('GET', '/companies'));
+      if (!list) return;
+      this.companies = list;
+      if (list.length) { this.message = null; this.companyId = list[0].id; this.tab = 'home'; } else this.flash('Not added yet. Ask the company owner to add your email, then check again.', 'bad');
+    },
     async createCompany() {
       const c = await this.run(() => api('POST', '/companies', this.newCompany), 'Company created. Your books are ready.');
       if (!c) return;
