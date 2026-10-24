@@ -1,0 +1,6 @@
+Code,Name,Type,Subtype
+1020,Savings,Asset,bank
+1520,Survey Equipment,Asset,fixed
+2600,Equipment Loan,Liability,long_term
+4200,Inspection Fees,Revenue,operating
+6700,Professional Licenses,Expense,operating

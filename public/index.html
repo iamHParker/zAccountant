@@ -442,7 +442,52 @@
 
     <!-- ACCOUNTS -->
     <section v-if="tab === 'accounts'">
-      <div class="row"><h1>Chart of accounts</h1><button v-if="can('accounts')" @click="showNewAcct = !showNewAcct">{{ showNewAcct ? 'Close' : 'Add account' }}</button></div>
+      <div class="row"><h1>Chart of accounts</h1>
+        <div v-if="can('accounts')">
+          <button @click="imp.show = !imp.show">{{ imp.show ? 'Close import' : 'Import from QuickBooks or Excel' }}</button>
+          <button @click="showNewAcct = !showNewAcct">{{ showNewAcct ? 'Close' : 'Add account' }}</button>
+        </div>
+      </div>
+      <div class="card" v-if="imp.show">
+        <h2>Import your books</h2>
+        <p class="hint">Usual order: <strong>1</strong> chart of accounts, <strong>2</strong> opening balances, <strong>3</strong> transactions since then. Nothing is saved until you press Import, and an import can be undone.</p>
+        <div class="kinds">
+          <label v-for="k in importKinds" class="check"><input type="radio" :value="k.id" v-model="imp.kind" @change="previewImport"> {{ k.label }}</label>
+        </div>
+        <p class="hint">{{ importKinds.find(k => k.id === imp.kind).help }}
+          <a v-if="importKinds.find(k => k.id === imp.kind).template" :href="`/templates/${importKinds.find(k => k.id === imp.kind).template}`" download>Download our template</a></p>
+        <label v-if="imp.kind === 'opening'">Balances as of <input type="date" v-model="imp.asOf" @change="previewImport"></label>
+        <input type="file" ref="importFile" accept=".csv,.xlsx,.xls,.iif,.txt" @change="pickImportFile">
+        <p class="hint" v-if="imp.busy">Checking the file…</p>
+        <div v-if="imp.problems" class="problems">
+          <p class="bad"><strong>{{ imp.problems.error }}</strong></p>
+          <ul class="warn"><li v-for="d in imp.problems.details">{{ d }}</li></ul>
+        </div>
+        <div v-if="imp.preview" class="preview">
+          <p>Ready to import from <strong>{{ imp.preview.fileName }}</strong>:</p>
+          <ul>
+            <li v-if="imp.preview.entries">{{ imp.preview.entries }} entr{{ imp.preview.entries === 1 ? 'y' : 'ies' }} ({{ imp.preview.lines }} lines) from {{ imp.preview.firstDate }} to {{ imp.preview.lastDate }}, totaling {{ money(imp.preview.totalCents) }}</li>
+            <li>{{ imp.preview.accountsCreated.length }} new account{{ imp.preview.accountsCreated.length === 1 ? '' : 's' }}<span v-if="imp.preview.accountsMatched">, {{ imp.preview.accountsMatched }} already here</span></li>
+            <li v-if="imp.preview.trialBalance" :class="imp.preview.trialBalance.balanced ? 'ok' : 'bad'">Trial balance after import: {{ imp.preview.trialBalance.balanced ? 'balances ✓' : 'does NOT balance' }}</li>
+            <li v-if="imp.preview.ignored.length" class="muted">Ignored (not accounting data): {{ imp.preview.ignored.join(', ') }}</li>
+          </ul>
+          <details v-if="imp.preview.accountsCreated.length"><summary>New accounts</summary>
+            <table class="data"><tr v-for="a in imp.preview.accountsCreated"><td>{{ a.code }}</td><td>{{ a.name }}</td><td class="muted">{{ typeLabel[a.type] }} · {{ a.subtype }}</td></tr></table>
+          </details>
+          <details v-if="imp.preview.accountTotals.length"><summary>Totals by account (compare with your QuickBooks report)</summary>
+            <table class="data"><tr v-for="a in imp.preview.accountTotals"><td>{{ a.code }}</td><td>{{ a.name }}</td><td class="num">{{ a.netCents >= 0 ? money(a.netCents) + ' Dr' : money(-a.netCents) + ' Cr' }}</td></tr></table>
+          </details>
+          <button class="primary" :disabled="imp.busy" @click="commitImport">Import</button>
+        </div>
+        <template v-if="imp.history.length">
+          <h3>Past imports</h3>
+          <table class="data">
+            <tr v-for="b in imp.history"><td>{{ new Date(b.createdAt).toLocaleDateString() }}</td><td>{{ b.fileName }}</td>
+              <td>{{ importKinds.find(k => k.id === b.kind)?.label }}</td><td>{{ b.entries }} entries</td>
+              <td>{{ b.status === 'undone' ? 'undone' : '' }}<button v-if="b.status === 'posted' && b.entries" class="link" @click="undoImport(b)">undo</button></td></tr>
+          </table>
+        </template>
+      </div>
       <form class="card narrow" v-if="showNewAcct" @submit.prevent="createAccount">
         <label>Number <input v-model.trim="newAcct.code" required placeholder="e.g. 6450"></label>
         <label>Name <input v-model.trim="newAcct.name" required></label>

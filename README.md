@@ -4,7 +4,7 @@ Small-business accounting and payroll for Texas, Colorado, California and Washin
 **double-entry books that cannot silently go out of balance**, with payroll tax logic reviewed by a
 Professional Review Board.
 
-Status: **Sprint 3 (banking)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
+Status: **Sprint 4 (importing books)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
 Target: public beta January 1, 2027.
 
 ## What's here
@@ -91,6 +91,7 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `GET …/bank-accounts/:id/transactions?status=review` | bank lines to review (or posted / matched / excluded) |
 | `POST …/bank-transactions/:id/{post,match,exclude,undo}`, `GET …/matches` | review a bank line |
 | `GET/POST …/bank-rules`, `DELETE …/bank-rules/:id` | categorization rules |
+| `POST …/imports/preview`, `POST …/imports`, `GET …/imports`, `POST …/imports/:id/undo` | import books: `kind` = accounts, opening (`asOf`), journal, iif; CSV `content` or Excel `base64` |
 | `GET/POST …/bank-accounts/:id/reconciliations`, `GET/DELETE …/reconciliations/:id`, `POST …/lines`, `POST …/complete` | bank reconciliation |
 | `POST …/lock` | close books through a date (reopening: owner + 2FA code + reason) |
 | `GET/POST/DELETE …/members` | who has access, and their role (owner, accountant, bookkeeper, viewer) |

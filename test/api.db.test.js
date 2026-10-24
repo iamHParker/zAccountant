@@ -282,6 +282,23 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal((await other.c.call('GET', `${b}/transactions`)).status, 404);
   });
 
+  await t.test('importing books through the restricted role; bookkeepers cannot import', async () => {
+    const csv = 'Entry,Date,Memo,Account,Debit,Credit\n1,12/01/2026,Imported rent,6300,100.00,\n1,12/01/2026,Imported rent,1000,,100.00\n';
+    const body = { kind: 'journal', fileName: 'je.csv', content: csv };
+    const prev = await owner.c.call('POST', `/api/companies/${co.id}/imports/preview`, body);
+    assert.equal(prev.status, 200, JSON.stringify(prev.body));
+    assert.equal(prev.body.preview, true);
+    const r = await owner.c.call('POST', `/api/companies/${co.id}/imports`, body);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const list = (await owner.c.call('GET', `/api/companies/${co.id}/imports`)).body;
+    assert.equal(list[0].entries, 1);
+    const u = await owner.c.call('POST', `/api/companies/${co.id}/imports/${list[0].id}/undo`, {});
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    const bk = await newUser('bk-import@example.com');
+    await owner.c.call('POST', `/api/companies/${co.id}/members`, { email: 'bk-import@example.com', role: 'bookkeeper' });
+    assert.equal((await bk.c.call('POST', `/api/companies/${co.id}/imports/preview`, body)).status, 403);
+  });
+
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
     const lock = `/api/companies/${co.id}/lock`;
     assert.equal((await owner.c.call('POST', lock, '{"through":null}', { 'content-type': 'text/plain' })).status, 415);

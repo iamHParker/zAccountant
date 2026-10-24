@@ -29,7 +29,7 @@ async function api(method, url, body, headers = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && !url.startsWith('/auth/') && !url.includes('/lock')) onSignInNeeded(data.next);
-  if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(data.error ?? `Request failed (${res.status})`), { details: data.details ?? [] });
   return data;
 }
 
@@ -84,6 +84,13 @@ createApp({
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
       lockDate: '', suiRate: '', famliCount: null, audit: null,
+      imp: { show: false, kind: 'journal', asOf: '', file: null, preview: null, problems: null, busy: false, history: [] },
+      importKinds: [
+        { id: 'accounts', label: 'Chart of accounts', template: 'chart-of-accounts.csv', help: 'QuickBooks: Reports → Account List → Export to Excel/CSV. Or fill in our template.' },
+        { id: 'opening', label: 'Opening balances (trial balance)', template: 'opening-balances.csv', help: 'Balances on the day before you start in zAccountant. QuickBooks: Reports → Trial Balance as of that day → Export.' },
+        { id: 'journal', label: 'Transactions (journal)', template: 'journal-entries.csv', help: 'QuickBooks: Reports → Journal for the date range → Export to CSV. Or fill in our template (one row per line; rows with the same Entry number form one entry).' },
+        { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
+      ],
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
@@ -114,6 +121,7 @@ createApp({
       if (t === 'settings') { this.loadMembers(); this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'bank') this.loadBank();
+      if (t === 'accounts') this.loadImports();
     },
     'quick.kind'() { this.quick.other = ''; },
   },
@@ -320,6 +328,54 @@ createApp({
     async saveSui() {
       const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { suiRatePct: this.suiRate }), 'Rate saved.');
       if (c) this.company = c;
+    },
+    // ---------------------------------------------------------------- Importing books
+    async loadImports() { this.imp.history = (await this.run(() => api('GET', `/companies/${this.companyId}/imports`))) ?? []; },
+    importBody() {
+      const i = this.imp;
+      return { kind: i.kind, asOf: i.asOf || undefined, fileName: i.file.name, ...(i.file.base64 ? { base64: i.file.base64 } : { content: i.file.content }) };
+    },
+    async pickImportFile(ev) {
+      const i = this.imp;
+      const f = ev.target.files[0];
+      i.preview = null; i.problems = null; i.file = null;
+      if (!f) return;
+      if (f.size > 10_000_000) { this.flash('That file is larger than 10 MB. Export a shorter date range.', 'bad'); return; }
+      if (/\.xlsx$/i.test(f.name)) {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        let bin = ''; for (let k = 0; k < bytes.length; k += 0x8000) bin += String.fromCharCode(...bytes.subarray(k, k + 0x8000));
+        i.file = { name: f.name, base64: btoa(bin) };
+      } else if (/\.xls$/i.test(f.name)) {
+        this.flash('Old .xls files can\'t be read. In Excel use File → Save As → Excel Workbook (.xlsx) or CSV.', 'bad'); return;
+      } else i.file = { name: f.name, content: await f.text() };
+      if (/\.iif$/i.test(f.name)) i.kind = 'iif';
+      await this.previewImport();
+    },
+    async previewImport() {
+      const i = this.imp;
+      if (!i.file) return;
+      if (i.kind === 'opening' && !i.asOf) { i.problems = { error: 'Choose the date of the opening balances first.', details: [] }; return; }
+      i.busy = true; i.preview = null; i.problems = null;
+      try { i.preview = await api('POST', `/companies/${this.companyId}/imports/preview`, this.importBody()); }
+      catch (e) { i.problems = { error: e.message.replace(/:.*$/, ''), details: e.details ?? [] }; }
+      finally { i.busy = false; }
+    },
+    async commitImport() {
+      const i = this.imp;
+      i.busy = true;
+      try {
+        const r = await api('POST', `/companies/${this.companyId}/imports`, this.importBody());
+        this.flash(`Imported${r.entries ? ` ${r.entries} entries` : ''}${r.accountsCreated.length ? `, ${r.accountsCreated.length} new accounts` : ''}. Verified against the file to the penny.`);
+        i.preview = null; i.file = null;
+        if (this.$refs.importFile) this.$refs.importFile.value = '';
+        this.accounts = await api('GET', `/companies/${this.companyId}/accounts`);
+        this.loadImports();
+      } catch (e) { i.problems = { error: e.message.replace(/:.*$/, ''), details: e.details ?? [] }; }
+      finally { i.busy = false; }
+    },
+    async undoImport(b) {
+      if (!confirm(`Undo the import of ${b.fileName || 'this file'}? Each of its ${b.entries} entries gets a reversing entry; accounts it created stay.`)) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/imports/${b.id}/undo`, {}), 'Import undone.')) this.loadImports();
     },
     // ---------------------------------------------------------------- Banking
     async loadBank() {

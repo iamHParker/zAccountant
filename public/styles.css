@@ -77,3 +77,7 @@ tr.matches td { background: var(--bg, #f5f6f8); font-size: 13px; }
 .recon-sum strong { font-size: 20px; }
 tr.clickable { cursor: pointer; }
 .preview { margin-top: 12px; }
+.kinds { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 8px 0; }
+details { margin: 8px 0; }
+details table { margin-top: 6px; }
+.problems ul { max-height: 240px; overflow: auto; }
