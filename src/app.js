@@ -210,7 +210,7 @@ export function createApp(pool, { log } = {}) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId', 'itemId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -588,6 +588,9 @@ export function createApp(pool, { log } = {}) {
       return res.status(status).json({ error: err.message, details: err.details ?? [] });
     }
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Request body is not valid JSON' });
+    if (err.type === 'entity.too.large') {
+      return res.status(413).json({ error: `That is too large to send (the limit here is ${Math.round(err.limit / 1_048_576)} MB). Try a smaller file or picture.` });
+    }
     if (err.status >= 400 && err.status < 500) return res.status(err.status).json({ error: err.expose ? err.message : 'Bad request' });
     // Database rule violations: return a plain explanation, never raw database text.
     const pgMessages = {

@@ -363,6 +363,9 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     // A 1×1 PNG as the logo; members read it back as a picture (not a download).
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
     assert.equal((await owner.c.call('PUT', `${base}/logo`, { picture: 'data:image/png;base64,AAAA' })).status, 400, 'not really a PNG');
+    const huge = await owner.c.call('PUT', `${base}/logo`, { picture: `data:image/png;base64,${'A'.repeat(3_000_000)}` });
+    assert.equal(huge.status, 413);
+    assert.match(huge.body.error, /too large to send \(the limit here is 2 MB\)/);
     assert.equal((await owner.c.call('PUT', `${base}/logo`, { picture: `data:image/png;base64,${png}` })).status, 200);
     assert.ok((await owner.c.call('GET', base)).body.logoVersion);
     const logo = await owner.c.call('GET', `${base}/logo`);

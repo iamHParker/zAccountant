@@ -13,7 +13,12 @@ pg.types.setTypeParser(1082, (v) => v);
 
 export function createPool(connectionString = process.env.DATABASE_URL) {
   if (!connectionString) throw new Error('DATABASE_URL is not set');
-  return new pg.Pool({ connectionString, max: Number(process.env.DB_POOL_MAX ?? 10) });
+  const pool = new pg.Pool({ connectionString, max: Number(process.env.DB_POOL_MAX ?? 10) });
+  // ℹ️ A connection resting in the pool can be dropped by the database (a restart or a network blip). Without this
+  // listener Node treats that as a crash and stops the whole server; with it the bad connection is thrown away,
+  // logged, and the next request simply opens a fresh one.
+  pool.on('error', (err) => console.error(JSON.stringify({ level: 'error', msg: 'idle database connection lost', error: err.message, code: err.code ?? null })));
+  return pool;
 }
 
 /**

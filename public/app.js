@@ -70,14 +70,30 @@ async function download(url) {
   setTimeout(() => URL.revokeObjectURL(href), 10_000);
 }
 
+const REQUEST_TIMEOUT_MS = 120_000; // a big import can take a while; anything longer has stalled
 async function api(method, url, body, headers = {}) {
   if (method !== 'GET' && body === undefined) body = {}; // writes are always JSON (server CSRF rule)
-  const res = await fetch(`/api${url}`, {
-    method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
+  const where = `${method} ${url.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, ':id')}`;
+  let res;
+  try {
+    res = await fetch(`/api${url}`, {
+      method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (e) {
+    // ℹ️ No answer at all: the connection dropped, or the server is restarting. For a save we can't know whether
+    // it arrived, so say so. Entries, invoices, bills and payments carry an Idempotency-Key, so pressing Save
+    // again on those never records them twice.
+    const timedOut = e?.name === 'TimeoutError';
+    noteError('network', `${where} → ${timedOut ? 'timed out' : 'no connection'}`);
+    const what = timedOut ? 'zAccountant took too long to answer' : "Can't reach zAccountant. Check your internet connection";
+    throw Object.assign(new Error(method === 'GET' ? `${what}, then try again.` : `${what}. Your change may not have been saved: check, then try again.`), { details: [], network: true });
+  }
+  const data = await res.json().catch(() => (res.ok ? {} : { error: res.status >= 500
+    ? `zAccountant is restarting or briefly unavailable (error ${res.status}). Wait a minute and try again.`
+    : `The request was refused (error ${res.status}).` }));
   if (res.status === 401 && !url.startsWith('/auth/') && !url.includes('/lock')) onSignInNeeded(data.next);
-  if (!res.ok && res.status !== 401) noteError('server', `${method} ${url.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, ':id')} → ${res.status}: ${data.error ?? ''}`, res.headers.get('x-request-id'));
+  if (!res.ok && res.status !== 401) noteError('server', `${where} → ${res.status}: ${data.error ?? ''}`, res.headers.get('x-request-id'));
   if (!res.ok) throw Object.assign(new Error(data.error ?? `Request failed (${res.status})`), { details: data.details ?? [] });
   return data;
 }
@@ -1046,4 +1062,15 @@ createApp({
     },
     async verifyAudit() { this.audit = await this.run(() => api('GET', `/companies/${this.companyId}/audit/verify`)); },
   },
-}).mount('#app');
+})
+  .use({
+    install(app) {
+      // A mistake in a screen's own code: record it for Beta feedback and tell the person, instead of a blank or frozen screen.
+      app.config.errorHandler = (err, vm) => {
+        noteError('screen', err?.message ?? String(err));
+        console.error(err);
+        vm?.$root?.flash?.('Something on this screen went wrong. Your saved work is safe; reload the page. 🐞 Beta feedback will send us the details.', 'bad');
+      };
+    },
+  })
+  .mount('#app');

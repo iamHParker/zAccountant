@@ -188,7 +188,7 @@ account and enter the confirmation number. Your books then show the tax paid. A 
   <li><strong>Accountant</strong>: the books, reports, imports and payroll.</li>
   <li><strong>Bookkeeper</strong>: day-to-day entries, bank, invoices and bills.</li>
   <li><strong>Viewer</strong>: reads books and reports, changes nothing.</li>
-  <li><strong>Staff</strong>: enters their own time only.</li>
+  <li><strong>Staff</strong>: writes invoices and enters their own time.</li>
 </ul>
 <p><strong>Custom roles</strong> mix permissions, for example a project manager who sees reports and approves timesheets.
 <strong>Departments</strong> decide whose time a supervisor approves.</p>`,

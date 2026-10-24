@@ -43,6 +43,18 @@ const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? (production ? '0.0.0.0' : '127.0.0.1');
 const server = createApp(pool).listen(port, host, () => console.log(`zAccountant running at http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`));
 
+// Last line of defence. A promise nobody waited on is logged and the server keeps going (the request it belonged
+// to has already been answered). Anything thrown outside a request leaves the program in an unknown state, so it is
+// logged and the server stops; Railway starts a fresh copy within seconds. Requests never reach here: the error
+// handler in app.js answers them.
+process.on('unhandledRejection', (reason) => {
+  console.error(JSON.stringify({ level: 'error', msg: 'unhandled promise rejection', error: String(reason?.message ?? reason).slice(0, 500) }));
+});
+process.on('uncaughtException', (err) => {
+  console.error(JSON.stringify({ level: 'fatal', msg: 'uncaught exception, restarting', error: err.message, stack: err.stack?.split('\n').slice(0, 5).join(' | ') }));
+  process.exit(1);
+});
+
 // Railway stops the old copy with SIGTERM on every deploy: finish requests in flight (each is one
 // database transaction), then close the database connections. Anything still running after 10 s is cut off
 // and rolled back by PostgreSQL, so a half-finished save is never left behind.

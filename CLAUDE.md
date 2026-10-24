@@ -73,6 +73,9 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   (`invoice_items`, kind service = hours × rate, expense = cost passed on), line `service_date`/`item_id`, invoice
   `project` block, letterhead (address, note with tax ID + TX firm number, closing line), logo in `company_logos`,
   pinned `default_sales_tax_rate`. Layout follows Homer's Excel invoice: Hours, Date, Task, Rate, T, Subtotal.
+- Guides: `docs/user-guide/` (chapters by tier: everyone, Basic, Payroll, Timesheets, staff) and
+  `docs/programmers-guide/` (architecture, money, security, DB, features, front end, **error handling**, testing,
+  recipes, ops). Update the matching chapter in the same PR as any feature or rule change (Homer, 2026-10-24).
 - Ops: request logs/metrics in `src/metrics.js`; restore drill and load test in `src/jobs/`; how to run them and
   the results log: `docs/runbooks/operations.md`.
 
