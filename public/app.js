@@ -20,17 +20,27 @@ function cents(v) {
   return Number(m[1].replace(/,/g, '') || 0) * 100 + Number((m[2] ?? '').padEnd(2, '0'));
 }
 
+let onSignInNeeded = () => {};
+
 async function api(method, url, body) {
+  if (method !== 'GET' && body === undefined) body = {}; // writes are always JSON (server CSRF rule)
   const res = await fetch(`/api${url}`, {
     method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !url.startsWith('/auth/') && !url.includes('/lock')) onSignInNeeded(data.next);
   if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
   return data;
 }
 
+// What each role may do (mirrors PERMISSIONS in src/app.js; the server is the real gatekeeper).
+const CAN = {
+  post: ['owner', 'accountant', 'bookkeeper'], accounts: ['owner', 'accountant'], close: ['owner', 'accountant'],
+  payroll: ['owner', 'accountant'], audit: ['owner', 'accountant'], admin: ['owner'],
+};
+
 const blankEmployee = () => ({
-  firstName: '', lastName: '', workState: 'TX', payFrequency: 'biweekly', payType: 'hourly', payRate: '',
+  firstName: '', lastName: '', ssn: '', workState: 'TX', payFrequency: 'biweekly', payType: 'hourly', payRate: '',
   w4: { formYear: 2020, allowances: 0, filingStatus: 'single', step2: false, dependentsCredit: '', extraWithholding: '' },
   ca: { filingStatus: 'single', allowances: 1 }, co: { annualAllowance: '' }, dc: { filingStatus: 'single', allowances: 0 },
 });
@@ -39,6 +49,9 @@ createApp({
   data() {
     return {
       companies: [], companyId: null, company: null, tab: 'home', message: null,
+      auth: { screen: 'loading', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
+      members: [], newMember: { email: '', role: 'bookkeeper' },
+      roleLabels: { owner: 'Owner', accountant: 'Accountant', bookkeeper: 'Bookkeeper', viewer: 'Viewer (read only)' },
       months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       tabs: [
         { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'reports', label: 'Reports' },
@@ -89,18 +102,72 @@ createApp({
       if (t === 'reports') this.loadReport();
       if (t === 'journal') this.loadEntries();
       if (t === 'payroll' || t === 'settings') this.loadEmployees();
+      if (t === 'settings') this.loadMembers();
       if (t === 'home') this.loadDash();
     },
     'quick.kind'() { this.quick.other = ''; },
   },
   async mounted() {
+    onSignInNeeded = (next) => this.goAuth(next ?? 'signin');
     try {
-      this.companies = await api('GET', '/companies');
-      this.companyId = this.companies[0]?.id ?? null;
-    } catch (e) { this.flash(e.message, 'bad'); }
+      const me = await api('GET', '/auth/me');
+      this.auth.user = me.user;
+      if (me.next) return this.goAuth(me.next);
+      await this.enterApp();
+    } catch { this.goAuth('signin'); }
   },
   methods: {
     money,
+    can(perm) { return Boolean(this.company && CAN[perm].includes(this.company.role)); },
+    async goAuth(screen) {
+      this.auth.screen = screen; this.auth.code = '';
+      if (screen === 'mfa_setup' && !this.auth.setup) {
+        try { this.auth.setup = await api('POST', '/auth/mfa/setup', {}); } catch (e) { this.flash(e.message, 'bad'); }
+      }
+    },
+    async enterApp() {
+      this.auth.screen = null;
+      this.companies = await api('GET', '/companies');
+      this.companyId = this.companies[0]?.id ?? null;
+      if (!this.companyId) this.company = null;
+    },
+    async signIn() {
+      const a = this.auth;
+      const r = await this.run(() => api('POST', '/auth/login', { email: a.email, password: a.password }));
+      if (!r) return;
+      a.password = ''; a.user = r.user;
+      this.goAuth(r.next);
+    },
+    async signUp() {
+      const a = this.auth;
+      const r = await this.run(() => api('POST', '/auth/signup', { email: a.email, password: a.password, name: a.name }));
+      if (!r) return;
+      a.password = ''; a.user = r.user;
+      this.goAuth(r.next);
+    },
+    async enableMfa() {
+      const r = await this.run(() => api('POST', '/auth/mfa/enable', { code: this.auth.code }));
+      if (r) { this.auth.recoveryCodes = r.recoveryCodes; this.auth.screen = 'recovery_codes'; }
+    },
+    async verifyMfa() {
+      const a = this.auth;
+      const body = a.useRecovery ? { recoveryCode: a.code } : { code: a.code };
+      if (await this.run(() => api('POST', '/auth/mfa/verify', body))) await this.enterApp();
+    },
+    async signOut() {
+      await api('POST', '/auth/logout', {}).catch(() => {});
+      Object.assign(this, { companies: [], companyId: null, company: null, tab: 'home' });
+      this.auth = { ...this.auth, user: null, setup: null, recoveryCodes: null, screen: 'signin' };
+    },
+    async loadMembers() { this.members = (await this.run(() => api('GET', `/companies/${this.companyId}/members`))) ?? []; },
+    async addMember() {
+      const m = await this.run(() => api('POST', `/companies/${this.companyId}/members`, this.newMember), 'Member saved.');
+      if (m) { this.newMember = { email: '', role: 'bookkeeper' }; this.loadMembers(); }
+    },
+    async removeMember(m) {
+      if (!confirm(`Remove ${m.name} from ${this.company.name}?`)) return;
+      if (await this.run(() => api('DELETE', `/companies/${this.companyId}/members/${m.id}`), 'Removed.')) this.loadMembers();
+    },
     printPage() { window.print(); },
     flash(text, kind = 'ok') { this.message = { text, kind }; if (kind === 'ok') setTimeout(() => { if (this.message?.text === text) this.message = null; }, 4000); },
     async run(fn, success) {
@@ -161,7 +228,7 @@ createApp({
       const e = this.newEmp;
       const stateElections = { CA: e.ca, CO: e.co.annualAllowance ? e.co : {}, DC: e.dc };
       const w4 = { ...e.w4, dependentsCredit: e.w4.dependentsCredit || '0', extraWithholding: e.w4.extraWithholding || '0' };
-      const body = { firstName: e.firstName, lastName: e.lastName, workState: e.workState, payFrequency: e.payFrequency, payType: e.payType, payRate: e.payRate, w4, stateElections: { [e.workState]: stateElections[e.workState] } };
+      const body = { ssn: e.ssn || undefined, firstName: e.firstName, lastName: e.lastName, workState: e.workState, payFrequency: e.payFrequency, payType: e.payType, payRate: e.payRate, w4, stateElections: { [e.workState]: stateElections[e.workState] } };
       const ok = await this.run(() => api('POST', `/companies/${this.companyId}/employees`, body), 'Employee saved.');
       if (ok) { this.newEmp = blankEmployee(); this.showNewEmp = false; this.loadEmployees(); }
     },
@@ -194,7 +261,9 @@ createApp({
     async reopenBooks() {
       const reason = prompt('Reopening lets transactions in closed periods be changed. Why are you reopening?');
       if (!reason) return;
-      const r = await this.run(() => api('POST', `/companies/${this.companyId}/lock`, { through: null, reason }), 'Books reopened.');
+      const mfaCode = prompt('For your security, enter the 6-digit code from your authenticator app:');
+      if (!mfaCode) return;
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/lock`, { through: null, reason, mfaCode: mfaCode.trim() }), 'Books reopened.');
       if (r) this.company.locked_through = null;
     },
     async saveFamli() {

@@ -4,11 +4,24 @@ import { createPool } from './pool.js';
 import { migrate } from './migrate.js';
 import * as ledger from '../services/ledgerService.js';
 import * as payroll from '../services/payrollService.js';
+import { hashPassword, encryptField, sha256 } from '../security/crypto.js';
+import { newTotpSecret } from '../security/totp.js';
 
 const pool = createPool();
 try {
   await migrate(pool);
-  const co = await ledger.createCompany(pool, { name: 'Demo Structural Engineering LLC', homeState: 'TX' });
+  // Demo sign-in (development only). Two-step sign-in is already on; add the printed key to an authenticator app.
+  const email = 'demo@example.com';
+  const password = 'demo password 2026';
+  const secret = newTotpSecret();
+  const recovery = 'DEMO1234';
+  const { rows: [user] } = await pool.query(
+    `INSERT INTO users (email, name, password_hash, totp_enabled, recovery_codes) VALUES ($1, 'Demo User', $2, true, $3)
+     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash RETURNING id, totp_enabled`,
+    [email, await hashPassword(password), [sha256(recovery)]]);
+  await pool.query('UPDATE users SET totp_secret_enc = $2, totp_enabled = true, totp_last_counter = NULL, recovery_codes = $3 WHERE id = $1',
+    [user.id, encryptField(secret, `user:${user.id}`), [sha256(recovery)]]);
+  const co = await ledger.createCompany(pool, { name: 'Demo Structural Engineering LLC', homeState: 'TX', ownerUserId: user.id });
   const A = Object.fromEntries((await ledger.listAccounts(pool, co.id)).map((a) => [a.code, a.id]));
   const y = new Date().getFullYear();
   const s = (date, memo, from, to, amount) => ledger.postSimple(pool, co.id, { date: `${y}-${date}`, memo, fromAccountId: A[from], toAccountId: A[to], amount });
@@ -27,6 +40,8 @@ try {
   await payroll.postPaycheck(pool, co.id, emp.id, { payDate: `${y}-01-16`, hours: '80' });
   await payroll.postPaycheck(pool, co.id, emp.id, { payDate: `${y}-01-30`, hours: '80', overtimeHours: '6' });
   console.log(`Demo company created: ${co.name}`);
+  console.log(`Sign in as ${email} / "${password}"`);
+  console.log(`Authenticator setup key: ${secret}   (or use one-time recovery code ${recovery})`);
 } finally {
   await pool.end();
 }
