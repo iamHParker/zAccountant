@@ -731,6 +731,120 @@
       </div>
     </section>
 
+    <!-- TIME -->
+    <section v-if="tab === 'time'">
+      <div class="row wrap"><h1>Time</h1>
+        <span>
+          <button @click="moveWeek(-1)">◀</button>
+          <strong>Week of {{ time.week }}</strong>
+          <button @click="moveWeek(1)">▶</button>
+        </span>
+        <label v-if="canManageTime() && members.some(m => m.id !== auth.user.id)">Whose time
+          <select v-model="time.userId" @change="time.editing = null; loadTime()"><option value="">Mine</option>
+            <option v-for="m in members.filter(m => m.id !== auth.user.id)" :value="m.id">{{ m.name }}</option></select>
+        </label>
+      </div>
+
+      <form class="card" @submit.prevent="saveTime">
+        <h2>{{ time.editing ? 'Change time' : 'Add time' }}</h2>
+        <p class="hint">Enter a start and end time, or just the hours (7.5 or 7:30). A shift that ends after midnight belongs to the day it started.</p>
+        <div class="grid4">
+          <label>Day <select v-model="time.form.date"><option v-for="d in weekDays()" :value="d">{{ new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) }}</option></select></label>
+          <label>Job <select v-model="time.form.jobId"><option value="">(no job)</option><option v-for="j in time.jobs" :value="j.id">{{ j.code ? j.code + ' · ' : '' }}{{ j.name }}</option></select></label>
+          <label>Start <input type="time" v-model="time.form.start"></label>
+          <label>End <input type="time" v-model="time.form.end"></label>
+          <label>or Hours <input v-model.trim="time.form.hours" inputmode="decimal" placeholder="7.5" class="num"></label>
+          <label class="span3">Notes <input v-model="time.form.notes" maxlength="500" placeholder="What you worked on"></label>
+        </div>
+        <label class="check"><input type="checkbox" v-model="time.form.billable"> Billable to the customer</label>
+        <button class="primary">{{ time.editing ? 'Save' : 'Add' }}</button>
+        <button type="button" v-if="time.editing" @click="time.editing = null; time.form = blankTime(time.week)">Cancel</button>
+      </form>
+
+      <div class="card">
+        <div class="row"><h2>This week</h2>
+          <button class="primary" v-if="time.entries.some(e => ['draft', 'rejected'].includes(e.status))" @click="submitWeek">Submit week for approval</button></div>
+        <p class="hint" v-if="!time.entries.length">No time entered this week.</p>
+        <table class="data" v-else>
+          <thead><tr><th>Day</th><th>Job</th><th>Time</th><th class="num">Hours</th><th>Notes</th><th>Status</th><th></th></tr></thead>
+          <tr v-for="e in time.entries">
+            <td>{{ new Date(e.date + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) }}</td>
+            <td>{{ e.jobName }}</td><td>{{ e.start ? e.start + '–' + e.end : '' }}</td><td class="num">{{ e.hours }}</td>
+            <td>{{ e.notes }}<span v-if="!e.billable" class="muted small"> (not billable)</span></td>
+            <td><span :class="'status-' + e.status">{{ e.paidRunId ? 'paid' : e.status === 'rejected' ? 'sent back' : e.status }}</span>
+              <div v-if="e.reviewNote" class="muted small">“{{ e.reviewNote }}” – {{ e.reviewedBy }}</div></td>
+            <td class="actions"><template v-if="e.status !== 'approved'"><button class="link" @click="editTime(e)">change</button> <button class="link" @click="deleteTime(e)">delete</button></template></td>
+          </tr>
+          <tr class="total"><td colspan="3">Week total</td><td class="num">{{ hrs(time.entries.reduce((t, e) => t + e.minutes, 0)) }}</td><td colspan="3"></td></tr>
+        </table>
+      </div>
+
+      <div class="card" v-if="canManageTime()">
+        <h2>Waiting for approval</h2>
+        <p class="hint" v-if="!time.pending.length">Nothing waiting.</p>
+        <template v-else>
+          <table class="data">
+            <thead><tr><th><input type="checkbox" class="auto-w" @change="pickAll($event.target.checked)"></th><th>Person</th><th>Day</th><th>Job</th><th class="num">Hours</th><th>Notes</th></tr></thead>
+            <tr v-for="e in time.pending"><td><input type="checkbox" class="auto-w" v-model="time.picked[e.id]"></td><td>{{ e.userName }}</td><td>{{ e.date }}</td><td>{{ e.jobName }}</td><td class="num">{{ e.hours }}</td><td>{{ e.notes }}</td></tr>
+          </table>
+          <div class="row wrap">
+            <button class="primary" @click="review(true)">Approve selected</button>
+            <input v-model="time.note" maxlength="300" placeholder="Note (needed to send back)" class="grow">
+            <button @click="review(false)">Send back</button>
+          </div>
+        </template>
+      </div>
+
+      <div class="card">
+        <h2>Import from HoursTracker</h2>
+        <p class="hint">In HoursTracker on your iPhone: open <strong>Reports</strong> (or the job's list of entries), choose the dates, tap <strong>Share/Export → CSV</strong>, and email or save the file. Then pick it here.
+          Other apps work too if the file has a Date (or Clocked In) column and Hours/Duration (or Clocked In and Out). Imported time arrives as drafts, and importing the same file twice skips what's already in.</p>
+        <div class="grid4">
+          <label>CSV file <input type="file" accept=".csv,text/csv" @change="pickTimeFile"></label>
+          <label v-if="canManageTime() && members.some(m => m.id !== auth.user.id)">For
+            <select v-model="time.importFor"><option value="">Me</option><option v-for="m in members.filter(m => m.id !== auth.user.id)" :value="m.id">{{ m.name }}</option></select></label>
+        </div>
+        <label class="check" v-if="canManageTime() || can('admin')"><input type="checkbox" v-model="time.createJobs" @change="time.preview = null"> Add jobs that aren't on the list yet</label>
+        <button @click="previewTimeImport" :disabled="!time.file">Check file</button>
+        <div v-if="time.preview" class="preview">
+          <p>{{ time.preview.format }} file: <strong>{{ time.preview.toImport }}</strong> entr{{ time.preview.toImport === 1 ? 'y' : 'ies' }}, {{ time.preview.hours }} hours
+            <span v-if="time.preview.from">({{ time.preview.from }} to {{ time.preview.to }})</span>.
+            <span v-if="time.preview.duplicates">{{ time.preview.duplicates }} already imported will be skipped.</span></p>
+          <p class="hint" v-if="time.preview.newJobs.length">Jobs not on the list: {{ time.preview.newJobs.join(', ') }}. {{ time.createJobs ? 'They will be added.' : 'The job name goes in the notes instead.' }}</p>
+          <table class="data">
+            <thead><tr><th>Day</th><th>Time</th><th class="num">Hours</th><th>Job</th><th>Notes</th></tr></thead>
+            <tr v-for="r in time.preview.sample"><td>{{ r.date }}</td><td>{{ r.start ? r.start + '–' + r.end : '' }}</td><td class="num">{{ r.hours }}</td><td>{{ r.job }}</td><td>{{ r.notes }}</td></tr>
+          </table>
+          <button class="primary" :disabled="!time.preview.toImport" @click="commitTimeImport">Import {{ time.preview.toImport }} entr{{ time.preview.toImport === 1 ? 'y' : 'ies' }}</button>
+        </div>
+      </div>
+
+      <div class="card" v-if="time.summary && time.summary.jobs.length">
+        <h2>Hours by job this week</h2>
+        <p class="hint" v-if="canManageTime()">Includes everyone whose time you can see.</p>
+        <table class="data">
+          <thead><tr><th>Job</th><th class="num">Hours</th><th class="num">Billable</th></tr></thead>
+          <tr v-for="j in time.summary.jobs"><td>{{ j.jobName }}</td><td class="num">{{ hrs(j.minutes) }}</td><td class="num">{{ hrs(j.billableMinutes) }}</td></tr>
+        </table>
+      </div>
+
+      <div class="card" v-if="canManageTime() || can('admin')">
+        <div class="row"><h2>Jobs</h2><button @click="time.showJobs = !time.showJobs">{{ time.showJobs ? 'Close' : 'Manage jobs' }}</button></div>
+        <template v-if="time.showJobs">
+          <table class="data" v-if="time.jobs.length">
+            <thead><tr><th>Code</th><th>Job</th><th>Customer</th><th></th></tr></thead>
+            <tr v-for="j in time.jobs"><td>{{ j.code }}</td><td>{{ j.name }}</td><td>{{ j.customerName }}</td><td><button class="link" @click="closeJob(j)">close</button></td></tr>
+          </table>
+          <form @submit.prevent="addJob" class="grid4">
+            <label>Job name <input v-model.trim="time.newJob.name" maxlength="80" required></label>
+            <label>Code (optional) <input v-model.trim="time.newJob.code" maxlength="30"></label>
+            <label v-if="time.customers.length">Customer (optional) <select v-model="time.newJob.customerId"><option value="">None</option><option v-for="c in time.customers" :value="c.id">{{ c.name }}</option></select></label>
+            <div><button class="primary">Add job</button></div>
+          </form>
+        </template>
+      </div>
+    </section>
+
     <!-- PAYROLL -->
     <section v-if="tab === 'payroll'">
       <p class="banner">Payroll is in <strong>calculate-only</strong> mode: we compute paychecks and record them in your books, but you (or your accountant) make the tax deposits and filings. Tax tables are awaiting Professional Review Board certification.</p>
@@ -753,9 +867,11 @@
         <label>Net pay paid from
           <select v-model="prun.paidFrom"><option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option><option value="">Not paid yet (hold in Net Pay Payable)</option></select>
         </label>
+        <button v-if="prun.rows.length" @click="fillFromTimesheets" :disabled="!prun.periodStart || !prun.periodEnd">Fill hours from approved timesheets</button>
+        <ul class="warn" v-if="prun.hoursNotes.length"><li v-for="n in prun.hoursNotes">{{ n }}</li></ul>
         <p class="hint" v-if="!prun.rows.length">No active employees on this pay schedule.</p>
         <table class="data" v-else>
-          <thead><tr><th></th><th>Employee</th><th>Pay</th><th class="w90">Hours</th><th class="w90">Overtime</th><th class="w120">401(k)</th></tr></thead>
+          <thead><tr><th></th><th>Employee</th><th>Pay</th><th class="w90">Hours</th><th class="w90">Overtime 1.5×</th><th class="w90">Double 2×</th><th class="w120">401(k)</th></tr></thead>
           <tbody>
             <tr v-for="x in prun.rows">
               <td><input type="checkbox" v-model="x.include" class="auto-w" @change="prun.preview = null"></td>
@@ -763,6 +879,7 @@
               <td>{{ money(x.emp.payRateCents) }}{{ x.emp.payType === 'hourly' ? '/hr' : '/check' }}</td>
               <td><input v-if="x.emp.payType === 'hourly'" v-model.trim="x.hours" inputmode="decimal" class="num" @input="prun.preview = null"></td>
               <td><input v-if="x.emp.payType === 'hourly'" v-model.trim="x.overtimeHours" inputmode="decimal" class="num" placeholder="0" @input="prun.preview = null"></td>
+              <td><input v-if="x.emp.payType === 'hourly'" v-model.trim="x.doubleTimeHours" inputmode="decimal" class="num" placeholder="0" @input="prun.preview = null"></td>
               <td><input v-model.trim="x.k401" inputmode="decimal" class="num" placeholder="0" @input="prun.preview = null"></td>
             </tr>
           </tbody>
@@ -867,9 +984,11 @@
       </form>
 
       <table class="data">
-        <thead><tr><th>Name</th><th>State</th><th>Pay</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>State</th><th>Pay</th><th v-if="can('payroll') && members.length">Timesheets from</th><th></th></tr></thead>
         <tr v-for="e in employees"><td>{{ e.firstName }} {{ e.lastName }}<span class="muted" v-if="e.ssnLast4"> · SSN •••-••-{{ e.ssnLast4 }}</span></td><td>{{ e.workState }}</td>
           <td>{{ money(e.payRateCents) }}{{ e.payType === 'hourly' ? '/hr' : '/check' }} · {{ e.payFrequency }}</td>
+          <td v-if="can('payroll') && members.length"><select :value="e.userId || ''" @change="linkEmployee(e, $event.target.value)" :aria-label="'Timesheets for ' + e.firstName">
+            <option value="">(not linked)</option><option v-for="m in members" :value="m.id">{{ m.name }}</option></select></td>
           <td><button v-if="can('payroll')" class="link" @click="startPaycheck(e)">Run paycheck</button></td></tr>
       </table>
 

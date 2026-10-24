@@ -87,3 +87,8 @@ input.num { text-align: right; }
 th.perm-col { font-size: 11px; text-align: center; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
 td.perm-col { text-align: center; color: var(--ok); }
 input.grow { flex: 1; width: auto; margin: 0; }
+.span3 { grid-column: span 3; }
+@media (max-width: 700px) { .span3 { grid-column: auto; } }
+.status-submitted { color: var(--muted); font-style: italic; }
+.status-approved { color: var(--ok); }
+.status-rejected { color: var(--bad); }

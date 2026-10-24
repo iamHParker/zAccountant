@@ -18,6 +18,7 @@ import * as bank from './services/bankService.js';
 import * as imports from './services/importService.js';
 import * as arap from './services/arapService.js';
 import * as roles from './services/accessService.js';
+import * as time from './services/timesheetService.js';
 import { AuthError } from './services/authService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
@@ -93,6 +94,7 @@ export function createApp(pool) {
   // Bank statement files can be a few MB; everything else is small.
   app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '6mb' }));
   app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
+  app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
     res.set({
@@ -177,7 +179,7 @@ export function createApp(pool) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -191,7 +193,8 @@ export function createApp(pool) {
         }
       }
       const can = (p) => Boolean(access?.permissions.has(p));
-      return handler({ db, req, companyId, role: access?.role ?? null, access, can, actor: req.user.email });
+      const viewer = { userId: req.user.id, can, departmentId: access?.departmentId ?? null };
+      return handler({ db, req, companyId, role: access?.role ?? null, access, can, viewer, actor: req.user.email });
     });
     res.status(status).json(body);
   };
@@ -222,7 +225,7 @@ export function createApp(pool) {
   }));
 
   // Members
-  api.get('/companies/:companyId/members', route(['view_books', 'admin', 'time_approve', 'time_all'], ({ db, companyId }) => auth.listMembers(db, companyId)));
+  api.get('/companies/:companyId/members', route(['view_books', 'admin', 'payroll', 'time_approve', 'time_all'], ({ db, companyId }) => auth.listMembers(db, companyId)));
   api.post('/companies/:companyId/members', route('admin', async ({ db, req, companyId, actor }) => {
     const m = await auth.addMember(db, companyId, { email: req.body?.email, role: req.body?.role, departmentId: req.body?.departmentId });
     await ledger.auditOnly(db, companyId, { action: 'set_member', entity: 'membership', entityId: m.id, actor, payload: { email: m.email, role: m.role, roleId: m.roleId, departmentId: m.departmentId } });
@@ -380,8 +383,8 @@ export function createApp(pool) {
   api.post('/companies/:companyId/paychecks/:paycheckId/void', route('payroll', ({ db, req, companyId, actor }) =>
     payroll.voidPaycheck(db, companyId, req.params.paycheckId, { date: req.body?.date, reason: req.body?.reason, actor }), 201));
   const runOpts = (req) => {
-    const { payFrequency, periodStart, periodEnd, payDate, paidFromAccountId, items } = req.body ?? {};
-    return { payFrequency, periodStart, periodEnd, payDate, paidFromAccountId, items, idempotencyKey: idemKey(req) };
+    const { payFrequency, periodStart, periodEnd, payDate, paidFromAccountId, items, fromTimesheets } = req.body ?? {};
+    return { payFrequency, periodStart, periodEnd, payDate, paidFromAccountId, items, fromTimesheets, idempotencyKey: idemKey(req) };
   };
   api.post('/companies/:companyId/payroll-runs/preview', route('payroll', ({ db, req, companyId }) => payroll.previewRun(db, companyId, runOpts(req))));
   api.post('/companies/:companyId/payroll-runs', route('payroll', ({ db, req, companyId, actor }) => payroll.postRun(db, companyId, runOpts(req), { actor }), 201));
@@ -393,6 +396,32 @@ export function createApp(pool) {
     payroll.getPayrollLiabilities(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
   api.get('/companies/:companyId/paychecks', route(['view_books', 'payroll'], ({ db, req, companyId }) =>
     payroll.listPaychecks(db, companyId, { year: req.query.year ? Number(req.query.year) : undefined })));
+
+  api.patch('/companies/:companyId/employees/:employeeId/user', route(['payroll', 'admin'], ({ db, req, companyId, actor }) =>
+    time.linkEmployeeUser(db, companyId, req.params.employeeId, req.body?.userId ?? null, { actor })));
+  api.get('/companies/:companyId/payroll-hours', route('payroll', ({ db, req, companyId }) =>
+    time.getPayrollHours(db, companyId, { payFrequency: q(req.query.payFrequency), periodStart: q(req.query.periodStart), periodEnd: q(req.query.periodEnd) })));
+
+  // Jobs and timesheets. Who may see or change whose time is checked inside the service
+  // (own time, your department's time with "approve time", or everyone's with "all time").
+  const TIME = ['time_own', 'time_approve', 'time_all'];
+  const JOB_ADMIN = ['time_approve', 'time_all', 'admin'];
+  api.get('/companies/:companyId/jobs', route('member', ({ db, req, companyId }) => time.listJobs(db, companyId, { includeInactive: req.query.inactive === '1' })));
+  api.post('/companies/:companyId/jobs', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.createJob(db, companyId, req.body ?? {}, { actor }), 201));
+  api.patch('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.updateJob(db, companyId, req.params.jobId, req.body ?? {}, { actor })));
+  const TE = '/companies/:companyId/time-entries';
+  api.get(TE, route(TIME, ({ db, req, companyId, viewer }) => time.listTimeEntries(db, companyId, viewer, {
+    from: q(req.query.from), to: q(req.query.to), userId: q(req.query.userId), status: q(req.query.status), jobId: q(req.query.jobId) })));
+  api.post(TE, route(TIME, ({ db, req, companyId, viewer, actor }) => time.createTimeEntry(db, companyId, viewer, req.body ?? {}, { actor }), 201));
+  api.post(`${TE}/submit`, route(TIME, ({ db, req, companyId, viewer }) => time.submitTimeEntries(db, companyId, viewer, { ids: req.body?.ids })));
+  api.post(`${TE}/review`, route(['time_approve', 'time_all'], ({ db, req, companyId, viewer, actor }) =>
+    time.reviewTimeEntries(db, companyId, viewer, { ids: req.body?.ids, approve: req.body?.approve, note: req.body?.note }, { actor })));
+  api.post(`${TE}/import`, route(TIME, ({ db, req, companyId, viewer, actor }) => time.importTimesheet(db, companyId, viewer, {
+    fileName: req.body?.fileName, content: req.body?.content, preview: req.body?.preview === true, userId: req.body?.userId || null, createJobs: req.body?.createJobs === true }, { actor })));
+  api.get('/companies/:companyId/reports/time-summary', route(TIME, ({ db, req, companyId, viewer }) =>
+    time.getTimeSummary(db, companyId, viewer, { from: q(req.query.from), to: q(req.query.to) })));
+  api.patch(`${TE}/:timeEntryId`, route(TIME, ({ db, req, companyId, viewer, actor }) => time.updateTimeEntry(db, companyId, viewer, req.params.timeEntryId, req.body ?? {}, { actor })));
+  api.delete(`${TE}/:timeEntryId`, route(TIME, ({ db, req, companyId, viewer, actor }) => time.deleteTimeEntry(db, companyId, viewer, req.params.timeEntryId, { actor })));
 
   app.use('/api', api);
   app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));

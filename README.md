@@ -4,7 +4,7 @@ Small-business accounting and payroll for Texas, Colorado, California and Washin
 **double-entry books that cannot silently go out of balance**, with payroll tax logic reviewed by a
 Professional Review Board.
 
-Status: **Sprint 6 (payroll runs and pay stubs)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
+Status: **Sprint 6 (payroll runs, pay stubs, roles and timesheets)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
 Target: public beta January 1, 2027.
 
 ## What's here
@@ -104,5 +104,12 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `GET …/reports/{dashboard,trial-balance,balance-sheet,income-statement,cash-flow}` | statements |
 | `GET …/audit/verify` | verify the audit hash chain |
 | `GET/POST …/employees`, `POST …/employees/:id/paychecks[/preview]`, `GET …/paychecks` | payroll |
-| `POST …/payroll-runs/preview`, `POST …/payroll-runs`, `GET …/payroll-runs[/:id]` | pay everyone on a schedule for a pay period (`items: [{employeeId, hours, overtimeHours, preTaxDeductions}]`) |
+| `POST …/payroll-runs/preview`, `POST …/payroll-runs`, `GET …/payroll-runs[/:id]` | pay everyone on a schedule for a pay period (`items: [{employeeId, hours, overtimeHours, doubleTimeHours, preTaxDeductions}]`; `fromTimesheets: true` marks the period's approved hours paid) |
+| `GET …/payroll-hours?payFrequency=&periodStart=&periodEnd=` | approved, unpaid timesheet hours per employee, split into regular / overtime / double time (federal 40-hour week; California daily and 7th-day rules) |
+| `PATCH …/employees/:id/user` | link an employee to the person who signs in (`{userId}`), so their timesheets can be paid |
+| `GET/POST …/jobs`, `PATCH …/jobs/:id` | jobs that time is entered against (optionally tied to a customer) |
+| `GET/POST …/time-entries`, `PATCH/DELETE …/time-entries/:id` | timesheet entries (`{date, start, end}` or `{date, hours}`, `jobId`, `notes`, `billable`); you see your own, your department's with "approve time", or everyone's with "all time" |
+| `POST …/time-entries/submit`, `POST …/time-entries/review` | send for approval (`{ids}`); approve or send back (`{ids, approve, note}`); nobody but the owner approves their own time |
+| `POST …/time-entries/import` | HoursTracker (or any timesheet CSV) export: `{fileName, content, preview, userId, createJobs}`; repeated rows are skipped |
+| `GET …/reports/time-summary?from=&to=` | hours by person and job |
 | `GET …/paychecks/:id/stub`, `GET …/reports/payroll-liabilities?from=&to=` | pay stub with year-to-date; payroll taxes owed by agency (payroll role) |

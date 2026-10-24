@@ -86,4 +86,15 @@ test('payroll runs, pay stubs and tax liabilities', { skip: !hasDb && 'DATABASE_
     assert.equal(after.unpaid.find((u) => u.key === 'fica_payable').owedCents, 0);
     await assert.rejects(payroll.getPayrollLiabilities(pool, co.id, { from: '2026-02-01', to: '2026-01-01' }), /date range/);
   });
+
+  await t.test('double time (California) is paid at 2× and shown on the stub', async () => {
+    const ca = await payroll.createEmployee(pool, co.id, { firstName: 'Cal', lastName: 'Ifornia', workState: 'CA', payFrequency: 'weekly', payType: 'hourly', payRate: '20.00', w4: { filingStatus: 'single' } });
+    const r = await payroll.postRun(pool, co.id, { payFrequency: 'weekly', periodStart: '2026-03-01', periodEnd: '2026-03-07', payDate: '2026-03-13', paidFromAccountId: A['1000'],
+      items: [{ employeeId: ca.id, hours: '40', overtimeHours: '4', doubleTimeHours: '1.5' }] });
+    assert.equal(r.grossCents, 40 * 2000 + 4 * 3000 + 1.5 * 4000);
+    const pc = (await payroll.listPaychecks(pool, co.id)).find((p) => p.employee === 'Cal Ifornia');
+    const stub = await payroll.getPayStub(pool, co.id, pc.id);
+    assert.deepEqual(stub.earnings.map((e) => [e.label, e.amountCents, e.hours]), [['Regular pay', 80_000, 40], ['Overtime (1.5×)', 12_000, 4], ['Double time (2×)', 6_000, 1.5]]);
+    await assert.rejects(payroll.previewPaycheck(pool, co.id, ben.id, { payDate: '2026-03-13', doubleTimeHours: '1' }), /hourly employees only/);
+  });
 });
