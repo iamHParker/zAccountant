@@ -45,8 +45,9 @@ const SIDES = {
   bills: { kind: 'bill', perm: 'bills', Doc: 'Bill', docs: 'Bills', who: 'vendor', Who: 'Vendor', Whos: 'Vendors', contacts: 'vendors', docPath: 'bills',
     payPath: 'payments-made', agingPath: 'ap-aging', payVerb: 'Pay bills', control: 'Accounts Payable', lineHint: 'Expense account' },
 };
-const blankLine = () => ({ accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
-const blankDoc = () => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', taxRate: '', lines: [blankLine()], key: newKey() });
+const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
+const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', taxRate, lines: [blankLine()], key: newKey() });
+const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false });
 const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', open: [], amounts: {}, key: newKey() });
 
@@ -159,6 +160,7 @@ createApp({
       dep: { agency: null, form: '', date: today(), paidFrom: '', reference: '', key: newKey() },
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
+      items: [], inv: { item: blankItem(), editId: null, letterhead: { address: '', note: '', footer: '' }, logoBusy: false },
       lockDate: '', suiRate: '', famliCount: null, audit: null, futaCr: {},
       imp: { show: false, kind: 'journal', asOf: '', file: null, preview: null, problems: null, busy: false, history: [] },
       importKinds: [
@@ -226,7 +228,7 @@ createApp({
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if ((t === 'payroll' || t === 'settings') && this.has('payroll') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
-      if (t === 'settings') { this.editFutaCr(); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
+      if (t === 'settings') { this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'bank') this.loadBank();
       if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
@@ -248,6 +250,8 @@ createApp({
   },
   methods: {
     money,
+    blankLine,
+    usDate(d) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d ?? ''); return m ? `${m[2]}/${m[3]}/${m[1]}` : (d ?? ''); },
     can(perm) { return Boolean(this.company?.permissions?.includes(perm)); },
     /** Features come from the company's plan (the server refuses the rest). */
     has(feature) { return Boolean(this.company?.features?.includes(feature)); },
@@ -853,11 +857,76 @@ createApp({
     async toggleContactActive(c) {
       if (await this.run(() => api('PATCH', `${this.arBase()}/contacts/${c.id}`, { isActive: !c.isActive }))) this.loadAr();
     },
-    newDoc() { this.ar.doc = blankDoc(); this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null; },
+    newDoc() {
+      const invoice = this.S.kind === 'invoice';
+      this.ar.doc = blankDoc(invoice ? this.company?.default_sales_tax_rate ?? '' : '');
+      this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
+      if (invoice) this.loadItems();
+    },
+    // ---------------------------------------------------------------- Invoice setup: saved rates, sales tax, letterhead, logo
+    async loadItems(all = false) { this.items = (await this.run(() => api('GET', `/companies/${this.companyId}/invoice-items${all ? '?all=1' : ''}`))) ?? []; },
+    /** A saved rate was picked on an invoice line: fill in its price, tax and income account (all still changeable). */
+    pickItem(l) {
+      const it = this.items.find((x) => x.id === l.itemId);
+      if (!it) return;
+      l.accountId = it.accountId; l.taxable = it.taxable;
+      if (it.rateCents != null) l.unitPrice = (it.rateCents / 100).toFixed(2);
+      if (it.kind === 'expense') l.quantity = '1';
+      if (!l.serviceDate) l.serviceDate = this.ar.doc.date;
+    },
+    itemLabel(it) { return `${it.name}${it.rateCents != null ? ` · ${this.money(it.rateCents)}${it.kind === 'service' ? '/hr' : ''}` : ''}`; },
+    async pinTaxRate() {
+      const rate = String(this.ar.doc.taxRate ?? '').trim();
+      const r = await this.run(() => api('PUT', `/companies/${this.companyId}/default-tax-rate`, { rate }),
+        rate ? `New invoices will start with ${rate}% sales tax.` : 'New invoices will start with no sales tax rate.');
+      if (r) this.company = { ...this.company, default_sales_tax_rate: r.defaultSalesTaxRate };
+    },
+    incomeAccounts() { return this.accounts.filter((a) => a.isActive && a.type === 'revenue'); },
+    editItem(it) { this.inv.editId = it.id; this.inv.item = { name: it.name, kind: it.kind, rate: it.rateCents == null ? '' : (it.rateCents / 100).toFixed(2), taxable: it.taxable, accountId: it.accountId }; },
+    cancelItem() { this.inv.editId = null; this.inv.item = blankItem(); },
+    async saveItem() {
+      const v = this.inv.item; const id = this.inv.editId;
+      const r = await this.run(() => (id ? api('PATCH', `/companies/${this.companyId}/invoice-items/${id}`, v) : api('POST', `/companies/${this.companyId}/invoice-items`, v)),
+        id ? 'Rate saved.' : 'Rate added.');
+      if (r) { this.cancelItem(); this.loadItems(true); }
+    },
+    async toggleItem(it) {
+      if (await this.run(() => api('PATCH', `/companies/${this.companyId}/invoice-items/${it.id}`, { isActive: !it.isActive }))) this.loadItems(true);
+    },
+    async addStarterItems() {
+      const accountId = this.inv.item.accountId || this.incomeAccounts().find((a) => /service/i.test(a.name))?.id || this.incomeAccounts()[0]?.id;
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/invoice-items/starter`, { accountId }));
+      if (r) { this.flash(r.added ? `Added ${r.added} rates. Type in your prices next.` : 'You already have all of them.'); this.loadItems(true); }
+    },
+    editLetterhead() {
+      const c = this.company ?? {};
+      this.inv.letterhead = { address: c.invoice_address ?? '', note: c.invoice_note ?? '', footer: c.invoice_footer ?? '' };
+    },
+    async saveLetterhead() {
+      const r = await this.run(() => api('PUT', `/companies/${this.companyId}/letterhead`, this.inv.letterhead), 'Letterhead saved.');
+      if (r) { this.company = { ...this.company, invoice_address: r.address, invoice_note: r.note, invoice_footer: r.footer }; this.editLetterhead(); }
+    },
+    logoUrl() { return this.company?.logoVersion ? `/api/companies/${this.companyId}/logo?v=${this.company.logoVersion}` : null; },
+    async chooseLogo(e) {
+      const file = e.target.files?.[0]; e.target.value = '';
+      if (!file) return;
+      this.inv.logoBusy = true;
+      try {
+        const picture = await pictureFromFile(file, { maxSide: 600, type: 'image/png' });
+        const r = await this.run(() => api('PUT', `/companies/${this.companyId}/logo`, { picture }), 'Logo saved.');
+        if (r) this.company = { ...this.company, logoVersion: Date.now() };
+      } catch (err) { this.flash(err.message, 'bad'); } finally { this.inv.logoBusy = false; }
+    },
+    async removeLogo() {
+      if (!confirm('Remove the logo from your invoices?')) return;
+      if (await this.run(() => api('PUT', `/companies/${this.companyId}/logo`, { picture: null }), 'Logo removed.')) this.company = { ...this.company, logoVersion: null };
+    },
     async saveDoc() {
       const d = this.ar.doc;
-      const lines = d.lines.filter((l) => l.accountId || l.unitPrice).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1', unitPrice: l.unitPrice, taxable: l.taxable }));
-      const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo, taxRate: d.taxRate || undefined, lines };
+      const lines = d.lines.filter((l) => l.accountId || l.unitPrice).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
+        unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined }));
+      const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
+        project: this.S.kind === 'invoice' ? d.project : undefined, taxRate: d.taxRate || undefined, lines };
       const r = await this.run(() => api('POST', `${this.arBase()}/${this.S.docPath}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} saved.`);
       if (!r) return;
       this.ar.showDoc = false; this.ar.doc = blankDoc(); this.ar.panel = 'docs'; this.ar.view = 'open';

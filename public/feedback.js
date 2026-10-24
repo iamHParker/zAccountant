@@ -76,8 +76,11 @@ export async function pictureOfScreen() {
   });
 }
 
-/** A photo or picture file the tester chose, shrunk to at most 1600 pixels on its longer side -> JPEG data URL. */
-export async function pictureFromFile(file) {
+/**
+ * A photo or picture file the person chose, shrunk to at most `maxSide` pixels on its longer side -> data URL
+ * (JPEG for photos; PNG keeps a logo's lines and lettering crisp).
+ */
+export async function pictureFromFile(file, { maxSide = MAX_SIDE, type = 'image/jpeg' } = {}) {
   if (!/^image\//.test(file?.type ?? '')) throw new Error('Choose a picture (a photo or a screenshot)');
   // Read as a data: URL (the page's security policy allows data: pictures, not blob: ones).
   const src = await new Promise((resolve, reject) => {
@@ -92,10 +95,10 @@ export async function pictureFromFile(file) {
     i.onerror = () => reject(new Error('That picture could not be opened. Try a JPEG or PNG.'));
     i.src = src;
   });
-  const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
   const c = Object.assign(document.createElement('canvas'), { width: Math.round(img.naturalWidth * scale), height: Math.round(img.naturalHeight * scale) });
   const g = c.getContext('2d');
   g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height);
   g.drawImage(img, 0, 0, c.width, c.height);
-  return c.toDataURL('image/jpeg', 0.85);
+  return type === 'image/png' ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.85);
 }

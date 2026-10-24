@@ -42,6 +42,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   confirmation before the Board certifies DC.
 - **Production has no backups yet** (Railway Hobby plan can't schedule them). Homer decides by mid-Nov: upgrade
   to Pro, or Claude builds a nightly pg_dump to outside storage. Must be in place, with a restore drill, before alpha.
+- Invoice queue item 6: split travel costs (motel, rental car, airfare) across 2+ jobs, each invoice getting a share.
+  Homer's sample (a 2025 Excel invoice) had no split, so ask him how he divides them (equal shares or percents).
 - All tax-table blocks are `verified: false` until the Board certifies them; companies run in calculate-only mode.
 
 ## How the code is built (rules to keep)
@@ -67,6 +69,10 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 - Plans (Admin dashboard): catalog + path gates in `src/core/plans.js`, `src/services/planService.js`, tables
   `company_plans` / `plan_changes` (migration 015). `route()` refuses a gated path with 402. No row = Beta tester (all on).
   Prices are null until Homer sets them; don't invent prices.
+- Invoices for professional services (migration 016, `src/services/invoiceSetupService.js`): saved rates/items
+  (`invoice_items`, kind service = hours × rate, expense = cost passed on), line `service_date`/`item_id`, invoice
+  `project` block, letterhead (address, note with tax ID + TX firm number, closing line), logo in `company_logos`,
+  pinned `default_sales_tax_rate`. Layout follows Homer's Excel invoice: Hours, Date, Task, Rate, T, Subtotal.
 - Ops: request logs/metrics in `src/metrics.js`; restore drill and load test in `src/jobs/`; how to run them and
   the results log: `docs/runbooks/operations.md`.
 

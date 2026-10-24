@@ -460,7 +460,30 @@
             <label>Due date <input type="date" v-model="ar.doc.dueDate" placeholder="from terms"></label>
           </div>
           <p class="muted small">Leave the due date empty to use the {{ S.who }}'s payment terms.</p>
+          <label v-if="S.kind === 'invoice'">Project (optional: name and site address, printed on the invoice)
+            <textarea v-model="ar.doc.project" rows="3" maxlength="300" placeholder="Project name&#10;Street&#10;City, State ZIP"></textarea></label>
+          <template v-if="S.kind === 'invoice'">
           <table class="data lines">
+            <thead><tr><th>Rate or item</th><th>Date</th><th>Task / description</th><th class="num">Hours / qty</th><th class="num">Rate / price</th><th title="Taxable">Tax</th><th class="num">Amount</th><th>Income account</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="(l, i) in ar.doc.lines">
+                <td><select v-model="l.itemId" @change="pickItem(l)"><option value="">None</option>
+                  <optgroup label="By the hour"><option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
+                  <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
+                <td class="w150"><input type="date" v-model="l.serviceDate"></td>
+                <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit"></td>
+                <td class="w90"><input v-model="l.quantity" inputmode="decimal" class="num"></td>
+                <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
+                <td><input type="checkbox" v-model="l.taxable" class="auto-w" title="Taxable"></td>
+                <td class="num">{{ money(lineCents(l.quantity, l.unitPrice)) }}</td>
+                <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
+                <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="muted small" v-if="!items.length">Tip: save your rates (Eng Std Rate, Drafting, Equipment rental…) in Settings → Invoice rates and items, then pick them here.</p>
+          </template>
+          <table class="data lines" v-else>
             <thead><tr><th>{{ S.lineHint }}</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th v-if="S.kind === 'invoice'">Taxable</th><th class="num">Amount</th><th></th></tr></thead>
             <tbody>
               <tr v-for="(l, i) in ar.doc.lines">
@@ -474,10 +497,15 @@
               </tr>
             </tbody>
           </table>
-          <button type="button" class="small" @click="ar.doc.lines.push({ accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false })">+ Add line</button>
+          <button type="button" class="small" @click="ar.doc.lines.push({ ...blankLine(), serviceDate: S.kind === 'invoice' ? (ar.doc.lines.at(-1)?.serviceDate || '') : '' })">+ Add line</button>
           <div class="grid2">
             <label>Memo (optional) <input v-model="ar.doc.memo" maxlength="500"></label>
-            <label v-if="S.kind === 'invoice'">Sales tax rate % (optional) <input v-model="ar.doc.taxRate" inputmode="decimal" placeholder="e.g. 8.25"></label>
+            <div v-if="S.kind === 'invoice'">
+              <label>Sales tax rate % (optional) <input v-model="ar.doc.taxRate" inputmode="decimal" placeholder="e.g. 8.25"></label>
+              <button type="button" class="link" v-if="can('invoices') && String(ar.doc.taxRate || '').trim() !== (company.default_sales_tax_rate ?? '')" @click="pinTaxRate"
+                title="Start every new invoice with this rate">📌 Save {{ String(ar.doc.taxRate || '').trim() ? ar.doc.taxRate + '%' : 'no rate' }} as the default</button>
+              <span class="muted small" v-else-if="company.default_sales_tax_rate">📌 Your default rate</span>
+            </div>
           </div>
           <p class="num">Subtotal {{ money(docTotals.sub) }}<span v-if="docTotals.tax"> · Sales tax {{ money(docTotals.tax) }}</span> · <strong>Total {{ money(docTotals.total) }}</strong></p>
           <button class="primary" :disabled="docTotals.total <= 0 || !ar.doc.contactId">Save {{ S.Doc.toLowerCase() }}</button>
@@ -516,7 +544,7 @@
 
       <div class="card statement-doc print-me" v-if="ar.detail">
         <div class="row">
-          <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small">· {{ statusLabel(ar.detail.status) }}</span></h2>
+          <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small no-print">· {{ statusLabel(ar.detail.status) }}</span></h2>
           <span>
             <button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button>
             <button v-if="can(S.perm) && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
@@ -524,12 +552,46 @@
             <button @click="ar.detail = null">Close</button>
           </span>
         </div>
+        <template v-if="S.kind === 'invoice'">
+        <div class="letterhead">
+          <img v-if="logoUrl()" :src="logoUrl()" alt="" class="invoice-logo">
+          <div class="grow"><strong class="company-name">{{ company.name }}</strong>
+            <div class="pre-line" v-if="company.invoice_address">{{ company.invoice_address }}</div></div>
+          <table class="invoice-box">
+            <tr><th>Invoice #</th><td>{{ ar.detail.number }}</td></tr>
+            <tr><th>Date</th><td>{{ usDate(ar.detail.date) }}</td></tr>
+            <tr><th>Due</th><td>{{ usDate(ar.detail.dueDate) }}</td></tr>
+            <tr v-if="ar.detail.contact.termsDays != null"><th>Terms</th><td>{{ ar.detail.contact.termsDays ? ar.detail.contact.termsDays + ' days' : 'Due on receipt' }}</td></tr>
+          </table>
+        </div>
+        <div class="grid2 invoice-parties">
+          <div class="boxed"><span class="muted small">BILL TO</span><br><strong>{{ ar.detail.contact.name }}</strong>
+            <div class="pre-line" v-if="ar.detail.contact.address">{{ ar.detail.contact.address }}</div><div v-if="ar.detail.contact.email">{{ ar.detail.contact.email }}</div></div>
+          <div>
+            <div v-if="ar.detail.project"><span class="muted small">PROJECT</span><div class="pre-line">{{ ar.detail.project }}</div></div>
+            <div v-if="company.invoice_note" class="pre-line small invoice-note">{{ company.invoice_note }}</div>
+          </div>
+        </div>
+        <table class="data invoice-lines">
+          <thead><tr><th class="num">Hours / qty</th><th>Date</th><th>Description</th><th class="num">Rate</th><th title="Taxable">Tax</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            <tr v-for="l in ar.detail.lines"><td class="num">{{ l.quantity }}</td><td>{{ l.serviceDate ? usDate(l.serviceDate) : '' }}</td>
+              <td>{{ l.description || l.itemName || l.accountName }}<span v-if="l.itemName && l.description" class="muted small"> · {{ l.itemName }}</span></td>
+              <td class="num">{{ money(l.unitPriceCents) }}</td><td>{{ l.taxable ? 'T' : '' }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr v-if="ar.detail.taxCents"><td colspan="5" class="num">Subtotal</td><td class="num">{{ money(ar.detail.subtotalCents) }}</td></tr>
+            <tr v-if="ar.detail.taxCents"><td colspan="5" class="num">Sales tax {{ ar.detail.taxRate }}% on taxable lines</td><td class="num">{{ money(ar.detail.taxCents) }}</td></tr>
+            <tr class="total"><td colspan="5" class="num">Total</td><td class="num">{{ money(ar.detail.totalCents) }}</td></tr>
+            <tr v-for="p in ar.detail.payments.filter(p => p.status === 'posted')"><td colspan="5" class="num">Payment {{ p.date }}{{ p.reference ? ' #' + p.reference : '' }}</td><td class="num">({{ money(p.amountCents) }})</td></tr>
+            <tr class="total"><td colspan="5" class="num">Balance due</td><td class="num">{{ money(ar.detail.balanceCents) }}</td></tr>
+          </tbody>
+        </table>
+        <p v-if="company.invoice_footer" class="pre-line invoice-footer">{{ company.invoice_footer }}</p>
+        </template>
+        <template v-else>
         <div class="grid2">
-          <div><strong>{{ S.kind === 'invoice' ? company.name : ar.detail.contact.name }}</strong></div>
+          <div><strong>{{ ar.detail.contact.name }}</strong></div>
           <div class="num">Date {{ ar.detail.date }}<br>Due {{ ar.detail.dueDate }}</div>
         </div>
-        <p v-if="S.kind === 'invoice'"><span class="muted">Bill to</span><br><strong>{{ ar.detail.contact.name }}</strong><br>
-          <span v-if="ar.detail.contact.address">{{ ar.detail.contact.address }}<br></span><span v-if="ar.detail.contact.email">{{ ar.detail.contact.email }}</span></p>
         <table class="data">
           <thead><tr><th>Description</th><th v-if="S.kind === 'bill'">Account</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr></thead>
           <tbody>
@@ -543,8 +605,9 @@
             <tr class="total"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Balance due</td><td class="num">{{ money(ar.detail.balanceCents) }}</td></tr>
           </tbody>
         </table>
+        </template>
         <p v-if="ar.detail.memo">{{ ar.detail.memo }}</p>
-        <p class="muted small">Journal entry #{{ ar.detail.entryNumber }}<span v-if="ar.detail.voidDate"> · voided {{ ar.detail.voidDate }}</span></p>
+        <p class="muted small no-print">Journal entry #{{ ar.detail.entryNumber }}<span v-if="ar.detail.voidDate"> · voided {{ ar.detail.voidDate }}</span></p>
       </div>
 
       <div class="seg">
@@ -1401,6 +1464,53 @@
         </table>
         <form v-if="can('admin')" @submit.prevent="addDept" class="row wrap"><input v-model.trim="newDept" placeholder="Department name" maxlength="60" required class="grow"><button>Add</button></form>
       </div>
+      <div class="card" v-if="can('admin')">
+        <h2>Invoice letterhead and logo</h2>
+        <p class="hint">What prints at the top and bottom of every invoice.</p>
+        <div class="row wrap logo-row">
+          <img v-if="logoUrl()" :src="logoUrl()" alt="Your logo" class="invoice-logo">
+          <span v-else class="muted">No logo yet.</span>
+          <label class="button file-btn">{{ logoUrl() ? 'Change logo' : 'Upload logo' }}<input type="file" accept="image/png,image/jpeg" @change="chooseLogo" :disabled="inv.logoBusy"></label>
+          <button v-if="logoUrl()" type="button" class="link" @click="removeLogo">remove</button>
+        </div>
+        <p class="muted small">A PNG or JPEG. It's shrunk to 600 pixels on its longer side.</p>
+        <form @submit.prevent="saveLetterhead">
+          <div class="grid2">
+            <label>Address (under your company name) <textarea v-model="inv.letterhead.address" rows="3" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
+            <label>Note on each invoice (tax ID, firm registration number…) <textarea v-model="inv.letterhead.note" rows="3" maxlength="300" placeholder="TAX ID# 00-0000000&#10;TX Firm 000"></textarea></label>
+          </div>
+          <label>Closing line <input v-model="inv.letterhead.footer" maxlength="300" placeholder="Thank you for your business"></label>
+          <button class="primary">Save letterhead</button>
+        </form>
+      </div>
+
+      <div class="card" v-if="can('admin')">
+        <h2>Invoice rates and items</h2>
+        <p class="hint">Save the rates you bill (Eng Std Rate, Drafting…) and the costs you pass on (equipment rental, lodging, airfare). On an invoice,
+          pick one and the line fills in its rate, tax and income account. You can still change the numbers on any one invoice, and changing a rate here never changes invoices already saved.
+          Leave the price empty for costs that differ every time.</p>
+        <table class="data" v-if="items.length">
+          <thead><tr><th>Name</th><th>Billed</th><th class="num">Rate / price</th><th>Taxable</th><th>Income account</th><th></th></tr></thead>
+          <tr v-for="it in items" :class="{ muted: !it.isActive }"><td>{{ it.name }}</td><td>{{ it.kind === 'service' ? 'by the hour' : 'cost passed on' }}</td>
+            <td class="num">{{ it.rateCents == null ? 'type on invoice' : money(it.rateCents) }}</td><td>{{ it.taxable ? 'yes' : '' }}</td>
+            <td>{{ it.accountCode }} · {{ it.accountName }}</td>
+            <td class="actions"><button class="link" @click="editItem(it)">edit</button> <button class="link" @click="toggleItem(it)">{{ it.isActive ? 'hide' : 'show' }}</button></td></tr>
+        </table>
+        <p v-else><button type="button" @click="addStarterItems">Start with an engineering firm's list</button>
+          <span class="muted small">Adds Eng Std Rate, Eng Overtime Rate, Eng Depo/Arb/Trial Rate, Eng Volume Rate, Drafting, Office worker, Equipment rental, Lodging, Rental car and Airfare, with no prices yet.</span></p>
+        <form @submit.prevent="saveItem" class="preview">
+          <h3>{{ inv.editId ? 'Change ' + inv.item.name : 'Add a rate or item' }}</h3>
+          <div class="grid4">
+            <label>Name <input v-model="inv.item.name" maxlength="80" required></label>
+            <label>Billed <select v-model="inv.item.kind"><option value="service">By the hour (hours × rate)</option><option value="expense">Cost passed on (usually 1 × cost)</option></select></label>
+            <label>{{ inv.item.kind === 'service' ? 'Hourly rate' : 'Price (optional)' }} <input v-model="inv.item.rate" inputmode="decimal" class="num" placeholder="0.00"></label>
+            <label>Income account <select v-model="inv.item.accountId" required><option value="">Choose…</option><option v-for="a in incomeAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+          </div>
+          <label class="check"><input type="checkbox" v-model="inv.item.taxable"> Charge sales tax on it</label>
+          <button class="primary">{{ inv.editId ? 'Save' : 'Add' }}</button> <button type="button" v-if="inv.editId" @click="cancelItem">Cancel</button>
+        </form>
+      </div>
+
       <div class="card narrow" v-if="can('close')">
         <h2>Close the books</h2>
         <p class="hint">After you close a period, nobody can add or change transactions dated on or before that day.
