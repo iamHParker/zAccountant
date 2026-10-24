@@ -71,6 +71,33 @@ test('payroll posting against PostgreSQL', { skip: !hasDb && 'DATABASE_URL not s
     assert.deepEqual(rows.map((r) => r.f), [200_000, 400_000, 600_000, 700_000, 700_000, 700_000, 700_000, 700_000].map((x, i) => Math.min((i + 1) * 200_000, 1_600_000)));
   });
 
+  await t.test('payroll register: one row per paycheck, voids as negative rows, every row ties', async () => {
+    const kim = await payroll.createEmployee(pool, co.id, { firstName: 'Kim', lastName: 'Ortiz', workState: 'TX', payFrequency: 'biweekly', payType: 'hourly', payRate: '30.00', w4: {} });
+    const ded = [{ name: '401(k)', amountCents: 12_000, kind: 'retirement_401k' }];
+    const a = await payroll.postPaycheck(pool, co.id, kim.id, { payDate: '2026-05-15', hours: '80', overtimeHours: '2', preTaxDeductions: ded });
+    await payroll.postPaycheck(pool, co.id, kim.id, { payDate: '2026-05-29', hours: '80', preTaxDeductions: ded });
+    const second = (await payroll.listPaychecks(pool, co.id)).find((p) => p.payDate === '2026-05-29');
+    await payroll.voidPaycheck(pool, co.id, second.id, { reason: 'Paid twice', date: '2026-05-29' });
+    const reg = await payroll.getPayrollRegister(pool, co.id, { from: '2026-05-01', to: '2026-05-31' });
+    assert.equal(reg.ties, true);
+    assert.equal(reg.rows.length, 3);
+    const [first, orig, voidRow] = reg.rows;
+    assert.equal(first.hours, '82.00');
+    assert.equal(first.grossCents, a.grossCents); // 80 × 30 + 2 × 45 = $2,490
+    assert.equal(first.grossCents, 249_000);
+    assert.equal(first.deductions['401(k)'], 12_000);
+    assert.equal(orig.note, 'Voided on 2026-05-29');
+    assert.equal(voidRow.note, 'Void of the 2026-05-29 paycheck');
+    assert.deepEqual([voidRow.hours, voidRow.grossCents, voidRow.deductions['401(k)']], ['-80.00', -240_000, -12_000]);
+    // Net effect of the month is the one good paycheck.
+    assert.deepEqual([reg.totals.hours, reg.totals.grossCents, reg.totals.deductions['401(k)'], reg.totals.netPayCents], ['82.00', 249_000, 12_000, a.netPayCents]);
+    assert.equal(reg.totals.employerCostCents, 249_000 + a.employerTaxes.reduce((t, x) => t + x.amountCents, 0));
+    assert.deepEqual(reg.deductionColumns, [{ key: '401(k)', label: '401(k)' }]);
+    // The stub's year-to-date 401(k) is back to one paycheck's worth after the void.
+    const stub = await payroll.getPayStub(pool, co.id, voidRow.paycheckId);
+    assert.equal(stub.deductions[0].ytdCents, 12_000);
+  });
+
   await t.test('paychecks must be entered in date order', async () => {
     await assert.rejects(payroll.postPaycheck(pool, co.id, emp.id, { payDate: '2026-02-01', hours: '80' }), /date order/);
     await assert.rejects(payroll.previewPaycheck(pool, co.id, emp.id, { payDate: '2026-05-01', hours: 'lots' }), /must be a number/);

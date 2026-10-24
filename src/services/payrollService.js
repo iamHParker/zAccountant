@@ -225,6 +225,7 @@ export async function voidPaycheck(pool, companyId, paycheckId, { date, reason, 
     const voidCalc = {
       voidOf: pc.id, reason: reason.trim(), grossCents: neg(calc.grossCents), netPayCents: neg(calc.netPayCents),
       wages: { incomeTaxCents: neg(calc.wages.incomeTaxCents), ficaCents: neg(calc.wages.ficaCents) },
+      deductions: (calc.deductions ?? []).map((d) => ({ ...d, amountCents: neg(d.amountCents) })),
       employeeTaxes: calc.employeeTaxes.map((t) => ({ ...t, amountCents: neg(t.amountCents), taxableCents: neg(t.taxableCents) })),
       employerTaxes: calc.employerTaxes.map((t) => ({ ...t, amountCents: neg(t.amountCents), taxableCents: neg(t.taxableCents) })),
     };
@@ -427,6 +428,67 @@ export async function getPayStub(db, companyId, paycheckId) {
     employerTaxes: (calc.employerTaxes ?? []).map((t) => ({ code: t.code, label: t.label, amountCents: t.amountCents, ytdCents: ytdEr.get(t.code) ?? 0 })),
     netPayCents: calc.netPayCents, ytdNetPayCents: ytdNet,
     tablesVerified: pc.tables_verified,
+  };
+}
+
+// ---------------------------------------------------------------- Payroll register
+
+const hundredthsOf = (calc) => (calc.regularHours == null ? null
+  : Math.round(calc.regularHours * 100) + (calc.overtime?.hundredthsOfHours ?? 0) + (calc.doubleTime?.hundredthsOfHours ?? 0));
+const hoursText = (h) => (h == null ? null : `${h < 0 ? '-' : ''}${Math.floor(Math.abs(h) / 100)}.${String(Math.abs(h) % 100).padStart(2, '0')}`);
+
+/**
+ * Payroll register: every paycheck with a pay date in [from, to], one column per deduction and tax,
+ * with totals. Void records appear as negative rows (and the paycheck they cancel is marked), so the
+ * totals are what was really paid. Each row ties: gross − deductions − employee taxes = net pay.
+ */
+export async function getPayrollRegister(db, companyId, { from, to }) {
+  if (!isIsoDate(from) || !isIsoDate(to) || to < from) throw new LedgerError('Choose a date range (from on or before to)');
+  const { rows } = await db.query(
+    `SELECT p.id, to_char(p.pay_date, 'YYYY-MM-DD') AS "payDate", to_char(p.period_start, 'YYYY-MM-DD') AS "periodStart",
+            to_char(p.period_end, 'YYYY-MM-DD') AS "periodEnd", p.calculation, o.calculation AS "originalCalc",
+            to_char(o.pay_date, 'YYYY-MM-DD') AS "voidsPayDate", e.last_name || ', ' || e.first_name AS employee,
+            (SELECT to_char(v.pay_date, 'YYYY-MM-DD') FROM paychecks v WHERE v.company_id = p.company_id AND v.voids_paycheck_id = p.id) AS "voidedOn"
+       FROM paychecks p JOIN employees e ON e.id = p.employee_id LEFT JOIN paychecks o ON o.id = p.voids_paycheck_id
+      WHERE p.company_id = $1 AND p.pay_date BETWEEN $2 AND $3
+      ORDER BY p.pay_date, e.last_name, e.first_name, p.created_at`, [companyId, from, to]);
+  const cols = { deductions: new Map(), employeeTaxes: new Map(), employerTaxes: new Map() };
+  const blankTotals = () => ({ grossCents: 0, netPayCents: 0, deductions: {}, employeeTaxes: {}, employerTaxes: {} });
+  const totals = blankTotals();
+  const sumOf = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+  let totalHours = null;
+  const out = rows.map((r) => {
+    const calc = r.calculation;
+    const orig = r.originalCalc;
+    // Void records made before deductions were copied onto them: take the original's, negated.
+    const deductions = calc.deductions ?? (orig?.deductions ?? []).map((d) => ({ ...d, amountCents: -d.amountCents }));
+    const hours = orig ? (hundredthsOf(orig) == null ? null : -hundredthsOf(orig)) : hundredthsOf(calc);
+    const row = { paycheckId: r.id, payDate: r.payDate, employee: r.employee, periodStart: r.periodStart ?? null, periodEnd: r.periodEnd ?? null,
+      hours: hoursText(hours), ...blankTotals(), grossCents: calc.grossCents, netPayCents: calc.netPayCents,
+      note: r.voidsPayDate ? `Void of the ${r.voidsPayDate} paycheck` : r.voidedOn ? `Voided on ${r.voidedOn}` : null };
+    if (hours != null) totalHours = (totalHours ?? 0) + hours;
+    const add = (kind, key, label, cents) => {
+      if (!cols[kind].has(key)) cols[kind].set(key, { key, label });
+      row[kind][key] = (row[kind][key] ?? 0) + cents;
+      totals[kind][key] = (totals[kind][key] ?? 0) + cents;
+    };
+    for (const d of deductions) add('deductions', d.name, d.name, d.amountCents);
+    for (const t of calc.employeeTaxes ?? []) add('employeeTaxes', t.code, t.label, t.amountCents);
+    for (const t of calc.employerTaxes ?? []) add('employerTaxes', t.code, t.label.replace(/ \(employer\)$/, ''), t.amountCents);
+    totals.grossCents += row.grossCents;
+    totals.netPayCents += row.netPayCents;
+    row.check = row.grossCents - sumOf(row.deductions) - sumOf(row.employeeTaxes) - row.netPayCents;
+    return row;
+  });
+  totals.hours = hoursText(totalHours);
+  totals.employerCostCents = totals.grossCents + sumOf(totals.employerTaxes);
+  totals.check = totals.grossCents - sumOf(totals.deductions) - sumOf(totals.employeeTaxes) - totals.netPayCents;
+  return {
+    from, to, rows: out, totals,
+    deductionColumns: [...cols.deductions.values()],
+    employeeTaxColumns: [...cols.employeeTaxes.values()],
+    employerTaxColumns: [...cols.employerTaxes.values()],
+    ties: totals.check === 0 && out.every((r) => r.check === 0),
   };
 }
 

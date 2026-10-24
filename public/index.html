@@ -331,11 +331,11 @@
         </form>
       </div>
 
-      <div class="card statement-doc" v-if="ar.detail">
+      <div class="card statement-doc print-me" v-if="ar.detail">
         <div class="row">
           <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small">· {{ statusLabel(ar.detail.status) }}</span></h2>
           <span>
-            <button @click="printPage">Print</button>
+            <button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button>
             <button v-if="can(S.perm) && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="voidDoc(ar.detail)">Void</button>
             <button @click="ar.detail = null">Close</button>
@@ -424,10 +424,11 @@
         </table>
       </div>
 
-      <div class="card statement" v-if="ar.panel === 'aging'">
+      <div class="card statement print-me" v-if="ar.panel === 'aging'">
         <div class="row wrap">
           <label class="inline">As of <input type="date" v-model="ar.agingAsOf" @change="loadAr"></label>
-          <button @click="printPage">Print</button>
+          <button @click="downloadCsv(`/companies/${companyId}/reports/${S.agingPath}?asOf=${ar.agingAsOf}&format=csv`)">Download CSV</button>
+          <button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button>
         </div>
         <template v-if="ar.aging">
           <h2>{{ company.name }}</h2>
@@ -570,16 +571,24 @@
     <section v-if="tab === 'reports'">
       <div class="row wrap">
         <div class="seg">
-          <button v-for="r in reportTypes" :class="{ active: report.type === r.id }" @click="report.type = r.id; loadReport()">{{ r.label }}</button>
+          <button v-for="r in reportTypes.filter((r) => can(r.perm))" :class="{ active: report.type === r.id }" @click="report.type = r.id; loadReport()">{{ r.label }}</button>
         </div>
-        <label v-if="report.type === 'income-statement' || report.type === 'cash-flow'" class="inline">From <input type="date" v-model="report.from" @change="loadReport"></label>
-        <label class="inline">{{ report.type === 'income-statement' || report.type === 'cash-flow' ? 'To' : 'As of' }} <input type="date" v-model="report.to" @change="loadReport"></label>
-        <button @click="printPage">Print</button>
+        <label v-if="reportIsRange" class="inline">From <input type="date" v-model="report.from" @change="loadReport"></label>
+        <label class="inline">{{ reportIsRange ? 'To' : 'As of' }} <input type="date" v-model="report.to" @change="loadReport"></label>
+        <label v-if="report.type === 'balance-sheet' || report.type === 'income-statement'" class="inline">Compare with
+          <select class="auto" v-model="report.compare" @change="loadReport">
+            <option value="none">nothing</option>
+            <option value="prior_period">{{ report.type === 'balance-sheet' ? 'a month earlier' : 'the period before' }}</option>
+            <option value="prior_year">a year earlier</option>
+          </select>
+        </label>
+        <button @click="downloadReport">Download CSV</button>
+        <button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button>
       </div>
-      <div class="card statement" v-if="report.data">
+      <div class="card statement print-me" v-if="report.data">
         <h2>{{ company.name }}</h2>
         <h3>{{ reportTypes.find(r => r.id === report.type).label }}</h3>
-        <p class="muted">{{ report.data.asOf ? 'As of ' + report.data.asOf : report.data.from + ' to ' + report.data.to }}</p>
+        <p class="muted">{{ report.data.asOf ? 'As of ' + report.data.asOf : (report.type === 'payroll-register' ? 'Pay dates ' : '') + report.data.from + ' to ' + report.data.to }}<template v-if="report.data.comparison">, compared with {{ report.data.comparison.asOf || report.data.comparison.from + ' to ' + report.data.comparison.to }}</template></p>
 
         <template v-if="report.type === 'trial-balance'">
           <table class="data">
@@ -591,39 +600,76 @@
 
         <template v-if="report.type === 'balance-sheet'">
           <table class="data">
-            <tr class="head"><td colspan="2">Assets</td></tr>
-            <tr v-for="l in report.data.assets.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
-            <tr class="total"><td>Total assets</td><td class="num">{{ money(report.data.assets.totalCents) }}</td></tr>
-            <tr class="head"><td colspan="2">Liabilities</td></tr>
-            <tr v-for="l in report.data.liabilities.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
-            <tr class="sub"><td>Total liabilities</td><td class="num">{{ money(report.data.liabilities.totalCents) }}</td></tr>
-            <tr class="head"><td colspan="2">Equity</td></tr>
-            <tr v-for="l in report.data.equity.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
-            <tr class="sub"><td>Total equity</td><td class="num">{{ money(report.data.equity.totalCents) }}</td></tr>
-            <tr class="total"><td>Total liabilities &amp; equity</td><td class="num">{{ money(report.data.liabilitiesAndEquityCents) }}</td></tr>
+            <thead v-if="report.data.comparison"><tr><th></th><th class="num" v-for="h in cmpHeads">{{ h }}</th></tr></thead>
+            <tr class="head"><td :colspan="cmpCols">Assets</td></tr>
+            <tr v-for="l in report.data.assets.lines"><td class="ind">{{ l.name }}</td><td class="num" v-for="c in lineCells(l)">{{ c }}</td></tr>
+            <tr class="total"><td>Total assets</td><td class="num" v-for="c in secCells(report.data.assets)">{{ c }}</td></tr>
+            <tr class="head"><td :colspan="cmpCols">Liabilities</td></tr>
+            <tr v-for="l in report.data.liabilities.lines"><td class="ind">{{ l.name }}</td><td class="num" v-for="c in lineCells(l)">{{ c }}</td></tr>
+            <tr class="sub"><td>Total liabilities</td><td class="num" v-for="c in secCells(report.data.liabilities)">{{ c }}</td></tr>
+            <tr class="head"><td :colspan="cmpCols">Equity</td></tr>
+            <tr v-for="l in report.data.equity.lines"><td class="ind">{{ l.name }}</td><td class="num" v-for="c in lineCells(l)">{{ c }}</td></tr>
+            <tr class="sub"><td>Total equity</td><td class="num" v-for="c in secCells(report.data.equity)">{{ c }}</td></tr>
+            <tr class="total"><td>Total liabilities &amp; equity</td><td class="num" v-for="c in totCells('liabilitiesAndEquityCents')">{{ c }}</td></tr>
           </table>
         </template>
 
         <template v-if="report.type === 'income-statement'">
           <table class="data">
-            <tr class="head"><td colspan="2">Income</td></tr>
-            <tr v-for="l in report.data.revenue.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
-            <tr class="sub"><td>Total income</td><td class="num">{{ money(report.data.revenue.totalCents) }}</td></tr>
+            <thead v-if="report.data.comparison"><tr><th></th><th class="num" v-for="h in cmpHeads">{{ h }}</th></tr></thead>
+            <tr class="head"><td :colspan="cmpCols">Income</td></tr>
+            <tr v-for="l in report.data.revenue.lines"><td class="ind">{{ l.name }}</td><td class="num" v-for="c in lineCells(l)">{{ c }}</td></tr>
+            <tr class="sub"><td>Total income</td><td class="num" v-for="c in secCells(report.data.revenue)">{{ c }}</td></tr>
             <template v-if="report.data.cogs.lines.length">
-              <tr class="head"><td colspan="2">Cost of goods sold</td></tr>
-              <tr v-for="l in report.data.cogs.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
-              <tr class="sub"><td>Gross profit</td><td class="num">{{ money(report.data.grossProfitCents) }}</td></tr>
+              <tr class="head"><td :colspan="cmpCols">Cost of goods sold</td></tr>
+              <tr v-for="l in report.data.cogs.lines"><td class="ind">{{ l.name }}</td><td class="num" v-for="c in lineCells(l)">{{ c }}</td></tr>
+              <tr class="sub"><td>Gross profit</td><td class="num" v-for="c in totCells('grossProfitCents')">{{ c }}</td></tr>
             </template>
-            <tr class="head"><td colspan="2">Expenses</td></tr>
-            <tr v-for="l in report.data.operatingExpenses.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
-            <tr class="sub"><td>Operating income</td><td class="num">{{ money(report.data.operatingIncomeCents) }}</td></tr>
+            <tr class="head"><td :colspan="cmpCols">Expenses</td></tr>
+            <tr v-for="l in report.data.operatingExpenses.lines"><td class="ind">{{ l.name }}</td><td class="num" v-for="c in lineCells(l)">{{ c }}</td></tr>
+            <tr class="sub"><td>Total expenses</td><td class="num" v-for="c in secCells(report.data.operatingExpenses)">{{ c }}</td></tr>
+            <tr class="sub"><td>Operating income</td><td class="num" v-for="c in totCells('operatingIncomeCents')">{{ c }}</td></tr>
             <template v-if="report.data.otherIncome.lines.length || report.data.otherExpenses.lines.length">
-              <tr class="head"><td colspan="2">Other income &amp; expenses</td></tr>
-              <tr v-for="l in report.data.otherIncome.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
-              <tr v-for="l in report.data.otherExpenses.lines"><td class="ind">{{ l.name }}</td><td class="num">{{ money(-l.amountCents) }}</td></tr>
+              <tr class="head"><td :colspan="cmpCols">Other income &amp; expenses</td></tr>
+              <tr v-for="l in report.data.otherIncome.lines"><td class="ind">{{ l.name }}</td><td class="num" v-for="c in lineCells(l)">{{ c }}</td></tr>
+              <tr v-for="l in report.data.otherExpenses.lines"><td class="ind">{{ l.name }}</td><td class="num" v-for="c in lineCells(l, -1)">{{ c }}</td></tr>
             </template>
-            <tr class="total"><td>Net income</td><td class="num">{{ money(report.data.netIncomeCents) }}</td></tr>
+            <tr class="total"><td>Net income</td><td class="num" v-for="c in totCells('netIncomeCents')">{{ c }}</td></tr>
           </table>
+          <p class="muted small" v-if="report.data.comparison">Change % is measured against the earlier period; "—" means the earlier amount was zero. Expense lines show a + when the expense went up.</p>
+        </template>
+
+        <template v-if="report.type === 'payroll-register'">
+          <div class="scroll-x">
+            <table class="data register">
+              <thead><tr>
+                <th>Pay date</th><th>Employee</th><th class="num">Hours</th><th class="num">Gross</th>
+                <th class="num" v-for="c in report.data.deductionColumns">{{ c.label }}</th>
+                <th class="num" v-for="c in report.data.employeeTaxColumns">{{ c.label }}</th>
+                <th class="num">Net pay</th>
+                <th class="num er" v-for="c in report.data.employerTaxColumns">{{ c.label }} (employer)</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="r in report.data.rows" :class="{ muted: r.note }" :title="r.note || ''">
+                  <td>{{ r.payDate }}</td><td>{{ r.employee }}<div class="small muted" v-if="r.note">{{ r.note }}</div></td><td class="num">{{ r.hours ?? '' }}</td><td class="num">{{ money(r.grossCents) }}</td>
+                  <td class="num" v-for="c in report.data.deductionColumns">{{ money(r.deductions[c.key] ?? 0) }}</td>
+                  <td class="num" v-for="c in report.data.employeeTaxColumns">{{ money(r.employeeTaxes[c.key] ?? 0) }}</td>
+                  <td class="num">{{ money(r.netPayCents) }}</td>
+                  <td class="num er" v-for="c in report.data.employerTaxColumns">{{ money(r.employerTaxes[c.key] ?? 0) }}</td>
+                </tr>
+                <tr class="total">
+                  <td colspan="2">Total ({{ report.data.rows.length }} paychecks)</td><td class="num">{{ report.data.totals.hours ?? '' }}</td><td class="num">{{ money(report.data.totals.grossCents) }}</td>
+                  <td class="num" v-for="c in report.data.deductionColumns">{{ money(report.data.totals.deductions[c.key]) }}</td>
+                  <td class="num" v-for="c in report.data.employeeTaxColumns">{{ money(report.data.totals.employeeTaxes[c.key]) }}</td>
+                  <td class="num">{{ money(report.data.totals.netPayCents) }}</td>
+                  <td class="num er" v-for="c in report.data.employerTaxColumns">{{ money(report.data.totals.employerTaxes[c.key]) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="muted" v-if="!report.data.rows.length">No paychecks were dated in this range.</p>
+          <p>Total cost to the company (gross pay plus employer taxes): <strong>{{ money(report.data.totals.employerCostCents) }}</strong></p>
+          <p :class="report.data.ties ? 'ok' : 'bad'">{{ report.data.ties ? '✓ Every paycheck ties: gross − deductions − employee taxes = net pay.' : '⚠ A paycheck does not tie out. Please report this.' }}</p>
         </template>
 
         <template v-if="report.type === 'cash-flow'">
@@ -647,7 +693,7 @@
             </template>
           </table>
         </template>
-        <p :class="reportCheck === 0 ? 'ok' : 'bad'">{{ reportCheck === 0 ? '✓ This report ties out.' : '⚠ This report does not tie out by ' + money(reportCheck) }}</p>
+        <p v-if="report.type !== 'payroll-register'" :class="reportCheck === 0 ? 'ok' : 'bad'">{{ reportCheck === 0 ? '✓ This report ties out.' : '⚠ This report does not tie out by ' + money(reportCheck) }}</p>
       </div>
     </section>
 
@@ -905,8 +951,8 @@
         </template>
       </div>
 
-      <div class="card stub-card" v-if="stub">
-        <div class="row"><h2>Pay stub</h2><span><button @click="printPage">Print</button><button @click="stub = null">Close</button></span></div>
+      <div class="card stub-card print-me" v-if="stub">
+        <div class="row"><h2>Pay stub</h2><span><button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button><button @click="stub = null">Close</button></span></div>
         <div class="grid2">
           <div><strong>{{ stub.employer.name }}</strong><br>{{ stub.employee.name }}<span v-if="stub.employee.ssnLast4"> · SSN •••-••-{{ stub.employee.ssnLast4 }}</span></div>
           <div class="num">Pay date {{ stub.payDate }}<br><span v-if="stub.periodStart">Period {{ stub.periodStart }} to {{ stub.periodEnd }}</span></div>

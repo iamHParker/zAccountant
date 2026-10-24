@@ -1,5 +1,5 @@
 // Pulls account totals from the database and hands them to the pure report functions.
-import { trialBalance, incomeStatement, balanceSheet, cashFlowStatement, postClosingSums } from '../core/reports.js';
+import { trialBalance, incomeStatement, balanceSheet, cashFlowStatement, postClosingSums, comparisonPeriod, compareStatements } from '../core/reports.js';
 import { LedgerError, isIsoDate } from '../core/ledger.js';
 import { getCompany, listAccounts } from './ledgerService.js';
 
@@ -68,15 +68,33 @@ export async function nonCashSums(db, companyId, { from, to }) {
   return new Map(rows.map((r) => [r.account_id, { debitCents: r.d, creditCents: r.c }]));
 }
 
-export async function getIncomeStatement(db, companyId, { from, to }) {
-  need(from, 'from'); need(to, 'to');
-  if (from > to) throw new LedgerError('"from" must be on or before "to"');
-  const accounts = await listAccounts(db, companyId);
-  return { from, to, ...incomeStatement(accounts, await accountSums(db, companyId, { from, to })) };
+const COMPARE = ['none', 'prior_period', 'prior_year'];
+function priorFor(range, compare) {
+  if (compare != null && !COMPARE.includes(compare)) throw new LedgerError('compare must be none, prior_period or prior_year');
+  return comparisonPeriod(range, compare);
 }
 
-export async function getBalanceSheet(db, companyId, { asOf }) {
+/** Profit & Loss for [from, to]; `compare` (prior_period | prior_year) adds side-by-side columns. */
+export async function getIncomeStatement(db, companyId, { from, to, compare = null }) {
+  need(from, 'from'); need(to, 'to');
+  if (from > to) throw new LedgerError('"from" must be on or before "to"');
+  const prior = priorFor({ from, to }, compare);
+  const accounts = await listAccounts(db, companyId);
+  const current = { from, to, ...incomeStatement(accounts, await accountSums(db, companyId, { from, to })) };
+  if (!prior) return current;
+  return compareStatements('income-statement', current, incomeStatement(accounts, await accountSums(db, companyId, prior)), { compare, ...prior });
+}
+
+/** Balance sheet as of a date; `compare` (prior_period = a month earlier | prior_year) adds columns. */
+export async function getBalanceSheet(db, companyId, { asOf, compare = null }) {
   need(asOf, 'asOf');
+  const prior = priorFor({ asOf }, compare);
+  const current = await balanceSheetAsOf(db, companyId, asOf);
+  if (!prior) return current;
+  return compareStatements('balance-sheet', current, await balanceSheetAsOf(db, companyId, prior.asOf), { compare, ...prior });
+}
+
+async function balanceSheetAsOf(db, companyId, asOf) {
   const company = await getCompany(db, companyId);
   const accounts = await listAccounts(db, companyId);
   const fyStart = fiscalYearStart(asOf, company.fiscal_year_start_month);
