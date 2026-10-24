@@ -9,7 +9,7 @@ import { encryptField } from '../security/crypto.js';
 
 const EMP_COLS = `id, first_name AS "firstName", last_name AS "lastName", work_state AS "workState",
   pay_frequency AS "payFrequency", pay_type AS "payType", pay_rate_cents AS "payRateCents",
-  w4, state_elections AS "stateElections", active, ssn_last4 AS "ssnLast4"`;
+  w4, state_elections AS "stateElections", active, ssn_last4 AS "ssnLast4", user_id AS "userId"`;
 
 /** Validate a Social Security number (format and IRS/SSA never-issued ranges). Returns 9 digits or throws. */
 export function cleanSsn(ssn) {
@@ -119,6 +119,15 @@ async function compute(db, companyId, employeeId, input) {
     overtime = { hundredthsOfHours: h, payCents: otPay, premiumCents: premium };
     gross += otPay;
   }
+  // Double time (California: over 12 hours in a day, or over 8 on the 7th day in a row of a workweek).
+  let doubleTime = null;
+  if (input.doubleTimeHours != null && input.doubleTimeHours !== '') {
+    if (emp.payType !== 'hourly') throw new PayrollError('double-time hours apply to hourly employees only');
+    const h = hundredthsOfHours(input.doubleTimeHours, 'double-time hours');
+    const dtPay = Number((BigInt(emp.payRateCents) * 2n * BigInt(h) + 50n) / 100n);
+    doubleTime = { hundredthsOfHours: h, payCents: dtPay };
+    gross += dtPay;
+  }
   const result = calculatePaycheck({
     year, payFrequency: emp.payFrequency, grossCents: gross,
     preTaxDeductions: input.preTaxDeductions ?? [],
@@ -127,6 +136,7 @@ async function compute(db, companyId, employeeId, input) {
     company: { suiRatePct: company.sui_rate_pct ?? undefined, famliHeadcount: company.famli_headcount },
   });
   result.overtime = overtime;
+  result.doubleTime = doubleTime;
   result.regularHours = emp.payType === 'hourly' ? hundredthsOfHours(input.hours, 'hours') / 100 : null;
   result.payRateCents = emp.payRateCents;
   return { company, emp, result, lastPayDate };
@@ -244,7 +254,7 @@ const RUN_FREQUENCIES = ['weekly', 'biweekly', 'semimonthly', 'monthly'];
 
 /**
  * Work out who is in a run: everyone active on this pay schedule, unless `items` names them.
- * Each item: { employeeId, hours, overtimeHours, preTaxDeductions }. Returns [{ emp, input }].
+ * Each item: { employeeId, hours, overtimeHours, doubleTimeHours, preTaxDeductions }. Returns [{ emp, input }].
  */
 async function runMembers(db, companyId, { payFrequency, payDate, periodStart, periodEnd, paidFromAccountId, items }) {
   const errors = [];
@@ -261,7 +271,7 @@ async function runMembers(db, companyId, { payFrequency, payDate, periodStart, p
   }
   const members = emps.filter((e) => !given || given.has(e.id)).map((emp) => {
     const i = given?.get(emp.id) ?? {};
-    return { emp, input: { payDate, periodStart, periodEnd, paidFromAccountId, hours: i.hours, overtimeHours: i.overtimeHours, preTaxDeductions: i.preTaxDeductions ?? [] } };
+    return { emp, input: { payDate, periodStart, periodEnd, paidFromAccountId, hours: i.hours, overtimeHours: i.overtimeHours, doubleTimeHours: i.doubleTimeHours, preTaxDeductions: i.preTaxDeductions ?? [] } };
   });
   if (!members.length) errors.push(`no active ${payFrequency} employees to pay`);
   if (errors.length) throw new PayrollError(`Payroll is not valid: ${[...new Set(errors)].join('; ')}`);
@@ -318,9 +328,20 @@ export async function postRun(pool, companyId, opts, { actor = null } = {}) {
         t.employeeTaxCents, t.employerTaxCents, t.deductionCents, key, actor]);
     const members = await runMembers(c, companyId, opts);
     for (const m of members) await postPaycheck(c, companyId, m.emp.id, { ...m.input, runId: run.id }, { actor });
+    // Hours that came from approved timesheets are marked paid by this run, so they can't be paid twice.
+    let timeEntriesPaid = 0;
+    if (opts.fromTimesheets === true) {
+      const { rowCount } = await c.query(
+        `UPDATE time_entries t SET paid_run_id = $2, updated_at = now()
+           FROM employees e
+          WHERE t.company_id = $1 AND e.company_id = $1 AND e.user_id = t.user_id AND e.id = ANY($3::uuid[])
+            AND t.status = 'approved' AND t.paid_run_id IS NULL AND t.work_date BETWEEN $4 AND $5`,
+        [companyId, run.id, members.map((m) => m.emp.id), opts.periodStart, opts.periodEnd]);
+      timeEntriesPaid = rowCount;
+    }
     await appendAudit(c, companyId, { action: 'create', entity: 'payroll_run', entityId: run.id, actor,
-      payload: { payFrequency: opts.payFrequency, periodStart: opts.periodStart, periodEnd: opts.periodEnd, payDate: opts.payDate, ...t } });
-    return getRun(c, companyId, run.id);
+      payload: { payFrequency: opts.payFrequency, periodStart: opts.periodStart, periodEnd: opts.periodEnd, payDate: opts.payDate, ...t, timeEntriesPaid } });
+    return { ...(await getRun(c, companyId, run.id)), timeEntriesPaid };
   });
 }
 
@@ -378,7 +399,7 @@ export async function getPayStub(db, companyId, paycheckId) {
   const calc = pc.calculation;
   const ytdGross = upTo.reduce((t, r) => t + r.gross_cents, 0);
   const ytdNet = upTo.reduce((t, r) => t + r.net_pay_cents, 0);
-  const regular = calc.grossCents - (calc.overtime?.payCents ?? 0);
+  const regular = calc.grossCents - (calc.overtime?.payCents ?? 0) - (calc.doubleTime?.payCents ?? 0);
   // Rate and hours as they were on this paycheck (older paychecks didn't record them: shown blank).
   const rate = calc.payRateCents ?? null;
   const hourly = calc.regularHours != null;
@@ -386,6 +407,9 @@ export async function getPayStub(db, companyId, paycheckId) {
   if (calc.overtime) {
     earnings.push({ label: 'Overtime (1.5×)', amountCents: calc.overtime.payCents, hours: calc.overtime.hundredthsOfHours / 100,
       rateCents: rate == null ? null : Number((BigInt(rate) * 3n + 1n) / 2n) });
+  }
+  if (calc.doubleTime) {
+    earnings.push({ label: 'Double time (2×)', amountCents: calc.doubleTime.payCents, hours: calc.doubleTime.hundredthsOfHours / 100, rateCents: rate == null ? null : rate * 2 });
   }
   const { rows: [v] } = await db.query('SELECT pay_date FROM paychecks WHERE company_id = $1 AND voids_paycheck_id = $2', [companyId, pc.id]);
   return {

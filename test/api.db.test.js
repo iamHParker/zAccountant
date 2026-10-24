@@ -408,6 +408,104 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal((await staff.c.call('POST', `${base}/members`, { email: 'staff@example.com', role: 'owner' })).status, 403);
   });
 
+  await t.test('timesheets: enter, approve by department, import HoursTracker, pay through payroll', async () => {
+    const base = `/api/companies/${co.id}`;
+    const eng = (await owner.c.call('GET', `${base}/departments`)).body.find((d) => d.name === 'Engineering');
+    const field = (await owner.c.call('POST', `${base}/departments`, { name: 'Field' })).body;
+    const lead = (await owner.c.call('POST', `${base}/roles`, { name: 'Crew Lead', permissions: ['time_own', 'time_approve'] })).body;
+    const foreman = await newUser('foreman@example.com');
+    const worker = await newUser('worker@example.com');
+    const other = await newUser('other@example.com');
+    assert.equal((await owner.c.call('POST', `${base}/members`, { email: 'foreman@example.com', role: lead.id, departmentId: eng.id })).status, 201);
+    assert.equal((await owner.c.call('POST', `${base}/members`, { email: 'worker@example.com', role: 'staff', departmentId: eng.id })).status, 201);
+    assert.equal((await owner.c.call('POST', `${base}/members`, { email: 'other@example.com', role: 'staff', departmentId: field.id })).status, 201);
+    const members = (await owner.c.call('GET', `${base}/members`)).body;
+    const uid = (e) => members.find((m) => m.email === e).id;
+
+    // Jobs: approvers and the owner add them; staff can only pick them.
+    const job = await foreman.c.call('POST', `${base}/jobs`, { name: 'Smith Residence', code: 'J-101' });
+    assert.equal(job.status, 201, JSON.stringify(job.body));
+    assert.equal((await worker.c.call('POST', `${base}/jobs`, { name: 'Nope' })).status, 403);
+    assert.equal((await worker.c.call('GET', `${base}/jobs`)).body.length, 1);
+
+    // A week of 9-hour days (Mon–Fri), entered by the worker.
+    const days = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06'];
+    const ids = [];
+    for (const date of days) {
+      const r = await worker.c.call('POST', `${base}/time-entries`, { date, start: '7:00 AM', end: '4:00 PM', jobId: job.body.id, notes: 'framing' });
+      assert.equal(r.status, 201, JSON.stringify(r.body));
+      assert.equal(r.body.hours, '9.00');
+      ids.push(r.body.id);
+    }
+    const bad = await worker.c.call('POST', `${base}/time-entries`, { date: '2026-11-02', hours: '16' });
+    assert.equal(bad.status, 400, 'more than 24 hours in a day');
+    assert.match(bad.body.error, /24 hours/);
+    // Staff can't enter time for someone else, or see it.
+    assert.equal((await other.c.call('POST', `${base}/time-entries`, { userId: uid('worker@example.com'), date: '2026-11-02', hours: '1' })).status, 400);
+    assert.equal((await other.c.call('GET', `${base}/time-entries`)).body.length, 0);
+    assert.equal((await other.c.call('PATCH', `${base}/time-entries/${ids[0]}`, { date: '2026-11-02', hours: '1' })).status, 400);
+
+    assert.equal((await worker.c.call('POST', `${base}/time-entries/submit`, { ids })).body.submitted, 5);
+    // The worker can't approve their own time; the foreman (same department) sees and approves it.
+    assert.equal((await worker.c.call('POST', `${base}/time-entries/review`, { ids, approve: true })).status, 403);
+    const seen = (await foreman.c.call('GET', `${base}/time-entries?status=submitted`)).body;
+    assert.equal(seen.length, 5);
+    // A crew lead in another department couldn't: other is in Field, so the foreman can't approve them.
+    const o = (await other.c.call('POST', `${base}/time-entries`, { date: '2026-11-02', hours: '8' })).body;
+    await other.c.call('POST', `${base}/time-entries/submit`, { ids: [o.id] });
+    const cross = await foreman.c.call('POST', `${base}/time-entries/review`, { ids: [o.id], approve: true });
+    assert.equal(cross.status, 400);
+    assert.match(cross.body.error, /can't approve/);
+    const back = await foreman.c.call('POST', `${base}/time-entries/review`, { ids: [ids[4]], approve: false, note: 'lunch?' });
+    assert.equal(back.status, 200, JSON.stringify(back.body));
+    await worker.c.call('PATCH', `${base}/time-entries/${ids[4]}`, { date: '2026-11-06', start: '7:00 AM', end: '4:00 PM', breakMinutes: 0 });
+    await worker.c.call('POST', `${base}/time-entries/submit`, { ids: [ids[4]] });
+    assert.equal((await foreman.c.call('POST', `${base}/time-entries/review`, { ids, approve: true })).body.approved, 5);
+    assert.equal((await worker.c.call('PATCH', `${base}/time-entries/${ids[0]}`, { date: '2026-11-02', hours: '1' })).status, 400, 'approved time is locked');
+
+    // HoursTracker import: the next week, two shifts; importing the same file again skips both.
+    const csv = 'Job,Clocked In,Clocked Out,Duration,Hourly Rate,Earnings,Comment\n'
+      + 'Smith Residence,11/09/2026 7:00 AM,11/09/2026 3:00 PM,8.00,30,240,trim\n'
+      + 'New Bridge,11/10/2026 7:00 AM,11/10/2026 1:30 PM,6.50,30,195,survey\n';
+    const pre = await worker.c.call('POST', `${base}/time-entries/import`, { fileName: 'hours.csv', content: csv, preview: true });
+    assert.equal(pre.status, 200, JSON.stringify(pre.body));
+    assert.equal(pre.body.format, 'HoursTracker');
+    assert.deepEqual([pre.body.toImport, pre.body.hours, pre.body.newJobs], [2, '14.50', ['New Bridge']]);
+    assert.equal((await worker.c.call('POST', `${base}/time-entries/import`, { content: csv, createJobs: true })).status, 400, 'staff can\'t add jobs');
+    const imp = await worker.c.call('POST', `${base}/time-entries/import`, { fileName: 'hours.csv', content: csv });
+    assert.equal(imp.body.imported, 2);
+    const again = await worker.c.call('POST', `${base}/time-entries/import`, { fileName: 'hours.csv', content: csv });
+    assert.deepEqual([again.body.imported, again.body.duplicates], [0, 2]);
+    const imported = (await worker.c.call('GET', `${base}/time-entries?from=2026-11-09&to=2026-11-15`)).body;
+    assert.equal(imported.find((e) => e.date === '2026-11-10').notes, 'Job: New Bridge · survey', 'unknown job kept in the notes');
+    assert.equal(imported.find((e) => e.date === '2026-11-09').jobName, 'Smith Residence');
+
+    // Payroll: link the worker to an hourly employee; approved hours fill the run with overtime split.
+    const emp = (await owner.c.call('POST', `${base}/employees`, { firstName: 'Wes', lastName: 'Worker', workState: 'CO', payFrequency: 'weekly', payType: 'hourly', payRate: '30.00', w4: { filingStatus: 'single' } })).body;
+    assert.equal((await worker.c.call('PATCH', `${base}/employees/${emp.id}/user`, { userId: uid('worker@example.com') })).status, 403);
+    assert.equal((await owner.c.call('PATCH', `${base}/employees/${emp.id}/user`, { userId: uid('worker@example.com') })).status, 200);
+    const hrs = await owner.c.call('GET', `${base}/payroll-hours?payFrequency=weekly&periodStart=2026-11-01&periodEnd=2026-11-07`);
+    assert.equal(hrs.status, 200, JSON.stringify(hrs.body));
+    const w = hrs.body.employees.find((e) => e.employeeId === emp.id);
+    assert.deepEqual([w.hours, w.overtimeHours, w.doubleTimeHours], ['40.00', '5.00', '0.00']);
+    const run = await owner.c.call('POST', `${base}/payroll-runs`, { payFrequency: 'weekly', periodStart: '2026-11-01', periodEnd: '2026-11-07', payDate: '2026-11-13',
+      paidFromAccountId: A['1000'], fromTimesheets: true, items: [{ employeeId: emp.id, hours: w.hours, overtimeHours: w.overtimeHours }] });
+    assert.equal(run.status, 201, JSON.stringify(run.body));
+    assert.equal(run.body.grossCents, 40 * 3000 + 5 * 4500);
+    assert.equal(run.body.timeEntriesPaid, 5);
+    const paid = (await worker.c.call('GET', `${base}/time-entries?status=paid`)).body;
+    assert.equal(paid.length, 5);
+    assert.equal((await foreman.c.call('POST', `${base}/time-entries/review`, { ids: [ids[0]], approve: false })).status, 400, 'paid time is final');
+    assert.equal((await worker.c.call('DELETE', `${base}/time-entries/${ids[0]}`, {})).status, 400);
+    const after = (await owner.c.call('GET', `${base}/payroll-hours?payFrequency=weekly&periodStart=2026-11-01&periodEnd=2026-11-07`)).body;
+    assert.equal(after.employees.find((e) => e.employeeId === emp.id).hours, '0.00', 'nothing left to pay');
+
+    // Hours by job.
+    const sum = (await owner.c.call('GET', `${base}/reports/time-summary?from=2026-11-01&to=2026-11-15`)).body;
+    assert.equal(sum.jobs.find((j) => j.jobName === 'Smith Residence').minutes, 45 * 60 + 8 * 60);
+    assert.equal((await other.c.call('GET', `${base}/reports/time-summary?from=2026-11-01&to=2026-11-15`)).body.totalMinutes, 8 * 60, 'staff see only their own');
+  });
+
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
     const lock = `/api/companies/${co.id}/lock`;
     assert.equal((await owner.c.call('POST', lock, '{"through":null}', { 'content-type': 'text/plain' })).status, 415);

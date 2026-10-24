@@ -65,8 +65,18 @@ async function api(method, url, body, headers = {}) {
 // screens someone can't use.
 const TAB_PERMS = {
   home: ['view_books'], journal: ['view_books'], sales: ['view_books', 'invoices'], bills: ['view_books', 'bills'], bank: ['view_books'],
-  reports: ['view_books'], accounts: ['view_books'], payroll: ['view_books', 'payroll'],
+  reports: ['view_books'], accounts: ['view_books'], payroll: ['view_books', 'payroll'], time: ['time_own', 'time_approve', 'time_all'],
 };
+
+/** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
+function weekStartOf(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return new Date(d.getTime() - d.getUTCDay() * 86_400_000).toISOString().slice(0, 10);
+}
+const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const blankTime = (date = today()) => ({ date, jobId: '', start: '', end: '', hours: '', notes: '', billable: true });
+/** Minutes -> hours with 2 decimals, rounded half-up like the server ("7.53"). */
+const hrs = (m) => { const h = Math.floor((m * 100 + 30) / 60); return `${Math.floor(h / 100)}.${String(h % 100).padStart(2, '0')}`; };
 
 // One key per "Save" click: if the request is retried (double click, flaky Wi-Fi), the server posts it only once.
 const newKey = () => crypto.randomUUID();
@@ -89,7 +99,7 @@ createApp({
       months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       tabs: [
         { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'sales', label: 'Sales' }, { id: 'bills', label: 'Bills' }, { id: 'bank', label: 'Banking' },
-        { id: 'reports', label: 'Reports' },
+        { id: 'reports', label: 'Reports' }, { id: 'time', label: 'Time' },
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
       roles: { permissions: [], presets: [], custom: [] }, departments: [], newDept: '',
@@ -113,7 +123,9 @@ createApp({
         expense: [['operating', 'Operating expense'], ['cogs', 'Cost of goods sold'], ['other', 'Other expense (interest…)']],
       },
       paychecks: [], runs: [], stub: null,
-      prun: { show: false, payFrequency: 'biweekly', periodStart: '', periodEnd: '', payDate: today(), paidFrom: '', rows: [], preview: null, key: newKey() },
+      prun: { show: false, payFrequency: 'biweekly', periodStart: '', periodEnd: '', payDate: today(), paidFrom: '', rows: [], preview: null, key: newKey(), fromTimesheets: false, hoursNotes: [] },
+      time: { week: weekStartOf(today()), userId: '', entries: [], jobs: [], form: blankTime(), editing: null, pending: [], picked: {}, note: '',
+        file: null, importFor: '', createJobs: false, preview: null, summary: null, showJobs: false, newJob: { name: '', code: '', customerId: '' }, customers: [] },
       liab: { from: today().slice(0, 8) + '01', to: today(), data: null },
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
@@ -169,11 +181,13 @@ createApp({
       if (t === 'reports') this.loadReport();
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if ((t === 'payroll' || t === 'settings') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
+      if (t === 'payroll' && this.can('payroll')) this.loadMembers();
       if (t === 'settings') { this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'bank') this.loadBank();
       if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
       if (t === 'accounts') this.loadImports();
+      if (t === 'time') this.loadTime(true);
     },
     'quick.kind'() { this.quick.other = ''; },
   },
@@ -230,6 +244,7 @@ createApp({
       Object.assign(this, { companies: [], companyId: null, company: null, tab: 'home' });
       this.auth = { ...this.auth, user: null, setup: null, recoveryCodes: null, screen: 'signin' };
     },
+    hrs, blankTime,
     async loadMembers() { this.members = (await this.run(() => api('GET', `/companies/${this.companyId}/members`))) ?? []; },
     async addMember() {
       const m = await this.run(() => api('POST', `/companies/${this.companyId}/members`, { ...this.newMember, departmentId: this.newMember.departmentId || null }), 'Member saved.');
@@ -320,25 +335,130 @@ createApp({
     runRows() {
       const r = this.prun;
       r.preview = null;
-      r.rows = this.employees.filter((e) => e.active && e.payFrequency === r.payFrequency).map((e) => ({ emp: e, include: true, hours: '', overtimeHours: '', k401: '' }));
+      r.fromTimesheets = false; r.hoursNotes = [];
+      r.rows = this.employees.filter((e) => e.active && e.payFrequency === r.payFrequency).map((e) => ({ emp: e, include: true, hours: '', overtimeHours: '', doubleTimeHours: '', k401: '' }));
     },
     runBody() {
       const r = this.prun;
       return { payFrequency: r.payFrequency, periodStart: r.periodStart, periodEnd: r.periodEnd, payDate: r.payDate, paidFromAccountId: r.paidFrom || undefined,
         items: r.rows.filter((x) => x.include).map((x) => {
           const k = cents(x.k401);
-          return { employeeId: x.emp.id, hours: x.hours || undefined, overtimeHours: x.overtimeHours || undefined,
+          return { employeeId: x.emp.id, hours: x.hours || undefined, overtimeHours: x.overtimeHours || undefined, doubleTimeHours: x.doubleTimeHours || undefined,
             preTaxDeductions: k ? [{ name: '401(k)', amountCents: k, kind: 'retirement_401k' }] : [] };
-        }) };
+        }), fromTimesheets: r.fromTimesheets };
+    },
+    /** Fill hourly employees' hours from approved, unpaid timesheets for the period. */
+    async fillFromTimesheets() {
+      const r = this.prun;
+      const q = new URLSearchParams({ payFrequency: r.payFrequency, periodStart: r.periodStart, periodEnd: r.periodEnd });
+      const h = await this.run(() => api('GET', `/companies/${this.companyId}/payroll-hours?${q}`));
+      if (!h) return;
+      const notes = [];
+      for (const x of r.rows) {
+        const e = h.employees.find((y) => y.employeeId === x.emp.id);
+        if (!e) continue;
+        if (x.emp.payType === 'hourly' && e.linked) {
+          x.hours = e.hours; x.overtimeHours = e.overtimeHours === '0.00' ? '' : e.overtimeHours; x.doubleTimeHours = e.doubleTimeHours === '0.00' ? '' : e.doubleTimeHours;
+        }
+        for (const w of e.warnings) notes.push(`${e.name}: ${w}`);
+      }
+      r.fromTimesheets = true; r.hoursNotes = notes; r.preview = null;
+      this.flash('Hours filled in from approved timesheets. Check them, then Calculate.');
+    },
+    async linkEmployee(e, userId) {
+      if (await this.run(() => api('PATCH', `/companies/${this.companyId}/employees/${e.id}/user`, { userId: userId || null }), 'Saved.')) this.loadEmployees();
+      else this.loadEmployees();
     },
     async previewRun() { this.prun.preview = await this.run(() => api('POST', `/companies/${this.companyId}/payroll-runs/preview`, this.runBody())); },
     async postRun() {
       const r = await this.run(() => api('POST', `/companies/${this.companyId}/payroll-runs`, this.runBody(), { 'Idempotency-Key': this.prun.key }),
         'Payroll recorded in your books.');
+      if (r?.timeEntriesPaid) this.flash(`Payroll recorded in your books. ${r.timeEntriesPaid} timesheet entr${r.timeEntriesPaid === 1 ? 'y is' : 'ies are'} now marked paid.`);
       if (r) { this.prun.show = false; this.prun.preview = null; this.loadEmployees(); }
     },
     async openStub(p) { this.stub = await this.run(() => api('GET', `/companies/${this.companyId}/paychecks/${p.id}/stub`)); },
     async loadLiab() { this.liab.data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/payroll-liabilities?from=${this.liab.from}&to=${this.liab.to}`)); },
+    // ---------------------------------------------------------------- Time
+    canManageTime() { return this.can('time_approve') || this.can('time_all'); },
+    weekDays() { return [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(this.time.week, i)); },
+    async loadTime(first = false) {
+      const t = this.time;
+      const base = `/companies/${this.companyId}`;
+      if (first) {
+        t.jobs = (await this.run(() => api('GET', `${base}/jobs`))) ?? [];
+        if (this.canManageTime()) await this.loadMembers();
+        if (this.can('invoices') || this.can('view_books')) t.customers = (await this.run(() => api('GET', `${base}/customers`))) ?? [];
+      }
+      const q = new URLSearchParams({ from: t.week, to: addDays(t.week, 6), userId: t.userId || this.auth.user.id });
+      t.entries = (await this.run(() => api('GET', `${base}/time-entries?${q}`))) ?? [];
+      t.summary = await this.run(() => api('GET', `${base}/reports/time-summary?from=${t.week}&to=${addDays(t.week, 6)}`));
+      if (this.canManageTime()) { t.pending = (await this.run(() => api('GET', `${base}/time-entries?status=submitted`))) ?? []; t.picked = {}; }
+    },
+    moveWeek(n) { this.time.week = addDays(this.time.week, 7 * n); this.time.form = blankTime(this.time.week); this.loadTime(); },
+    timeBody(f) {
+      return { date: f.date, jobId: f.jobId || null, start: f.start || undefined, end: f.end || undefined, hours: f.hours || undefined, notes: f.notes, billable: f.billable };
+    },
+    async saveTime() {
+      const t = this.time;
+      const base = `/companies/${this.companyId}/time-entries`;
+      const body = { ...this.timeBody(t.form), userId: t.userId || undefined };
+      const ok = t.editing
+        ? await this.run(() => api('PATCH', `${base}/${t.editing}`, body), 'Time saved.')
+        : await this.run(() => api('POST', base, body), 'Time added.');
+      if (ok) { const keep = { date: t.form.date, jobId: t.form.jobId }; t.form = { ...blankTime(), ...keep }; t.editing = null; this.loadTime(); }
+    },
+    editTime(e) {
+      this.time.editing = e.id;
+      this.time.form = { date: e.date, jobId: e.jobId ?? '', start: e.start ?? '', end: e.end ?? '', hours: e.start ? '' : e.hours, notes: e.notes ?? '', billable: e.billable };
+    },
+    async deleteTime(e) {
+      if (!confirm(`Delete ${e.hours} hours on ${e.date}?`)) return;
+      if (await this.run(() => api('DELETE', `/companies/${this.companyId}/time-entries/${e.id}`), 'Deleted.')) this.loadTime();
+    },
+    async submitWeek() {
+      const ids = this.time.entries.filter((e) => ['draft', 'rejected'].includes(e.status)).map((e) => e.id);
+      if (ids.length && await this.run(() => api('POST', `/companies/${this.companyId}/time-entries/submit`, { ids }), `Sent ${ids.length} entr${ids.length === 1 ? 'y' : 'ies'} for approval.`)) this.loadTime();
+    },
+    async review(approve) {
+      const ids = Object.keys(this.time.picked).filter((k) => this.time.picked[k]);
+      if (!ids.length) return this.flash('Tick the entries first.', 'bad');
+      if (!approve && !this.time.note) return this.flash('Add a note saying what to fix.', 'bad');
+      const ok = await this.run(() => api('POST', `/companies/${this.companyId}/time-entries/review`, { ids, approve, note: this.time.note || undefined }),
+        approve ? `Approved ${ids.length}.` : `Sent back ${ids.length}.`);
+      if (ok) { this.time.note = ''; this.loadTime(); }
+    },
+    pickAll(on) { for (const e of this.time.pending) this.time.picked[e.id] = on; },
+    async pickTimeFile(ev) {
+      const f = ev.target.files[0];
+      this.time.preview = null;
+      this.time.file = f ? { name: f.name, content: await f.text() } : null;
+    },
+    importTimeBody(preview) {
+      const t = this.time;
+      return { fileName: t.file.name, content: t.file.content, preview, userId: t.importFor || undefined, createJobs: t.createJobs };
+    },
+    async previewTimeImport() {
+      this.time.preview = await this.run(() => api('POST', `/companies/${this.companyId}/time-entries/import`, this.importTimeBody(true)));
+    },
+    async commitTimeImport() {
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/time-entries/import`, this.importTimeBody(false)));
+      if (r) {
+        this.flash(`Imported ${r.imported} entr${r.imported === 1 ? 'y' : 'ies'} (${r.hours} hours) as drafts${r.duplicates ? `; skipped ${r.duplicates} already imported` : ''}. Review them, then submit the week.`);
+        Object.assign(this.time, { file: null, preview: null });
+        if (r.from) this.time.week = weekStartOf(r.from);
+        this.loadTime(true);
+      }
+    },
+    async addJob() {
+      const j = this.time.newJob;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/jobs`, { ...j, customerId: j.customerId || null }), 'Job added.')) {
+        this.time.newJob = { name: '', code: '', customerId: '' };
+        this.loadTime(true);
+      }
+    },
+    async closeJob(j) {
+      if (await this.run(() => api('PATCH', `/companies/${this.companyId}/jobs/${j.id}`, { name: j.name, code: j.code, customerId: j.customerId, isActive: false }), 'Job closed.')) this.loadTime(true);
+    },
     async createCompany() {
       const c = await this.run(() => api('POST', '/companies', this.newCompany), 'Company created. Your books are ready.');
       if (!c) return;
