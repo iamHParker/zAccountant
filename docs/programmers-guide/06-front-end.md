@@ -5,7 +5,8 @@ browser. What is in `public/` is exactly what runs.
 
 | File | What it holds |
 |---|---|
-| `index.html` | all the screens' markup: one `<section v-if="tab === '…'">` per tab, plus dialogs |
+| `welcome.html`, `welcome.css`, `welcome.js`, `img/` | the public front page at `/` (services, prices from `GET /api/public/plans`, security, sign-in buttons into `/app`). Plain HTML, no Vue. ⚠️ The Security section's "Coming" list (encryption on the user's side, Swiss servers) is Homer's plan, not fact yet: move an item to "Today" only when it is built |
+| `index.html` | the app at `/app`: all the screens' markup: one `<section v-if="tab === '…'">` per tab, plus dialogs |
 | `app.js` | the Vue app: `data()` (the state), `computed` (values worked out from the state), `watch.tab` (loads a tab's data), `methods` (button actions) |
 | `styles.css` | every style, including print rules |
 | `help.js` | the in-app Help guides (searchable; the ? button opens the guide for the current tab) |

@@ -44,6 +44,11 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   to Pro, or Claude builds a nightly pg_dump to outside storage. Must be in place, with a restore drill, before alpha.
 - Invoice queue item 6: split travel costs (motel, rental car, airfare) across 2+ jobs, each invoice getting a share.
   Homer's sample (a 2025 Excel invoice) had no split, so ask him how he divides them (equal shares or percents).
+- **Queued for late next week (Homer, 2026-10-24): "Tax-ready" add-on, level 1 only.** Map accounts to Schedule C /
+  1120-S / 1065 lines, a Tax summary report, 1099-NEC totals per vendor, W-2/W-3 totals. Not printed forms, not e-file
+  (a CPA partner does real preparation through an accountant's role).
+- Front page claims: the Security section's "Coming" list (encryption on the user's side so we can't read the data;
+  servers in Switzerland) is Homer's plan, a placeholder during alpha. Never present it as done until it is built.
 - All tax-table blocks are `verified: false` until the Board certifies them; companies run in calculate-only mode.
 
 ## How the code is built (rules to keep)
@@ -73,6 +78,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   (`invoice_items`, kind service = hours × rate, expense = cost passed on), line `service_date`/`item_id`, invoice
   `project` block, letterhead (address, note with tax ID + TX firm number, closing line), logo in `company_logos`,
   pinned `default_sales_tax_rate`. Layout follows Homer's Excel invoice: Hours, Date, Task, Rate, T, Subtotal.
+- Front page at `/` (`public/welcome.html`, plain HTML, prices from `GET /api/public/plans`); the app is at `/app`.
+  Settings → Back up your books (`src/services/backupService.js`): re-importable CSVs of the chart and journal.
 - Guides: `docs/user-guide/` (chapters by tier: everyone, Basic, Payroll, Timesheets, staff) and
   `docs/programmers-guide/` (architecture, money, security, DB, features, front end, **error handling**, testing,
   recipes, ops). Update the matching chapter in the same PR as any feature or rule change (Homer, 2026-10-24).

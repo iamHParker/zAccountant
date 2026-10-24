@@ -91,6 +91,9 @@ each test file creates and deletes its own temporary database).
 
 ## API quick reference
 
+Pages: `/` is the public front page (`public/welcome.html`: services, prices, security); `/app` is the app.
+Public: `GET /api/public/plans` (plan names and prices, from `src/core/plans.js`).
+
 Sign-in: `POST /api/auth/{signup,login,logout}`, `GET /api/auth/me`, `POST /api/auth/mfa/{setup,enable,verify}`.
 Everything else needs a fully signed-in session (cookie) and is under `/api/companies/:companyId/…`. Amounts may be sent as decimal strings (`"1234.56"`); responses use integer cents.
 
@@ -106,6 +109,7 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `GET …/bank-accounts/:id/transactions?status=review` | bank lines to review (or posted / matched / excluded) |
 | `POST …/bank-transactions/:id/{post,match,exclude,undo}`, `GET …/matches` | review a bank line |
 | `GET/POST …/bank-rules`, `DELETE …/bank-rules/:id` | categorization rules |
+| `GET …/backup/accounts`, `GET …/backup/journal` | Back up your books: chart of accounts and every journal line as CSV in the import templates' layout (re-importable) |
 | `POST …/imports/preview`, `POST …/imports`, `GET …/imports`, `POST …/imports/:id/undo` | import books: `kind` = accounts, opening (`asOf`), journal, iif; CSV `content` or Excel `base64` |
 | `GET/POST …/customers`, `GET/POST …/vendors`, `PATCH …/contacts/:id` | customers and vendors (with open and overdue balances) |
 | `GET/POST …/invoices`, `GET/POST …/bills`, `GET …/documents/:id`, `POST …/documents/:id/void` | invoices and bills (`status=open\|paid\|void\|all`); send an `Idempotency-Key` |

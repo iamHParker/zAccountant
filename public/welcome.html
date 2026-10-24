@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>zAccountant: no-frills accounting</title>
+  <meta name="description" content="zAccountant is the no-frills accounting software for individuals and small companies that don't need hand-holding.">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/welcome.css">
+  <script type="module" src="/welcome.js"></script>
+</head>
+<body class="welcome">
+  <header class="top welcome-top">
+    <a class="brand" href="/">z<span>Accountant</span></a>
+    <svg class="swiss-flag" viewBox="0 0 32 32" role="img" aria-labelledby="flag-t"><title id="flag-t">Swiss flag</title>
+      <rect width="32" height="32" rx="3" fill="#da291c"/><path d="M13 6h6v7h7v6h-7v7h-6v-7H6v-6h7z" fill="#fff"/></svg>
+    <nav class="welcome-nav">
+      <a href="#services">Services</a>
+      <a href="#prices">Prices</a>
+      <a href="#security">Security</a>
+    </nav>
+    <div class="welcome-signin">
+      <a class="button" href="/app">Sign in</a>
+      <a class="button primary" href="/app#signup">Create an account</a>
+    </div>
+  </header>
+
+  <main class="welcome-main">
+    <section class="hero">
+      <div class="hero-text">
+        <h1>Accounting without the hand-holding.</h1>
+        <p class="lead">zAccountant is the no-frills accounting software for individuals and small companies that don't
+          need hand-holding.</p>
+        <p>Real double-entry books, invoices, bills, bank imports, payroll and timesheets. No wizards, no upsells, no
+          clutter: the screens you need, and books that always balance.</p>
+        <p><a class="button primary" href="/app#signup">Create an account</a> <a class="button" href="/app">Sign in</a></p>
+      </div>
+      <img class="hero-img" src="/img/books-screen.svg" alt="zAccountant's Home screen: cash, income, expenses and profit, with the latest transactions">
+    </section>
+
+    <p class="alpha-note"><strong>Alpha testing.</strong> zAccountant is still being tested. If you use it now, keep
+      your own backup: download a copy of your books regularly (Settings → Back up your books) and keep your own
+      records as well.</p>
+
+    <section id="services">
+      <h2>Services</h2>
+      <div class="cards3">
+        <div class="card"><h3>Books</h3>
+          <p>Double-entry books checked by the database itself: every entry balances, closed months stay closed, and a
+            tamper-evident audit trail records every change. Balance sheet, profit and loss, cash flow and trial
+            balance, as PDF or Excel.</p></div>
+        <div class="card"><h3>Invoices and bills</h3>
+          <p>Invoices with your logo and letterhead, hourly rates and costs passed on, sales tax, customer payments and
+            aging. Bills and vendor payments, with 1099 vendors flagged.</p></div>
+        <div class="card"><h3>Banking</h3>
+          <p>Import your bank's CSV or QFX statements, match them to your books, set rules for repeat items, and
+            reconcile each month.</p></div>
+        <div class="card"><h3>Payroll <span class="tag">add-on</span></h3>
+          <p>Paychecks with federal and state withholding for Texas, Colorado, California and Washington DC, pay stubs,
+            and the payroll taxes owed with their due dates.</p></div>
+        <div class="card"><h3>Timesheets <span class="tag">add-on</span></h3>
+          <p>Time by job, approvals by department, an import from the HoursTracker app, and approved hours straight into
+            payroll with overtime worked out.</p></div>
+        <div class="card"><h3>Bring your books</h3>
+          <p>Import your chart of accounts, opening balances and transactions from QuickBooks or Excel. Every import is
+            checked first and can be undone.</p></div>
+      </div>
+    </section>
+
+    <section id="prices">
+      <h2>Prices</h2>
+      <p class="hint">During the beta, testers pay nothing and get every feature.</p>
+      <div class="cards3" id="price-list">
+        <!-- Filled in by welcome.js from the plan catalog; this is what shows if that can't load. -->
+        <div class="card"><h3>Basic</h3><p class="price">Price to be announced</p><p>Books, invoices, bills, banking, reports</p></div>
+        <div class="card"><h3>Payroll add-on</h3><p class="price">Price to be announced</p></div>
+        <div class="card"><h3>Timesheets add-on</h3><p class="price">Price to be announced</p></div>
+      </div>
+    </section>
+
+    <section id="security">
+      <h2>Security</h2>
+      <div class="cards2">
+        <div class="card"><h3>Today</h3>
+          <ul>
+            <li>All traffic between you and zAccountant is encrypted (HTTPS).</li>
+            <li>Social Security numbers and two-step sign-in secrets are encrypted before they are stored.</li>
+            <li>Passwords are never stored, only a one-way scrambled form of them.</li>
+            <li>Two-step sign-in with an authenticator app is required for every account.</li>
+            <li>Each company's books are walled off by the database itself.</li>
+          </ul></div>
+        <div class="card"><h3>Coming <span class="tag">planned</span></h3>
+          <ul>
+            <li><strong>Full encryption on your side:</strong> your books encrypted on your own device before they are
+              sent, so we store only encrypted information and even we can't read it.</li>
+            <li><strong>Data stored on servers in Switzerland.</strong></li>
+          </ul>
+          <p class="muted small">These are not in place yet during alpha testing.</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="welcome-foot">
+    <span>zAccountant</span>
+    <a href="/app">Sign in</a>
+  </footer>
+</body>
+</html>

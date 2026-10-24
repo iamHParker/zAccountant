@@ -262,7 +262,7 @@ createApp({
       this.version = me.version ?? '';
       if (me.next) return this.goAuth(me.next);
       await this.enterApp();
-    } catch { this.goAuth('signin'); }
+    } catch { this.goAuth(location.hash === '#signup' ? 'signup' : 'signin'); }
   },
   methods: {
     money,

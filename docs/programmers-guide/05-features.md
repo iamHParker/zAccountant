@@ -11,6 +11,12 @@ Companies, chart of accounts (types and subtypes decide where an account appears
 Chart of accounts, opening balances and journals from CSV, Excel or a QuickBooks IIF file. `preview` checks
 everything and saves nothing. An import is one batch, and the whole batch can be undone.
 
+## Back up your books (`backupService.js`)
+Settings → Back up your books downloads two CSVs in exactly our import templates' layout: the chart of accounts
+and every journal line (Entry, Date, Memo, Account, Debit, Credit, Source). Importing them into a new company
+(accounts first, then journal) rebuilds the same trial balance; `api.db.test.js` proves it. Documents (invoice
+lines, customers, employees, timesheets) and line memos are not in it. Alpha users are told to keep their own.
+
 ## Sales and bills (`arapService.js`, `invoiceSetupService.js`)
 - Customers and vendors are `contacts` (`kind`). Invoices and bills are `documents` with `document_lines`.
 - Saving a document posts one journal entry: invoice = Dr Accounts Receivable, Cr income per line, Cr Sales Tax

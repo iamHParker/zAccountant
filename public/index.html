@@ -61,15 +61,22 @@
     <section v-if="auth.screen === 'loading'" class="card narrow"><p class="hint">Loading…</p></section>
     <section v-else-if="auth.screen === 'signin'" class="card narrow">
       <h1>Sign in</h1>
+      <p class="alpha-note"><strong>Alpha testing.</strong> zAccountant is still being tested. Keep your own backup:
+        download a copy of your books regularly from <strong>Settings → Back up your books</strong>, and keep your own
+        records (bank statements, receipts, invoices) as well.</p>
       <form @submit.prevent="signIn">
         <label>Email <input type="email" v-model.trim="auth.email" autocomplete="username" required></label>
         <label>Password <input type="password" v-model="auth.password" autocomplete="current-password" required></label>
         <button class="primary">Sign in</button>
       </form>
       <p class="hint">New to zAccountant? <button class="link" @click="auth.screen = 'signup'">Create an account</button></p>
+      <p class="hint"><a href="/">← About zAccountant: services and prices</a></p>
     </section>
     <section v-else-if="auth.screen === 'signup'" class="card narrow">
       <h1>Create your account</h1>
+      <p class="alpha-note"><strong>Alpha testing.</strong> zAccountant is still being tested. Keep your own backup:
+        download a copy of your books regularly from <strong>Settings → Back up your books</strong>, and keep your own
+        records (bank statements, receipts, invoices) as well.</p>
       <form @submit.prevent="signUp">
         <label>Your name <input v-model.trim="auth.name" autocomplete="name" required></label>
         <label>Email <input type="email" v-model.trim="auth.email" autocomplete="username" required></label>
@@ -1409,6 +1416,16 @@
 
     <!-- SETTINGS -->
     <section v-if="tab === 'settings'">
+      <div class="card" v-if="can('view_books')">
+        <h2>Back up your books</h2>
+        <p class="hint">zAccountant is in alpha testing, so keep your own copy. Download both files every month (or after
+          a busy week) and keep them somewhere safe. They open in Excel, and they can be imported into a new company
+          (Accounts → Import: the chart of accounts first, then the transactions) to rebuild the books and every report.</p>
+        <p><button @click="downloadCsv(`/companies/${companyId}/backup/accounts`)">Download chart of accounts</button>
+          <button @click="downloadCsv(`/companies/${companyId}/backup/journal`)">Download all transactions</button></p>
+        <p class="muted small">Not included: invoice and bill details, customers and vendors, employees and timesheets.
+          Keep your printed or saved invoices and pay stubs too.</p>
+      </div>
       <div class="card" v-if="members.length">
         <h2>People with access</h2>
         <table class="data">

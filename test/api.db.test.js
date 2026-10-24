@@ -775,6 +775,33 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/employees`)).status, 200);
   });
 
+  await t.test('front page, public prices, and Back up your books (round trip through the importer)', async () => {
+    const page = await fetch(`${base}/`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /no frills|no-frills/);
+    assert.match(await (await fetch(`${base}/app`)).text(), /id="app"/, 'the app moved to /app');
+    const pub = await (await fetch(`${base}/api/public/plans`)).json();
+    assert.deepEqual(pub.plans.map((p) => p.key), ['beta', 'basic']);
+    assert.equal(pub.plans.find((p) => p.key === 'basic').monthlyCents, null, 'no price invented');
+
+    const acc = await owner.c.call('GET', `/api/companies/${co.id}/backup/accounts`);
+    assert.equal(acc.status, 200);
+    assert.match(acc.headers['content-disposition'], /attachment; filename="API Co - Chart of accounts \d{4}-\d{2}-\d{2}\.csv"/);
+    const jr = await owner.c.call('GET', `/api/companies/${co.id}/backup/journal`);
+    assert.equal(jr.status, 200);
+    assert.match(jr.text, /^\uFEFF?Entry,Date,Memo,Account,Debit,Credit,Source\r\n1,/);
+    // Rebuild the books in a new company from the two files: the trial balance must come out the same.
+    const copy = (await owner.c.call('POST', '/api/companies', { name: 'Restored Co', homeState: 'CO', fiscalYearStartMonth: 1 })).body;
+    const ia = await owner.c.call('POST', `/api/companies/${copy.id}/imports`, { kind: 'accounts', fileName: 'a.csv', content: acc.text });
+    assert.equal(ia.status, 201, JSON.stringify(ia.body));
+    const ij = await owner.c.call('POST', `/api/companies/${copy.id}/imports`, { kind: 'journal', fileName: 'j.csv', content: jr.text });
+    assert.equal(ij.status, 201, JSON.stringify(ij.body));
+    const tb = async (id) => (await owner.c.call('GET', `/api/companies/${id}/reports/trial-balance?asOf=2099-12-31`)).body
+      .rows.map((r) => `${r.code} ${r.name} ${r.debitCents} ${r.creditCents}`);
+    assert.ok((await tb(co.id)).length > 2);
+    assert.deepEqual(await tb(copy.id), await tb(co.id));
+  });
+
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
     const lock = `/api/companies/${co.id}/lock`;
     assert.equal((await owner.c.call('POST', lock, '{"through":null}', { 'content-type': 'text/plain' })).status, 415);
