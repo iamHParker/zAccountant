@@ -3,12 +3,15 @@ import { createPool } from './db/pool.js';
 import { migrate } from './db/migrate.js';
 import { createApp } from './app.js';
 import { startNightlyScheduler } from './jobs/booksCheck.js';
+import { ensureRuntimeRole } from './db/grant.js';
 
 const production = process.env.NODE_ENV === 'production';
 if (production) {
   // Refuse to run in production without the secrets and settings that protect customer data.
-  const missing = ['DATABASE_URL', 'MIGRATION_DATABASE_URL', 'AUDIT_HMAC_KEY', 'FIELD_ENCRYPTION_KEY', 'ALLOWED_HOSTS']
+  // On Railway the site's address comes in RAILWAY_PUBLIC_DOMAIN, so ALLOWED_HOSTS is optional there.
+  const missing = ['DATABASE_URL', 'MIGRATION_DATABASE_URL', 'AUDIT_HMAC_KEY', 'FIELD_ENCRYPTION_KEY']
     .filter((k) => !process.env[k]);
+  if (!process.env.ALLOWED_HOSTS && !process.env.RAILWAY_PUBLIC_DOMAIN) missing.push('ALLOWED_HOSTS');
   if (missing.length) {
     console.error(`Missing required settings: ${missing.join(', ')}`);
     process.exit(1);
@@ -23,7 +26,11 @@ if (production) {
 const ownerPool = createPool(process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL);
 const applied = await migrate(ownerPool);
 if (applied.length) console.log(`Applied migrations: ${applied.join(', ')}`);
-if (!process.env.MIGRATION_DATABASE_URL) {
+if (process.env.MIGRATION_DATABASE_URL) {
+  // Create/refresh the app's restricted login from DATABASE_URL (user + password) and its rights.
+  const r = await ensureRuntimeRole(ownerPool, process.env.DATABASE_URL);
+  if (!r.skipped) console.log(JSON.stringify({ level: 'info', msg: 'runtime database role ready', role: r.role }));
+} else {
   console.warn('Note: running with a single database role (development). Row-level security is not enforced for the table owner.');
 }
 
