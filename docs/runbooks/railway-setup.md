@@ -28,7 +28,11 @@ Homer does these steps in the Railway website; Claude sends them one at a time i
    the deploy log shows `runtime database role ready` and `zAccountant running`.
 7. **First sign-in.** Open the domain, create the owner account, set up two-step sign-in, save the recovery codes.
 8. **Backups.** Postgres service → Backups: turn on scheduled backups (daily). Run the restore drill
-   (`docs/runbooks/operations.md`) once before the alpha.
+   (`docs/runbooks/operations.md`) once before the alpha. **Needs Railway Pro**: on Hobby the Backups tab can
+   only view/restore existing backups. The alternative is a nightly `pg_dump` job to outside storage.
+
+**Done 2026-10-24:** steps 1–7 at `zaccountant-production.up.railway.app` (Hobby plan). Step 8 waits on Homer's
+choice (Pro, or our own backup job); he chose to decide later, reminder set for Nov 16.
 
 Later: custom domain (e.g. app.zaccountant.com, then set `ALLOWED_HOSTS` to include it), `METRICS_TOKEN` for
 Grafana, an uptime monitor on `/healthz`.
