@@ -470,6 +470,10 @@
           <label v-if="S.kind === 'invoice'">Project (optional: name and site address, printed on the invoice)
             <textarea v-model="ar.doc.project" rows="3" maxlength="300" placeholder="Project name&#10;Street&#10;City, State ZIP"></textarea></label>
           <template v-if="S.kind === 'invoice'">
+          <label class="split-jobs">Jobs sharing these expenses
+            <input type="number" min="1" max="99" step="1" v-model.number="ar.doc.splitJobs" @change="setSplitJobs" @input="setSplitJobs" class="num"></label>
+          <p class="muted small" v-if="ar.doc.splitJobs > 1">Each cost passed on (lodging, rental car, airfare…) is billed at 1/{{ ar.doc.splitJobs }} of its price.
+            Hourly rates are not split. A quantity you type on a line yourself stays as you typed it. Write one invoice per job, each with the same split.</p>
           <table class="data lines">
             <thead><tr><th>Rate or item</th><th>Date</th><th>Task / description</th><th class="num">Hours / qty</th><th class="num">Rate / price</th><th title="Taxable">Tax</th><th class="num">Amount</th><th>Income account</th><th></th></tr></thead>
             <tbody>
@@ -479,7 +483,7 @@
                   <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
                 <td class="w150"><input type="date" v-model="l.serviceDate"></td>
                 <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit"></td>
-                <td class="w90"><input v-model="l.quantity" inputmode="decimal" class="num"></td>
+                <td class="w90"><input v-model="l.quantity" @input="l.qtyTyped = true" inputmode="decimal" class="num" title="Hours, a quantity, or a share like 1/3"></td>
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td><input type="checkbox" v-model="l.taxable" class="auto-w" title="Taxable"></td>
                 <td class="num">{{ money(lineCents(l.quantity, l.unitPrice)) }}</td>

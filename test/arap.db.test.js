@@ -16,6 +16,12 @@ test('line amounts are exact (quantity × price, half-up)', () => {
   assert.equal(arap.lineAmount('3', 3333), 9999);
   assert.throws(() => arap.lineAmount('1.23456', 100), /4 decimals/);
   assert.throws(() => arap.lineAmount('-1', 100), /Quantity/);
+  // Costs split across jobs (Homer, 2026-10-24): quantity "1/N", price ÷ N divided exactly, rounded once.
+  assert.equal(arap.lineAmount('1/3', 35000), 11667);      // motel $350.00 ÷ 3 = $116.666… → $116.67
+  assert.equal(arap.lineAmount('1/2', 45001), 22501);      // $450.01 ÷ 2 = $225.005 → $225.01 (half-up)
+  assert.equal(arap.lineAmount('1/4', 120000), 30000);     // airfare $1,200.00 ÷ 4 = $300.00
+  assert.equal(arap.lineAmount('1/1', 9999), 9999);
+  assert.throws(() => arap.lineAmount('1/0', 100), /divide by 0/);
   assert.equal(arap.bucketFor(-5), 'current');
   assert.equal(arap.bucketFor(0), 'current');
   assert.equal(arap.bucketFor(1), 'd1_30');

@@ -156,3 +156,5 @@ table.invoice-lines thead th { background: var(--bg); }
 .logo-drop .file-link { color: var(--brand); text-decoration: underline; }
 .logo-slot { display: flex; align-items: center; justify-content: center; min-width: 160px; min-height: 90px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: #fff; text-align: center; }
 .logo-slot.empty { border-style: dashed; background: none; }
+.split-jobs { display: inline-block; margin-bottom: 8px; }
+.split-jobs input { width: 90px; display: inline-block; margin-left: 8px; }

@@ -42,8 +42,6 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   confirmation before the Board certifies DC.
 - **Production has no backups yet** (Railway Hobby plan can't schedule them). Homer decides by mid-Nov: upgrade
   to Pro, or Claude builds a nightly pg_dump to outside storage. Must be in place, with a restore drill, before alpha.
-- Invoice queue item 6: split travel costs (motel, rental car, airfare) across 2+ jobs, each invoice getting a share.
-  Homer's sample (a 2025 Excel invoice) had no split, so ask him how he divides them (equal shares or percents).
 - **Queued for late next week (Homer, 2026-10-24): "Tax-ready" add-on, level 1 only.** Map accounts to Schedule C /
   1120-S / 1065 lines, a Tax summary report, 1099-NEC totals per vendor, W-2/W-3 totals. Not printed forms, not e-file
   (a CPA partner does real preparation through an accountant's role).
@@ -78,6 +76,7 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   (`invoice_items`, kind service = hours × rate, expense = cost passed on), line `service_date`/`item_id`, invoice
   `project` block, letterhead (address, note with tax ID + TX firm number, closing line), logo in `company_logos`,
   pinned `default_sales_tax_rate`. Layout follows Homer's Excel invoice: Hours, Date, Task, Rate, T, Subtotal.
+  Expense split across jobs: quantity `1/N` from the invoice's "Jobs sharing these expenses" box; typed quantities win.
 - Front page at `/` (`public/welcome.html`, plain HTML, prices from `GET /api/public/plans`); the app is at `/app`.
   Settings → Back up your books (`src/services/backupService.js`): re-importable CSVs of the chart and journal.
 - Guides: `docs/user-guide/` (chapters by tier: everyone, Basic, Payroll, Timesheets, staff) and
