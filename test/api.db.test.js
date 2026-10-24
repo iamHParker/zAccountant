@@ -5,9 +5,11 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { hasDb, freshDatabase } from './db.js';
 import { createApp } from '../src/app.js';
+import { withScope } from '../src/db/pool.js';
 import { totpCode } from '../src/security/totp.js';
 
 process.env.AUTH_RATE_LIMIT = '1000';
+process.env.DEVELOPER_EMAILS = 'dev@example.com';
 
 test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
   const db = await freshDatabase({ withAppRole: true });
@@ -595,6 +597,72 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
       assert.match(text, /db_pool_waiting \d+/);
     } finally {
       delete process.env.METRICS_TOKEN;
+    }
+  });
+
+  await t.test('beta feedback: anyone sends, only developers read; testers cannot see each other\'s reports', async () => {
+    // A 1×1 PNG, as the dialog sends a picture (a data URL).
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+    const context = { location: { tab: 'Sales', panel: 'docs', role: 'Owner' }, actions: [{ at: '10:00:01', what: 'click button "Save"' }],
+      errors: [{ at: '10:00:02', kind: 'server', message: 'POST /companies/:id/invoices → 400: Pick a customer', reqId: 'abc12345' }], junk: 'x'.repeat(5000) };
+    const sent = await owner.c.call('POST', '/api/feedback', { note: 'The invoice total shows $0.00', companyId: co.id, picture: png, context });
+    assert.equal(sent.status, 201, JSON.stringify(sent.body));
+    assert.ok(sent.body.number >= 1);
+    assert.equal((await owner.c.call('POST', '/api/feedback', { note: '   ' })).status, 400);
+    assert.equal((await owner.c.call('POST', '/api/feedback', { note: 'x', picture: 'data:image/png;base64,AAAA' })).status, 400, 'not really a PNG');
+    assert.equal((await owner.c.call('POST', '/api/feedback', { note: 'x', picture: 'data:image/gif;base64,R0lGOD' })).status, 400);
+
+    // Not a developer: refused, reads included.
+    assert.equal((await owner.c.call('GET', '/api/developer/reports')).status, 403);
+    assert.equal((await owner.c.call('GET', '/api/developer/backup')).status, 403);
+    const me = await owner.c.call('GET', '/api/auth/me');
+    assert.equal(me.body.user.platformRole, null);
+    assert.match(me.body.version, /^\d+\.\d+\.\d+/);
+
+    // A second tester sends one; row-level security keeps each tester to their own rows even in raw SQL.
+    const other = await newUser('tester2@example.com');
+    const s2 = await other.c.call('POST', '/api/feedback', { note: 'Second tester', companyId: co.id }); // not a member: company not recorded
+    assert.equal(s2.status, 201);
+    const otherId = (await other.c.call('GET', '/api/auth/me')).body.user.id;
+    const seen = await withScope(db.appPool, { userId: otherId }, (c) => c.query('SELECT note, company_id FROM feedback_reports'));
+    assert.deepEqual(seen.rows.map((r) => [r.note, r.company_id]), [['Second tester', null]]);
+
+    const dev = await newUser('dev@example.com');
+    assert.equal((await dev.c.call('GET', '/api/auth/me')).body.user.platformRole, 'developer');
+    const sum = await dev.c.call('GET', '/api/developer/summary');
+    assert.equal(sum.status, 200);
+    assert.ok(sum.body.counts.users >= 3 && sum.body.counts.companies >= 1);
+    const list = await dev.c.call('GET', '/api/developer/reports?status=new');
+    assert.equal(list.body.counts.new, 2);
+    const first = list.body.reports.find((r) => r.number === sent.body.number);
+    assert.deepEqual([first.page, first.hasPicture, first.pictureSource, first.status], ['Sales', true, 'screen', 'new']);
+    const full = (await dev.c.call('GET', `/api/developer/reports/${first.id}`)).body;
+    assert.equal(full.context.junk.length, 1001, 'long strings are cut');
+    assert.match(full.claudeDraft, /The invoice total shows \$0\.00/);
+    assert.match(full.claudeDraft, /request abc12345/);
+    assert.ok(!full.claudeDraft.includes('owner@example.com'), 'the write-up for Claude leaves out who sent it');
+    const pic = await dev.c.call('GET', `/api/developer/reports/${first.id}/picture`);
+    assert.equal(pic.headers['content-type'], 'image/png');
+
+    assert.equal((await dev.c.call('PATCH', `/api/developer/reports/${first.id}`, { status: 'bogus' })).status, 400);
+    assert.equal((await dev.c.call('PATCH', `/api/developer/reports/${first.id}`, { status: 'sent_to_claude', claudeText: 'Fix the total.', developerNote: 'seen' })).status, 200);
+    const after = (await dev.c.call('GET', `/api/developer/reports/${first.id}`)).body;
+    assert.deepEqual([after.status, after.claudeDraft, after.developerNote, after.updatedBy], ['sent_to_claude', 'Fix the total.', 'seen', 'dev@example.com']);
+    // The runtime login can't rewrite what the tester sent.
+    await assert.rejects(db.appPool.query('UPDATE feedback_reports SET note = $1', ['changed']), /permission denied/);
+    assert.ok(!JSON.stringify(logs).includes('invoice total'), 'the note is never logged');
+
+    // Backup: a pg_dump custom-format file ("PGDMP" is its first 5 bytes), made with the owner login.
+    process.env.MIGRATION_DATABASE_URL = db.url;
+    try {
+      const r = await fetch(`${base}/api/developer/backup`, { headers: { cookie: dev.c.cookie } });
+      assert.equal(r.status, 200);
+      assert.match(r.headers.get('content-disposition'), /zaccountant-backup-\d{4}-\d{2}-\d{2}-pg\d+\.dump/);
+      const bytes = Buffer.from(await r.arrayBuffer());
+      assert.equal(bytes.subarray(0, 5).toString(), 'PGDMP');
+      assert.ok(logs.some((l) => l.msg === 'backup downloaded'));
+    } finally {
+      delete process.env.MIGRATION_DATABASE_URL;
     }
   });
 

@@ -33,6 +33,9 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 - Roles, departments, permission checkboxes, timesheets (with HoursTracker CSV import feeding payroll): **all
   before launch** (done: PRs #8, #9).
 - Payroll and report polish slid about a week to make room for that.
+- 2026-10-24: stay on Railway **Hobby** while beta testers debug (Pro later; Homer has two more projects to follow).
+  Beta testers pay nothing and get every feature, even with their real books. Plans are switched **by hand** in the
+  Admin dashboard for now; **Stripe** goes in during December, before launch.
 
 ## Open items
 - DC $4,150 per-allowance withholding amount: no official 2026 source (latest FR-230 is 2018). Needs DC OTR
@@ -58,6 +61,9 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 
 - Railway: live at `zaccountant-production.up.railway.app` (Homer's owner account set up 2026-10-24); first-time setup steps in `docs/runbooks/railway-setup.md`; the server creates its restricted DB login
   from `DATABASE_URL` at start-up (`ensureRuntimeRole`).
+- Beta feedback + Developer dashboard (modelled on wri-eng's Report a problem): `public/feedback.js` (recorder, pictures),
+  `src/services/feedbackService.js`, table `feedback_reports` (RLS: sender or platform developer). Platform roles come only
+  from `DEVELOPER_EMAILS` / `ADMIN_EMAILS` (`src/core/platform.js`). Never log a report's note or picture.
 - Ops: request logs/metrics in `src/metrics.js`; restore drill and load test in `src/jobs/`; how to run them and
   the results log: `docs/runbooks/operations.md`.
 

@@ -24,6 +24,9 @@ import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows } fro
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
 import { createMetrics, bearerMatches } from './metrics.js';
+import * as feedback from './services/feedbackService.js';
+import { platformRole, appVersion } from './core/platform.js';
+import { streamBackup } from './jobs/backup.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -80,6 +83,9 @@ export function createApp(pool, { log } = {}) {
   const app = express();
   const hosts = allowedHosts();
   const metrics = createMetrics({ log });
+  // The last 100 server errors (what went wrong and where, with the request id; never request data), for the
+  // Developer dashboard. Kept in memory only: a restart or deploy clears it, and the full log stays in Railway.
+  const serverErrors = [];
   app.disable('x-powered-by');
   // Behind Railway's proxy the visitor's address is in X-Forwarded-For (one hop); rate limits need it.
   const trustProxy = process.env.TRUST_PROXY ?? (process.env.RAILWAY_ENVIRONMENT_NAME ? '1' : null);
@@ -111,6 +117,7 @@ export function createApp(pool, { log } = {}) {
   app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '6mb' }));
   app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
   app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
+  app.use('/api/feedback', express.json({ limit: '6mb' })); // a picture of the screen, as base64
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
     res.set({
@@ -144,13 +151,13 @@ export function createApp(pool, { log } = {}) {
     const { email, password, name } = req.body ?? {};
     const r = await auth.signup(pool, { email, password, name });
     setSessionCookie(res, r.token);
-    res.status(201).json({ user: r.user, next: r.next });
+    res.status(201).json({ user: { ...r.user, platformRole: platformRole(r.user.email) }, next: r.next, version: appVersion() });
   });
   authApi.post('/login', async (req, res) => {
     const { email, password } = req.body ?? {};
     const r = await auth.login(pool, { email, password });
     setSessionCookie(res, r.token);
-    res.json({ user: r.user, next: r.next });
+    res.json({ user: { ...r.user, platformRole: platformRole(r.user.email) }, next: r.next, version: appVersion() });
   });
   authApi.post('/logout', async (req, res) => {
     await auth.logout(pool, readCookie(req, COOKIE()));
@@ -161,7 +168,7 @@ export function createApp(pool, { log } = {}) {
     const s = await session(req);
     if (!s) return res.status(401).json({ error: 'Not signed in' });
     const next = s.session.mfa_passed ? null : (s.user.mfaEnabled ? 'mfa_verify' : 'mfa_setup');
-    res.json({ user: s.user, next });
+    res.json({ user: { ...s.user, platformRole: platformRole(s.user.email) }, next, version: appVersion() });
   });
   authApi.post('/mfa/setup', async (req, res) => {
     const s = await session(req);
@@ -188,7 +195,7 @@ export function createApp(pool, { log } = {}) {
     const s = await session(req);
     if (!s) return res.status(401).json({ error: 'Please sign in' });
     if (!s.session.mfa_passed) return res.status(401).json({ error: 'Enter your two-factor code to continue', next: s.user.mfaEnabled ? 'mfa_verify' : 'mfa_setup' });
-    req.user = s.user;
+    req.user = { ...s.user, platformRole: platformRole(s.user.email) };
     next();
   });
 
@@ -232,6 +239,51 @@ export function createApp(pool, { log } = {}) {
     return { [FILE]: { name: csvFileName(company, title, period), type: 'text/csv; charset=utf-8', body: toCsv(rowsFor(data, { company, title })) } };
   });
   const statement = (kind) => (data, opts) => statementRows(kind, data, opts);
+
+  // ------------------------------------------------------------------ Beta feedback and the Developer dashboard
+  // Any signed-in person may send feedback; the company open at the time is recorded only if they belong to it.
+  api.post('/feedback', async (req, res) => {
+    const companyId = typeof req.body?.companyId === 'string' && UUID.test(req.body.companyId) ? req.body.companyId : null;
+    const r = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
+      const member = companyId ? await auth.getAccess(db, req.user.id, companyId) : null;
+      return feedback.createReport(db, req.user, member ? companyId : null, req.body ?? {}, { appVersion: appVersion() });
+    });
+    // The log names the report and the person's id, never the note or the picture.
+    log?.(JSON.stringify({ level: 'info', msg: 'beta feedback', reqId: req.id, report: r.number, userId: req.user.id }));
+    res.status(201).json(r);
+  });
+
+  // Developer routes: platform role developer only (DEVELOPER_EMAILS in Railway). Row-level security also
+  // checks it, so a mistake here still can't show one tester another tester's report.
+  const dev = (handler) => async (req, res) => {
+    if (req.user.platformRole !== 'developer') return res.status(403).json({ error: 'The Developer dashboard is for zAccountant developers.' });
+    if (req.params.reportId !== undefined && !UUID.test(req.params.reportId)) return res.status(404).json({ error: 'Report not found' });
+    const body = await withScope(pool, { userId: req.user.id, platformRole: 'developer' }, (db) => handler({ db, req }));
+    if (body?.[FILE]) {
+      const f = body[FILE];
+      return res.type(f.type).set('Content-Disposition', `inline; filename="${f.name}"`).send(f.body);
+    }
+    res.json(body);
+  };
+  const siteUrl = () => (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
+  api.get('/developer/summary', dev(async ({ db }) => ({
+    version: appVersion(), counts: await feedback.platformCounts(db), serverErrors: serverErrors.slice().reverse(),
+  })));
+  // A full backup, streamed straight from pg_dump (owner login, which sees every company). Logged: who and when.
+  api.get('/developer/backup', async (req, res) => {
+    if (req.user.platformRole !== 'developer') return res.status(403).json({ error: 'The Developer dashboard is for zAccountant developers.' });
+    const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
+    try {
+      await streamBackup(url, res, { log: (r) => log?.(JSON.stringify({ level: 'info', msg: 'backup downloaded', reqId: req.id, userId: req.user.id, ...r })) });
+    } catch (e) {
+      console.error(JSON.stringify({ level: 'error', msg: 'backup failed', reqId: req.id, error: e.message.replace(/postgres(ql)?:\/\/\S+/g, '[url]') }));
+      if (!res.headersSent) res.status(500).json({ error: 'The backup could not be made. The server log has the details.' });
+    }
+  });
+  api.get('/developer/reports', dev(({ db, req }) => feedback.listReports(db, { status: q(req.query.status) })));
+  api.get('/developer/reports/:reportId', dev(({ db, req }) => feedback.getReport(db, req.params.reportId, { siteUrl: siteUrl() })));
+  api.get('/developer/reports/:reportId/picture', dev(async ({ db, req }) => ({ [FILE]: await feedback.getPicture(db, req.params.reportId) })));
+  api.patch('/developer/reports/:reportId', dev(({ db, req }) => feedback.updateReport(db, req.params.reportId, req.body ?? {}, { actor: req.user.email })));
 
   // Companies
   api.get('/companies', route(null, ({ db, req }) => ledger.listCompanies(db, { userId: req.user.id })));
@@ -477,6 +529,9 @@ export function createApp(pool, { log } = {}) {
   // Static UI
   const vuePath = fileURLToPath(new URL('../node_modules/vue/dist/vue.esm-browser.prod.js', import.meta.url));
   app.get('/vendor/vue.js', (req, res) => res.type('text/javascript').sendFile(vuePath));
+  // Draws a picture of the screen for Beta feedback (loaded only when the dialog asks for one).
+  const htmlToImagePath = fileURLToPath(new URL('../node_modules/html-to-image/dist/html-to-image.js', import.meta.url));
+  app.get('/vendor/html-to-image.js', (req, res) => res.type('text/javascript').sendFile(htmlToImagePath));
   app.use(express.static(fileURLToPath(new URL('../public/', import.meta.url))));
 
   // Errors -> JSON. User mistakes are 4xx with a readable message; anything else is 500 without internals.
@@ -505,6 +560,9 @@ export function createApp(pool, { log } = {}) {
     };
     if (pgMessages[err.code]) return res.status(400).json({ error: pgMessages[err.code] });
     console.error(JSON.stringify({ level: 'error', msg: err.message, code: err.code, reqId: req.id, route: req.route?.path ?? 'unmatched' }));
+    serverErrors.push({ at: new Date().toISOString(), message: String(err.message).slice(0, 300), code: err.code ?? null, reqId: req.id,
+      method: req.method, route: `${req.baseUrl ?? ''}${req.route?.path ?? ''}` || 'unmatched' });
+    if (serverErrors.length > 100) serverErrors.shift();
     res.status(500).json({ error: 'Something went wrong on our side. Nothing was saved.' });
   });
   return app;

@@ -19,7 +19,9 @@
         <button v-for="t in tabs.filter(t => canTab(t.id))" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
       </nav>
       <div class="who" v-if="auth.user">
+        <button class="help-btn beta-btn" @click="openFeedback" title="Something wrong or confusing? Tell the zAccountant team">🐞 Beta feedback</button>
         <button v-if="company" class="help-btn" :class="{ active: tab === 'help' }" @click="openHelp" :title="tab === 'help' ? 'Back' : 'Help for this screen'" >? Help</button>
+        <button v-if="auth.user.platformRole === 'developer'" class="help-btn" :class="{ active: tab === 'developer' }" @click="openDeveloper" :title="tab === 'developer' ? 'Back' : 'Developer dashboard'">Developer</button>
         <span class="muted">{{ auth.user.name }}<template v-if="company"> · {{ company.roleName }}</template></span>
         <button class="link" @click="signOut">Sign out</button>
       </div>
@@ -28,6 +30,31 @@
 
   <div class="toast" v-if="message" :class="message.kind" @click="message = null">{{ message.text }}</div>
 
+  <!-- BETA FEEDBACK -->
+  <div class="overlay feedback-dialog" v-if="fb.open" @click.self="closeFeedback">
+    <form class="card dialog" @submit.prevent="sendFeedback">
+      <h2>🐞 Beta feedback</h2>
+      <p class="hint">Found something wrong, confusing, or missing? Tell us in your own words. The page adds which screen you're on,
+        your last few clicks and any error messages, so you don't have to (never what you typed into a form).</p>
+      <label>What happened, and what did you expect?
+        <textarea v-model="fb.note" rows="5" maxlength="4000" required placeholder="e.g. I saved an invoice and the total showed $0.00"></textarea></label>
+      <div class="row wrap">
+        <button type="button" @click="takePicture" :disabled="fb.busy">🖥 Take a picture of the screen</button>
+        <label class="button file-btn">📷 Attach a photo or picture<input type="file" accept="image/*" @change="choosePhoto" :disabled="fb.busy"></label>
+        <span class="muted small" v-if="fb.busy">Working…</span>
+      </div>
+      <div v-if="fb.picture" class="picture-preview">
+        <img :src="fb.picture" alt="The picture that will be sent">
+        <button type="button" class="link" @click="removePicture">Remove picture</button>
+      </div>
+      <p class="hint small" v-if="fb.picture">The picture shows whatever is on your screen, including amounts from your books. Only the zAccountant developers can see it.</p>
+      <p class="bad" v-if="fb.error">{{ fb.error }}</p>
+      <div class="row">
+        <button type="button" class="link" @click="closeFeedback">Cancel</button>
+        <button class="primary" :disabled="fb.busy">Send</button>
+      </div>
+    </form>
+  </div>
   <main>
     <!-- SIGN-IN SCREENS -->
     <section v-if="auth.screen === 'loading'" class="card narrow"><p class="hint">Loading…</p></section>
@@ -79,8 +106,100 @@
     </section>
 
     <template v-else>
+    <!-- DEVELOPER DASHBOARD (platform developers only; the server checks every request) -->
+    <section v-if="tab === 'developer'">
+      <div class="row"><h1>Developer dashboard</h1><button @click="loadDev">Refresh</button></div>
+      <div class="tiles" v-if="dev.summary">
+        <div class="tile"><div class="label">People signed up</div><div class="value">{{ dev.summary.counts.users }}</div></div>
+        <div class="tile"><div class="label">Companies</div><div class="value">{{ dev.summary.counts.companies }}</div></div>
+        <div class="tile"><div class="label">Signed in, last 24 hours</div><div class="value">{{ dev.summary.counts.signedInToday }}</div></div>
+        <div class="tile"><div class="label">Version running</div><div class="value small">{{ dev.summary.version }}</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Beta feedback</h2>
+        <div class="seg" v-if="dev.list">
+          <button v-for="(label, key) in dev.list.statuses" :class="{ active: dev.status === key }" @click="dev.status = key; loadDevReports()">{{ label }} ({{ dev.list.counts[key] }})</button>
+          <button :class="{ active: !dev.status }" @click="dev.status = ''; loadDevReports()">All</button>
+        </div>
+        <p class="hint" v-if="dev.list && !dev.list.reports.length">No reports here.</p>
+        <table class="data" v-if="dev.list && dev.list.reports.length">
+          <thead><tr><th>#</th><th>Sent</th><th>Tester</th><th>Screen</th><th>What they wrote</th><th>Picture</th><th>Status</th></tr></thead>
+          <tr v-for="r in dev.list.reports" class="clickable" :class="{ sel: dev.report && dev.report.id === r.id }" @click="openDevReport(r.id)">
+            <td>{{ r.number }}</td><td>{{ new Date(r.createdAt).toLocaleString('en-US', { timeZone: 'America/Chicago', dateStyle: 'short', timeStyle: 'short' }) }}</td>
+            <td>{{ r.reporterName }}<br><span class="muted small">{{ r.reporterEmail }}</span></td><td>{{ r.page }}</td><td>{{ r.noteStart }}</td>
+            <td>{{ r.hasPicture ? (r.pictureSource === 'photo' ? '📷 photo' : '🖥 screen') : '' }}</td><td>{{ r.statusLabel }}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="card" v-if="dev.report">
+        <div class="row"><h2>Report {{ dev.report.number }}</h2><button class="link" @click="dev.report = null">Close</button></div>
+        <p class="muted small">From {{ dev.report.reporterName }} ({{ dev.report.reporterEmail }}) ·
+          {{ new Date(dev.report.createdAt).toLocaleString('en-US', { timeZone: 'America/Chicago' }) }} CT · version {{ dev.report.appVersion }}</p>
+        <blockquote class="tester-note">{{ dev.report.note }}</blockquote>
+        <div class="split">
+          <div>
+            <table class="data small">
+              <tr><th>Screen</th><td>{{ dev.report.context.location?.tab }}<template v-if="dev.report.context.location?.panel"> › {{ dev.report.context.location.panel }}</template></td></tr>
+              <tr><th>Their role</th><td>{{ dev.report.context.location?.role || 'no company open' }}</td></tr>
+              <tr><th>Window</th><td>{{ dev.report.context.viewport?.width }}×{{ dev.report.context.viewport?.height }}</td></tr>
+              <tr><th>Browser</th><td class="small">{{ dev.report.context.browser?.userAgent }}</td></tr>
+            </table>
+            <h3>Last clicks</h3>
+            <ol class="small"><li v-for="a in dev.report.context.actions || []">{{ a.at }} {{ a.what }}</li></ol>
+            <p class="hint" v-if="!(dev.report.context.actions || []).length">None recorded.</p>
+            <h3>Recent errors</h3>
+            <ul class="small"><li v-for="e in dev.report.context.errors || []"><strong>{{ e.kind }}</strong> {{ e.at }} {{ e.message }}<span v-if="e.reqId" class="muted"> (request {{ e.reqId }})</span></li></ul>
+            <p class="hint" v-if="!(dev.report.context.errors || []).length">None recorded.</p>
+          </div>
+          <div v-if="dev.report.hasPicture">
+            <a :href="`/api/developer/reports/${dev.report.id}/picture`" target="_blank" rel="noopener" title="Open full size">
+              <img class="report-picture" :src="`/api/developer/reports/${dev.report.id}/picture`" alt="The tester's picture"></a>
+            <p><a :href="`/api/developer/reports/${dev.report.id}/picture`" :download="`report-${dev.report.number}.jpg`">Download picture</a></p>
+          </div>
+        </div>
+
+        <h3>For Claude</h3>
+        <p class="hint">Edit this into what you want Claude to do (it leaves out who sent it). <strong>Copy for Claude</strong> copies it and marks the report Sent to Claude; paste it into your Claude project chat, and attach the picture if it helps.</p>
+        <textarea class="claude-text" v-model="dev.text" rows="16" aria-label="Write-up for Claude"></textarea>
+        <div class="row wrap">
+          <button class="primary" @click="copyForClaude">Copy for Claude</button>
+          <button @click="saveDevReport({ claudeText: dev.text })">Save write-up</button>
+          <button class="link" v-if="dev.report.claudeText" @click="resetClaudeText">Back to the automatic write-up</button>
+          <span class="ok" v-if="dev.copied">✓ Copied</span>
+        </div>
+
+        <div class="grid4">
+          <label>Status
+            <select :value="dev.report.status" @change="saveDevReport({ status: $event.target.value })">
+              <option v-for="(label, key) in dev.list?.statuses" :value="key">{{ label }}</option>
+            </select></label>
+          <label class="span3">Your note (only developers see it)
+            <input v-model="dev.note" @change="saveDevReport({ developerNote: dev.note })"></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Backup</h2>
+        <p class="hint">Downloads a complete copy of the database (every company's books) to this computer. Railway's Hobby plan has no automatic
+          backups, so do this about once a week and keep the file somewhere private. To check one, run the restore drill on it (docs/runbooks/operations.md).</p>
+        <a class="button" href="/api/developer/backup">Download backup</a>
+      </div>
+
+      <div class="card" v-if="dev.summary">
+        <h2>Server errors</h2>
+        <p class="hint">The last 100 since the server started (a deploy clears this list; Railway's log keeps everything). Match a tester's report by its request id.</p>
+        <p class="hint" v-if="!dev.summary.serverErrors.length">None. 🎉</p>
+        <table class="data small" v-else>
+          <thead><tr><th>When (UTC)</th><th>Request</th><th>What</th><th>Request id</th></tr></thead>
+          <tr v-for="e in dev.summary.serverErrors"><td>{{ e.at.slice(0, 19).replace('T', ' ') }}</td><td>{{ e.method }} {{ e.route }}</td><td>{{ e.message }}<span v-if="e.code" class="muted"> ({{ e.code }})</span></td><td class="muted">{{ e.reqId }}</td></tr>
+        </table>
+      </div>
+    </section>
+
     <!-- First run: create a company -->
-    <section v-if="!company || tab === 'new-company'" class="card narrow">
+    <section v-else-if="!company || tab === 'new-company'" class="card narrow">
       <h1>{{ companies.length ? 'Add a company' : 'Welcome! Let\'s set up your books' }}</h1>
       <p class="hint">We'll create a standard chart of accounts for a small business. You can add accounts later.</p>
       <form @submit.prevent="createCompany">

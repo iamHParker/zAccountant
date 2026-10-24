@@ -43,7 +43,11 @@ Alert rules for Grafana (thresholds from Section 14.2):
 
 ## 4. Backups and the restore drill (RTO under 4 hours)
 
-Railway PostgreSQL takes the automatic backups. The drill proves a backup actually restores and the books
+**While on Railway's Hobby plan (Homer, 2026-10-24) there are no automatic backups.** A developer downloads one
+from the Developer dashboard (**Download backup**, `GET /api/developer/backup`, pg_dump custom format, file named
+`zaccountant-backup-<date>-pg<version>.dump`) about once a week and keeps it private: it holds every company's books.
+Restore it with `pg_restore` of that PostgreSQL version, or check it with the drill's `--file` option below.
+Once on Pro, Railway takes the automatic backups. The drill proves a backup actually restores and the books
 in the copy are intact. Run it monthly, and before Board Review #3:
 
 1. In Railway, add a **second, empty** PostgreSQL database (never restore over the live one; the drill refuses a

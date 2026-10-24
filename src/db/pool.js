@@ -59,11 +59,12 @@ export async function withTransaction(pool, fn) {
  * One database transaction per web request, tagged with who is signed in and which company the
  * request is for. Row-level security policies read these values (zacc.user_id / zacc.company_id).
  */
-export async function withScope(pool, { userId = null, companyId = null }, fn) {
+export async function withScope(pool, { userId = null, companyId = null, platformRole = null }, fn) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query("SELECT set_config('zacc.user_id', $1, true), set_config('zacc.company_id', $2, true)", [userId ?? '', companyId ?? '']);
+    await client.query("SELECT set_config('zacc.user_id', $1, true), set_config('zacc.company_id', $2, true), set_config('zacc.platform_role', $3, true)",
+      [userId ?? '', companyId ?? '', platformRole ?? '']);
     client.__inTx = true;
     client.__spCount = 0;
     const result = await fn(client);
