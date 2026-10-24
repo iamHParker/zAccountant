@@ -181,7 +181,7 @@ export function createApp(pool) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -352,6 +352,18 @@ export function createApp(pool) {
       { ...req.body, idempotencyKey: req.get('Idempotency-Key') ?? req.body?.idempotencyKey }, { actor }), 201));
   api.post('/companies/:companyId/paychecks/:paycheckId/void', route('payroll', ({ db, req, companyId, actor }) =>
     payroll.voidPaycheck(db, companyId, req.params.paycheckId, { date: req.body?.date, reason: req.body?.reason, actor }), 201));
+  const runOpts = (req) => {
+    const { payFrequency, periodStart, periodEnd, payDate, paidFromAccountId, items } = req.body ?? {};
+    return { payFrequency, periodStart, periodEnd, payDate, paidFromAccountId, items, idempotencyKey: idemKey(req) };
+  };
+  api.post('/companies/:companyId/payroll-runs/preview', route('payroll', ({ db, req, companyId }) => payroll.previewRun(db, companyId, runOpts(req))));
+  api.post('/companies/:companyId/payroll-runs', route('payroll', ({ db, req, companyId, actor }) => payroll.postRun(db, companyId, runOpts(req), { actor }), 201));
+  api.get('/companies/:companyId/payroll-runs', route('read', ({ db, companyId }) => payroll.listRuns(db, companyId)));
+  api.get('/companies/:companyId/payroll-runs/:runId', route('read', ({ db, req, companyId }) => payroll.getRun(db, companyId, req.params.runId)));
+  // Pay stubs and tax totals show pay details, so they need the payroll role (not every member).
+  api.get('/companies/:companyId/paychecks/:paycheckId/stub', route('payroll', ({ db, req, companyId }) => payroll.getPayStub(db, companyId, req.params.paycheckId)));
+  api.get('/companies/:companyId/reports/payroll-liabilities', route('payroll', ({ db, req, companyId }) =>
+    payroll.getPayrollLiabilities(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
   api.get('/companies/:companyId/paychecks', route('read', ({ db, req, companyId }) =>
     payroll.listPaychecks(db, companyId, { year: req.query.year ? Number(req.query.year) : undefined })));
 

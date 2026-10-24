@@ -333,6 +333,29 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal((await outsider.c.call('GET', `${base}/invoices`)).status, 404);
   });
 
+  await t.test('payroll run, pay stub and tax liabilities through the restricted role', async () => {
+    const base = `/api/companies/${co.id}`;
+    const body = { payFrequency: 'monthly', periodStart: '2026-12-01', periodEnd: '2026-12-31', payDate: '2026-12-31', paidFromAccountId: A['1000'] };
+    const prev = await owner.c.call('POST', `${base}/payroll-runs/preview`, body);
+    assert.equal(prev.status, 200, JSON.stringify(prev.body));
+    assert.ok(prev.body.paychecks.length >= 1);
+    const run = await owner.c.call('POST', `${base}/payroll-runs`, body, { 'Idempotency-Key': 'api-run-2026-12' });
+    assert.equal(run.status, 201, JSON.stringify(run.body));
+    assert.equal((await owner.c.call('POST', `${base}/payroll-runs`, body, { 'Idempotency-Key': 'api-run-2026-12' })).body.id, run.body.id);
+    assert.equal((await owner.c.call('GET', `${base}/payroll-runs`)).body.length, 1);
+    const stub = await owner.c.call('GET', `${base}/paychecks/${run.body.paychecks[0].id}/stub`);
+    assert.equal(stub.status, 200, JSON.stringify(stub.body));
+    assert.equal(stub.body.periodEnd, '2026-12-31');
+    const liab = await owner.c.call('GET', `${base}/reports/payroll-liabilities?from=2026-12-01&to=2026-12-31`);
+    assert.equal(liab.status, 200, JSON.stringify(liab.body));
+    assert.ok(liab.body.totalCents > 0);
+    const bk = await newUser('bk-payroll@example.com');
+    await owner.c.call('POST', `${base}/members`, { email: 'bk-payroll@example.com', role: 'bookkeeper' });
+    assert.equal((await bk.c.call('GET', `${base}/paychecks/${run.body.paychecks[0].id}/stub`)).status, 403);
+    assert.equal((await bk.c.call('POST', `${base}/payroll-runs/preview`, body)).status, 403);
+    await assert.rejects(db.appPool.query('UPDATE payroll_runs SET gross_cents = 1'), /permission denied/);
+  });
+
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
     const lock = `/api/companies/${co.id}/lock`;
     assert.equal((await owner.c.call('POST', lock, '{"through":null}', { 'content-type': 'text/plain' })).status, 415);
