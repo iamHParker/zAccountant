@@ -7,6 +7,7 @@
 // ties out (e.g. Assets − Liabilities − Equity = 0). A non-zero check is a Sev-1 bug.
 
 import { naturalBalance } from './ledger.js';
+import { divRoundHalfUp } from './money.js';
 
 const ZERO = Object.freeze({ debitCents: 0, creditCents: 0 });
 const get = (sums, id) => sums.get(id) ?? ZERO;
@@ -221,5 +222,91 @@ export function postClosingSums(accounts, sumsAsOf, sumsBeforeFy) {
     const r = out.get(re.id);
     if (priorNi > 0) r.creditCents += priorNi; else r.debitCents += -priorNi;
   }
+  return out;
+}
+
+// ---------------------------------------------------------------- Comparative statements
+
+const monthEnd = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate(); // m is 1-12
+const isMonthEnd = (iso) => Number(iso.slice(8, 10)) === monthEnd(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)));
+
+/** Move a date by whole months. A month-end stays a month-end (2026-02-28 − 12 months = 2025-02-28,
+ *  2028-02-29 − 12 = 2027-02-28, 2029-02-28 − 12 = 2028-02-29); other days are clamped to the month. */
+export function shiftMonths(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = y * 12 + (m - 1) + n;
+  const ny = Math.floor(t / 12);
+  const nm = t - ny * 12 + 1;
+  const last = monthEnd(ny, nm);
+  const nd = isMonthEnd(iso) ? last : Math.min(d, last);
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(nd).padStart(2, '0')}`;
+}
+
+const addDaysIso = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * The period to compare a statement with. `compare` is 'prior_year' (the same dates a year earlier)
+ * or 'prior_period' (the stretch just before: whole months are compared with the same number of whole
+ * months, e.g. Q2 with Q1; any other range with the same number of days just before it). A balance sheet
+ * (asOf) compares with one year or one month earlier. Returns { from, to } or { asOf }, or null for none.
+ */
+export function comparisonPeriod({ from, to, asOf }, compare) {
+  if (!compare || compare === 'none') return null;
+  if (!['prior_year', 'prior_period'].includes(compare)) throw new RangeError('compare must be prior_year or prior_period');
+  if (asOf) return { asOf: shiftMonths(asOf, compare === 'prior_year' ? -12 : -1) };
+  if (compare === 'prior_year') return { from: shiftMonths(from, -12), to: shiftMonths(to, -12) };
+  if (from.endsWith('-01') && isMonthEnd(to)) {
+    const months = (Number(to.slice(0, 4)) * 12 + Number(to.slice(5, 7))) - (Number(from.slice(0, 4)) * 12 + Number(from.slice(5, 7))) + 1;
+    return { from: shiftMonths(from, -months), to: shiftMonths(to, -months) };
+  }
+  const days = (Date.parse(to) - Date.parse(from)) / 86_400_000 + 1;
+  return { from: addDaysIso(from, -days), to: addDaysIso(from, -1) };
+}
+
+/** Percent change from `prior` to `current` as a string with one decimal ("12.5", "-100.0"), rounded
+ *  half away from zero; null when the prior amount is 0 (no meaningful percent). Measured against the
+ *  size of the prior amount, so a loss that shrinks shows as an improvement (+). */
+export function percentChange(current, prior) {
+  if (prior === 0) return null;
+  const tenths = divRoundHalfUp(BigInt(current - prior) * 1000n, BigInt(Math.abs(prior)));
+  const a = tenths < 0n ? -tenths : tenths;
+  return `${tenths < 0n ? '-' : ''}${a / 10n}.${a % 10n}`;
+}
+
+const delta = (cur, prior) => ({ priorCents: prior, changeCents: cur - prior, changePct: percentChange(cur, prior) });
+
+/** Line up a section of two statements: every line gets prior/change columns; a line only in the prior
+ *  statement is kept (current = 0) so the columns still add to their totals. */
+function compareSection(cur, prior) {
+  const key = (l) => l.accountId ?? `name:${l.name}`;
+  const priorByKey = new Map(prior.lines.map((l) => [key(l), l]));
+  const seen = new Set();
+  const lines = cur.lines.map((l) => {
+    seen.add(key(l));
+    return { ...l, ...delta(l.amountCents, priorByKey.get(key(l))?.amountCents ?? 0) };
+  });
+  for (const l of prior.lines) if (!seen.has(key(l))) lines.push({ ...l, amountCents: 0, ...delta(0, l.amountCents) });
+  lines.sort((a, b) => (a.code && b.code ? byCode(a, b) : a.code ? -1 : b.code ? 1 : 0));
+  const t = delta(cur.totalCents, prior.totalCents);
+  return { lines, totalCents: cur.totalCents, totalPriorCents: t.priorCents, totalChangeCents: t.changeCents, totalChangePct: t.changePct };
+}
+
+const SECTIONS = {
+  'income-statement': { sections: ['revenue', 'cogs', 'operatingExpenses', 'otherIncome', 'otherExpenses'], totals: ['grossProfitCents', 'operatingIncomeCents', 'netIncomeCents'] },
+  'balance-sheet': { sections: ['assets', 'liabilities', 'equity'], totals: ['totalAssetsCents', 'liabilitiesAndEquityCents'] },
+};
+
+/**
+ * Put a statement side by side with the same statement for an earlier period. Section lines gain
+ * priorCents / changeCents / changePct and each section gains totalPriorCents / totalChangeCents /
+ * totalChangePct; `comparison.totals[name]` holds the same for subtotals such as net income.
+ * The prior statement must tie out too: `comparison.check` is its check (0 = ties out).
+ */
+export function compareStatements(kind, current, prior, period) {
+  const spec = SECTIONS[kind];
+  if (!spec) throw new RangeError(`no comparison for ${kind}`);
+  const out = { ...current };
+  for (const s of spec.sections) out[s] = compareSection(current[s], prior[s]);
+  out.comparison = { ...period, check: prior.check, totals: Object.fromEntries(spec.totals.map((t) => [t, delta(current[t], prior[t])])) };
   return out;
 }

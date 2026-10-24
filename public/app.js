@@ -50,6 +50,23 @@ const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: '
 
 let onSignInNeeded = () => {};
 
+/** Download a file the server makes (a CSV report) with the signed-in session, under the server's file name. */
+async function download(url) {
+  const res = await fetch(`/api${url}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) onSignInNeeded(data.next);
+    throw new Error(data.error ?? `Download failed (${res.status})`);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'report.csv';
+  const href = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement('a'), { href, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 10_000);
+}
+
 async function api(method, url, body, headers = {}) {
   if (method !== 'GET' && body === undefined) body = {}; // writes are always JSON (server CSRF rule)
   const res = await fetch(`/api${url}`, {
@@ -65,7 +82,7 @@ async function api(method, url, body, headers = {}) {
 // screens someone can't use.
 const TAB_PERMS = {
   home: ['view_books'], journal: ['view_books'], sales: ['view_books', 'invoices'], bills: ['view_books', 'bills'], bank: ['view_books'],
-  reports: ['view_books'], accounts: ['view_books'], payroll: ['view_books', 'payroll'], time: ['time_own', 'time_approve', 'time_all'],
+  reports: ['view_books', 'payroll'], accounts: ['view_books'], payroll: ['view_books', 'payroll'], time: ['time_own', 'time_approve', 'time_all'],
 };
 
 /** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
@@ -110,10 +127,11 @@ createApp({
       quick: { kind: 'out', date: today(), memo: '', amount: '', bank: '', other: '', key: newKey() },
       showJE: false, je: { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] },
       reportTypes: [
-        { id: 'balance-sheet', label: 'Balance Sheet' }, { id: 'income-statement', label: 'Profit & Loss' },
-        { id: 'cash-flow', label: 'Cash Flow' }, { id: 'trial-balance', label: 'Trial Balance' },
+        { id: 'balance-sheet', label: 'Balance Sheet', perm: 'view_books' }, { id: 'income-statement', label: 'Profit & Loss', perm: 'view_books', range: true },
+        { id: 'cash-flow', label: 'Cash Flow', perm: 'view_books', range: true }, { id: 'trial-balance', label: 'Trial Balance', perm: 'view_books' },
+        { id: 'payroll-register', label: 'Payroll Register', perm: 'payroll', range: true },
       ],
-      report: { type: 'balance-sheet', from: yearStart(), to: today(), data: null },
+      report: { type: 'balance-sheet', from: yearStart(), to: today(), compare: 'none', data: null },
       showNewAcct: false, newAcct: { code: '', name: '', type: 'expense', subtype: 'operating' }, register: null,
       subtypeChoices: {
         asset: [['current', 'Current asset (prepaid, deposits…)'], ['bank', 'Bank or cash account'], ['receivable', 'Money owed to you'], ['fixed', 'Equipment, vehicle, building'], ['contra', 'Accumulated depreciation'], ['investment', 'Long-term investment']],
@@ -174,7 +192,19 @@ createApp({
       for (const l of this.je.lines) d += (cents(l.debit) ?? 0) - (cents(l.credit) ?? 0);
       return d;
     },
-    reportCheck() { return this.report.data?.check ?? 0; },
+    reportCheck() { return (this.report.data?.check ?? 0) || (this.report.data?.comparison?.check ?? 0); },
+    reportIsRange() { return Boolean(this.reportTypes.find((x) => x.id === this.report.type)?.range); },
+    reportQuery() {
+      const r = this.report;
+      const base = this.reportIsRange ? `from=${r.from}&to=${r.to}` : `asOf=${r.to}`;
+      return ['balance-sheet', 'income-statement'].includes(r.type) && r.compare !== 'none' ? `${base}&compare=${r.compare}` : base;
+    },
+    cmpCols() { return this.report.data?.comparison ? 5 : 2; },
+    cmpHeads() {
+      const d = this.report.data;
+      const c = d.comparison;
+      return [d.asOf ?? `${d.from} to ${d.to}`, c.asOf ?? `${c.from} to ${c.to}`, 'Change', 'Change %'];
+    },
   },
   watch: {
     companyId() { this.loadCompany(); },
@@ -278,7 +308,39 @@ createApp({
       if (!confirm(`Remove ${m.name} from ${this.company.name}?`)) return;
       if (await this.run(() => api('DELETE', `/companies/${this.companyId}/members/${m.id}`), 'Removed.')) this.loadMembers();
     },
-    printPage() { window.print(); },
+    /** Print just the card the button is in (or the section's report), so "Save as PDF" makes a clean document. */
+    printPage(e) {
+      const btn = e?.target;
+      const target = btn?.closest?.('.card') ?? btn?.closest?.('section')?.querySelector('.print-me');
+      if (target) { target.classList.add('printing'); document.body.classList.add('print-focus'); }
+      const done = () => {
+        target?.classList.remove('printing');
+        document.body.classList.remove('print-focus');
+        window.removeEventListener('afterprint', done);
+      };
+      window.addEventListener('afterprint', done);
+      window.print();
+    },
+    async downloadCsv(path) { await this.run(() => download(path)); },
+    downloadReport() { this.downloadCsv(`/companies/${this.companyId}/reports/${this.report.type}?${this.reportQuery}&format=csv`); },
+    pctText(p) { return p == null ? '—' : `${p.startsWith('-') ? '' : '+'}${p}%`; },
+    /** Amount cells for one statement line: this period, or this period / earlier / change / change %. */
+    lineCells(l, sign = 1) {
+      const c = [money(sign * l.amountCents)];
+      if (this.report.data.comparison) c.push(money(sign * l.priorCents), money(sign * l.changeCents), this.pctText(l.changePct));
+      return c;
+    },
+    secCells(sec) {
+      const c = [money(sec.totalCents)];
+      if (this.report.data.comparison) c.push(money(sec.totalPriorCents), money(sec.totalChangeCents), this.pctText(sec.totalChangePct));
+      return c;
+    },
+    totCells(key) {
+      const d = this.report.data;
+      const c = [money(d[key])];
+      if (d.comparison) { const t = d.comparison.totals[key]; c.push(money(t.priorCents), money(t.changeCents), this.pctText(t.changePct)); }
+      return c;
+    },
     flash(text, kind = 'ok') { this.message = { text, kind }; if (kind === 'ok') setTimeout(() => { if (this.message?.text === text) this.message = null; }, 4000); },
     async run(fn, success) {
       try { const r = await fn(); if (success) this.flash(success); return r; } catch (e) { this.flash(e.message, 'bad'); return undefined; }
@@ -509,8 +571,11 @@ createApp({
     },
     async loadReport() {
       const r = this.report; r.data = null;
-      const q = r.type === 'income-statement' || r.type === 'cash-flow' ? `from=${r.from}&to=${r.to}` : `asOf=${r.to}`;
-      r.data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/${r.type}?${q}`));
+      if (!this.can(this.reportTypes.find((x) => x.id === r.type)?.perm)) r.type = this.reportTypes.find((x) => this.can(x.perm))?.id;
+      if (!r.type) return;
+      const type = r.type;
+      const data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/${type}?${this.reportQuery}`));
+      if (r.type === type) r.data = data; // ignore an answer for a report the user has already switched away from
     },
     async createAccount() {
       const a = await this.run(() => api('POST', `/companies/${this.companyId}/accounts`, this.newAcct), 'Account added.');

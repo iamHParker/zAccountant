@@ -26,7 +26,10 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
       });
       const set = r.headers.get('set-cookie');
       if (set) cookie = set.split(';')[0].endsWith('=') ? '' : set.split(';')[0];
-      return { status: r.status, body: await r.json().catch(() => null) };
+      const text = await r.text();
+      let json = null;
+      try { json = JSON.parse(text); } catch { /* a file download */ }
+      return { status: r.status, body: json, text, headers: Object.fromEntries(r.headers) };
     };
     return { call, get cookie() { return cookie; } };
   };
@@ -535,6 +538,31 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(dep.status, 201, JSON.stringify(dep.body));
     assert.equal(dep.body.amountCents, irs.dueCents);
     assert.equal((await owner.c.call('POST', `${base}/payroll-deposits/${dep.body.id}/void`, {})).status, 200);
+
+    // Reports as CSV downloads, side-by-side comparisons and the payroll register.
+    const bsCsv = await owner.c.call('GET', `${base}/reports/balance-sheet?asOf=2026-11-30&compare=prior_period&format=csv`);
+    assert.equal(bsCsv.status, 200, bsCsv.text);
+    assert.match(bsCsv.headers['content-type'], /^text\/csv/);
+    assert.equal(bsCsv.headers['content-disposition'], 'attachment; filename="API Co - Balance Sheet 2026-11-30.csv"');
+    assert.match(bsCsv.text, /^\uFEFF?API Co\r\nBalance Sheet\r\nAs of 2026-11-30\r\n/);
+    assert.match(bsCsv.text, /Account number,Account,2026-11-30,2026-10-31,Change,Change %/);
+    assert.match(bsCsv.text, /,Total liabilities and equity,/);
+    const bsCmp = (await owner.c.call('GET', `${base}/reports/balance-sheet?asOf=2026-11-30&compare=prior_period`)).body;
+    assert.deepEqual([bsCmp.comparison.asOf, bsCmp.comparison.check, bsCmp.check], ['2026-10-31', 0, 0]);
+    const isCmp = (await owner.c.call('GET', `${base}/reports/income-statement?from=2026-11-01&to=2026-11-30&compare=prior_year`)).body;
+    assert.deepEqual([isCmp.comparison.from, isCmp.comparison.to], ['2025-11-01', '2025-11-30']);
+    assert.equal((await owner.c.call('GET', `${base}/reports/income-statement?from=2026-11-01&to=2026-11-30&compare=yesterday`)).status, 400);
+    assert.equal((await worker.c.call('GET', `${base}/reports/balance-sheet?format=csv`)).status, 403);
+    const reg = await owner.c.call('GET', `${base}/reports/payroll-register?from=2026-11-01&to=2026-12-31`);
+    assert.equal(reg.status, 200, JSON.stringify(reg.body));
+    assert.equal(reg.body.ties, true);
+    const regChecks = (await owner.c.call('GET', `${base}/paychecks`)).body.filter((p) => p.payDate >= '2026-11-01' && p.payDate <= '2026-12-31');
+    assert.equal(reg.body.rows.length, regChecks.length);
+    assert.equal(reg.body.totals.grossCents, regChecks.reduce((t, p) => t + p.grossCents, 0));
+    assert.equal((await worker.c.call('GET', `${base}/reports/payroll-register?from=2026-11-01&to=2026-12-31`)).status, 403);
+    const regCsv = await owner.c.call('GET', `${base}/reports/payroll-register?from=2026-11-01&to=2026-12-31&format=csv`);
+    assert.match(regCsv.text, /Pay date,Employee,Period,Hours,Gross pay,/);
+    assert.match(regCsv.text, /\r\nTotal,,,/);
 
     // Hours by job.
     const sum = (await owner.c.call('GET', `${base}/reports/time-summary?from=2026-11-01&to=2026-11-15`)).body;

@@ -101,7 +101,9 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `GET/POST/DELETE …/members` | who has access: role (owner, accountant, bookkeeper, viewer, staff, or a custom role id) and department |
 | `GET/POST …/roles`, `PATCH/DELETE …/roles/:id` | permission catalog, built-in roles, custom roles (`{name, permissions}`) |
 | `GET/POST …/departments`, `DELETE …/departments/:id` | departments (Accounting, Engineering, Field…) |
-| `GET …/reports/{dashboard,trial-balance,balance-sheet,income-statement,cash-flow}` | statements |
+| `GET …/reports/{dashboard,trial-balance,balance-sheet,income-statement,cash-flow}` | statements; `compare=prior_period\|prior_year` adds side-by-side columns to the balance sheet and P&L |
+| `GET …/reports/payroll-register?from=&to=` | every paycheck in a pay-date range, a column per deduction and tax, with totals (payroll role) |
+| `…/reports/…?format=csv` | any statement, aging or the payroll register as a CSV download for Excel (printing to PDF uses the browser's print window) |
 | `GET …/audit/verify` | verify the audit hash chain |
 | `GET/POST …/employees`, `POST …/employees/:id/paychecks[/preview]`, `GET …/paychecks` | payroll |
 | `POST …/payroll-runs/preview`, `POST …/payroll-runs`, `GET …/payroll-runs[/:id]` | pay everyone on a schedule for a pay period (`items: [{employeeId, hours, overtimeHours, doubleTimeHours, preTaxDeductions}]`; `fromTimesheets: true` marks the period's approved hours paid) |

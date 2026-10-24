@@ -2,6 +2,15 @@
 
 Project memory lives here (Claude memory is off for this project). Keep it short and current.
 
+**Keeping this file small (Homer's standing rule).** This file loads into every session, so its size is a cost
+paid on every turn. When it passes about **120 lines**, split it, in the same PR as the change that grew it:
+- Notes about one part of the code go into a `CLAUDE.md` in that folder (`src/payroll/CLAUDE.md`,
+  `public/CLAUDE.md`, `src/db/CLAUDE.md`…). Claude Code loads a folder's file only when working there.
+- Reference detail that's rarely needed (history, finished decisions, long how-tos) goes into `docs/claude/<topic>.md`;
+  leave a one-line pointer here saying when to read it.
+- This top file keeps only what every session needs: the person, dates, authority, open items, the core rules.
+- Prune as well as split: delete notes that are done or no longer true.
+
 ## The person
 - **Homer** (GitHub `iamHParker`): structural engineer (geotechnical minor); programs in Fortran, VB, C/C++,
   assembler, Xojo. New to JavaScript and web development: explain plainly, use engineering analogies,
@@ -41,6 +50,9 @@ Project memory lives here (Claude memory is off for this project). Keep it short
 - Payroll engine is pure (`src/payroll/engine.js`); tax values are data in `src/payroll/tables/<year>.json`
   with sources recorded. Tests show hand-worked arithmetic in comments.
 - New schema = new numbered file in `src/db/migrations/`.
+- Reports: a route built with `report(permission, title, load, rowsFor)` in `src/app.js` answers JSON, or a CSV
+  download with `?format=csv` (row builders in `src/core/csv.js`). PDFs come from the browser's print window;
+  `printPage` prints only the card holding the button (or the section's `.print-me` card).
 
 ## Working here
 - Tests: `npm test` (needs `DATABASE_URL`, e.g. `postgres://zacc:zacc@localhost:5432/zacc_dev`); each DB test

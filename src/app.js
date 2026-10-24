@@ -20,12 +20,14 @@ import * as arap from './services/arapService.js';
 import * as roles from './services/accessService.js';
 import * as time from './services/timesheetService.js';
 import { AuthError } from './services/authService.js';
+import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows } from './core/csv.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
 const q = (v) => (typeof v === 'string' && v !== '' ? v : null); // ignore repeated (?a=1&a=2) or empty params
+const FILE = Symbol('file'); // a handler returning { [FILE]: { name, type, body } } sends a download instead of JSON
 
 /**
  * Route permissions. ℹ️ Each route names the permission it needs (see src/core/permissions.js), or a
@@ -196,8 +198,22 @@ export function createApp(pool) {
       const viewer = { userId: req.user.id, can, departmentId: access?.departmentId ?? null };
       return handler({ db, req, companyId, role: access?.role ?? null, access, can, viewer, actor: req.user.email });
     });
+    if (body?.[FILE]) {
+      const f = body[FILE];
+      return res.status(status).type(f.type).set('Content-Disposition', `attachment; filename="${f.name}"`).send(f.body);
+    }
     res.status(status).json(body);
   };
+
+  // A report route that answers JSON, or a CSV download with ?format=csv. `title` and `period` name the file.
+  const report = (permission, title, load, rowsFor) => route(permission, async (ctx) => {
+    const data = await load(ctx);
+    if (ctx.req.query.format !== 'csv') return data;
+    const company = (await ledger.getCompany(ctx.db, ctx.companyId)).name;
+    const period = data.asOf ?? `${data.from} to ${data.to}`;
+    return { [FILE]: { name: csvFileName(company, title, period), type: 'text/csv; charset=utf-8', body: toCsv(rowsFor(data, { company, title })) } };
+  });
+  const statement = (kind) => (data, opts) => statementRows(kind, data, opts);
 
   // Companies
   api.get('/companies', route(null, ({ db, req }) => ledger.listCompanies(db, { userId: req.user.id })));
@@ -351,8 +367,10 @@ export function createApp(pool) {
   }));
   api.post('/companies/:companyId/payments/:paymentId/void', route('post', ({ db, req, companyId, actor }) =>
     arap.voidPayment(db, companyId, req.params.paymentId, { date: req.body?.date, actor })));
-  api.get('/companies/:companyId/reports/ar-aging', route(['view_books', 'invoices'], ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'invoice', asOf: q(req.query.asOf) ?? centralToday() })));
-  api.get('/companies/:companyId/reports/ap-aging', route(['view_books', 'bills'], ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'bill', asOf: q(req.query.asOf) ?? centralToday() })));
+  api.get('/companies/:companyId/reports/ar-aging', report(['view_books', 'invoices'], 'Accounts Receivable Aging',
+    ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'invoice', asOf: q(req.query.asOf) ?? centralToday() }), agingRows));
+  api.get('/companies/:companyId/reports/ap-aging', report(['view_books', 'bills'], 'Accounts Payable Aging',
+    ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'bill', asOf: q(req.query.asOf) ?? centralToday() }), agingRows));
 
   // Importing books (QuickBooks / spreadsheets). Accountant-level: it can change many periods at once.
   const importOpts = (req, actor) => ({ kind: req.body?.kind, asOf: req.body?.asOf, actor,
@@ -364,10 +382,14 @@ export function createApp(pool) {
 
   // Reports
   api.get('/companies/:companyId/reports/dashboard', route('view_books', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/trial-balance', route('view_books', ({ db, req, companyId }) => reports.getTrialBalance(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/balance-sheet', route('view_books', ({ db, req, companyId }) => reports.getBalanceSheet(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/income-statement', route('view_books', ({ db, req, companyId }) => reports.getIncomeStatement(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
-  api.get('/companies/:companyId/reports/cash-flow', route('view_books', ({ db, req, companyId }) => reports.getCashFlow(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
+  api.get('/companies/:companyId/reports/trial-balance', report('view_books', 'Trial Balance',
+    ({ db, req, companyId }) => reports.getTrialBalance(db, companyId, { asOf: q(req.query.asOf) ?? today() }), statement('trial-balance')));
+  api.get('/companies/:companyId/reports/balance-sheet', report('view_books', 'Balance Sheet',
+    ({ db, req, companyId }) => reports.getBalanceSheet(db, companyId, { asOf: q(req.query.asOf) ?? today(), compare: q(req.query.compare) }), statement('balance-sheet')));
+  api.get('/companies/:companyId/reports/income-statement', report('view_books', 'Profit and Loss',
+    ({ db, req, companyId }) => reports.getIncomeStatement(db, companyId, { from: q(req.query.from), to: q(req.query.to), compare: q(req.query.compare) }), statement('income-statement')));
+  api.get('/companies/:companyId/reports/cash-flow', report('view_books', 'Statement of Cash Flows',
+    ({ db, req, companyId }) => reports.getCashFlow(db, companyId, { from: q(req.query.from), to: q(req.query.to) }), statement('cash-flow')));
   api.get('/companies/:companyId/audit/verify', route('audit', ({ db, companyId }) => verifyChain(db, companyId)));
   api.get('/companies/:companyId/books-check', route('view_books', ({ db, companyId }) => latestBooksCheck(db, companyId)));
   api.post('/companies/:companyId/books-check', route('audit', ({ db, companyId }) => runBooksCheck(db, companyId)));
@@ -392,6 +414,8 @@ export function createApp(pool) {
   api.get('/companies/:companyId/payroll-runs/:runId', route(['view_books', 'payroll'], ({ db, req, companyId }) => payroll.getRun(db, companyId, req.params.runId)));
   // Pay stubs and tax totals show pay details, so they need the payroll role (not every member).
   api.get('/companies/:companyId/paychecks/:paycheckId/stub', route('payroll', ({ db, req, companyId }) => payroll.getPayStub(db, companyId, req.params.paycheckId)));
+  api.get('/companies/:companyId/reports/payroll-register', report('payroll', 'Payroll Register',
+    ({ db, req, companyId }) => payroll.getPayrollRegister(db, companyId, { from: q(req.query.from), to: q(req.query.to) }), payrollRegisterRows));
   api.get('/companies/:companyId/reports/payroll-liabilities', route('payroll', ({ db, req, companyId }) =>
     payroll.getPayrollLiabilities(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
   api.post('/companies/:companyId/payroll-deposits', route('payroll', ({ db, req, companyId, actor }) => {
