@@ -7,6 +7,13 @@ Professional Review Board.
 Status: **Sprint 6 (payroll runs, pay stubs, roles and timesheets)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
 Target: public beta January 1, 2027.
 
+## Guides
+
+- **[User Guide](docs/user-guide/README.md)**: what people see and do, in chapters by tier (everyone, Basic books,
+  Payroll add-on, Timesheets add-on, zAccountant staff).
+- **[Programmer's Guide](docs/programmers-guide/README.md)**: how the code is built, the rules it never breaks,
+  error handling, testing, and step-by-step recipes for common changes.
+
 ## What's here
 
 | Folder | What it is | Engineering analogy |
@@ -20,6 +27,7 @@ Target: public beta January 1, 2027.
 | `test/` | Automated tests (`*.unit.test.js` need nothing; `*.db.test.js` need PostgreSQL) | load tests / check calcs |
 | `docs/spec/` | Spec sections 14, 18, 21 | — |
 | `docs/board/` | Professional Review Board reports | peer review / stamped calcs |
+| `docs/user-guide/`, `docs/programmers-guide/` | the two guides above | the project manual |
 
 ## Ground rules baked into the code
 
@@ -121,5 +129,7 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `POST …/time-entries/submit`, `POST …/time-entries/review` | send for approval (`{ids}`); approve or send back (`{ids, approve, note}`); nobody but the owner approves their own time |
 | `POST …/time-entries/import` | HoursTracker (or any timesheet CSV) export: `{fileName, content, preview, userId, createJobs}`; repeated rows are skipped |
 | `GET …/reports/time-summary?from=&to=` | hours by person and job |
+| `GET/POST …/invoice-items`, `PATCH …/invoice-items/:id`, `POST …/invoice-items/starter` | saved invoice rates and items (`{name, kind: service\|expense, rate, taxable, accountId}`); the starter list adds an engineering firm's usual names |
+| `PUT …/default-tax-rate`, `PUT …/letterhead`, `GET/PUT …/logo` | pinned sales tax rate for new invoices; invoice address, note and closing line; company logo (PNG/JPEG data URL, 1 MB) |
 | `GET …/paychecks/:id/stub`, `GET …/reports/payroll-liabilities?from=&to=` | pay stub with year-to-date; payroll taxes owed by agency (payroll role) |
 | `POST …/payroll-deposits`, `POST …/payroll-deposits/:id/void` | record a tax deposit to one agency for a date range (`{agency, form, periodStart, periodEnd, depositDate, paidFromAccountId, reference}`; pays what is still due), or void one recorded by mistake |
