@@ -3,7 +3,8 @@
 // For each company it:
 //   1. posts recurring entries that have come due,
 //   2. re-verifies the audit hash chain and reconciles every ledger entry against it,
-//   3. confirms the trial balance and balance sheet both balance,
+//   3. confirms the trial balance and balance sheet both balance, and that open invoices/bills add up
+//      to Accounts Receivable/Payable,
 //   4. confirms last night's chain fingerprint ("anchor") is still in the chain — so if someone deleted
 //      the newest audit rows, we notice — and takes tonight's anchor.
 // Each night's anchor is also written to the server log, which is stored outside the database.
@@ -14,6 +15,7 @@ import { createPool, withTransaction } from '../db/pool.js';
 import { postDueRecurring } from '../services/ledgerService.js';
 import { getTrialBalance, getBalanceSheet } from '../services/reportService.js';
 import { verifyChain } from '../services/audit.js';
+import { getAging } from '../services/arapService.js';
 
 /** Today's date in Central time (the business day the books are kept in). */
 export const centralToday = (now = new Date()) =>
@@ -33,6 +35,12 @@ export async function runBooksCheck(db, companyId, { asOf = centralToday(), trig
   if (!tb.balanced) problems.push(`Trial balance is off by ${tb.check}¢`);
   const bs = await getBalanceSheet(db, companyId, { asOf });
   if (!bs.balanced) problems.push(`Balance sheet is off by ${bs.check}¢`);
+
+  // Customer and vendor balances must add up to Accounts Receivable / Payable.
+  for (const [kind, label] of [['invoice', 'Accounts Receivable'], ['bill', 'Accounts Payable']]) {
+    const ag = await getAging(db, companyId, { kind, asOf });
+    if (!ag.ties) problems.push(`${label} is off from the open ${kind}s by ${ag.differenceCents}¢`);
+  }
 
   const { rows: [prev] } = await db.query(
     'SELECT anchor_seq, anchor_hash FROM books_checks WHERE company_id = $1 AND anchor_seq IS NOT NULL ORDER BY run_at DESC, id DESC LIMIT 1', [companyId]);

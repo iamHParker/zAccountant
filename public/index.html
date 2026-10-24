@@ -237,6 +237,217 @@
     </section>
 
     <!-- BANKING -->
+    <section v-if="tab === 'sales' || tab === 'bills'">
+      <div class="row wrap">
+        <h1>{{ tab === 'sales' ? 'Sales' : 'Bills' }}</h1>
+        <template v-if="can('post')">
+          <button class="primary" @click="newDoc">+ New {{ S.Doc.toLowerCase() }}</button>
+          <button @click="startPay()">{{ S.payVerb }}</button>
+          <button @click="ar.showContact = !ar.showContact">+ New {{ S.who }}</button>
+        </template>
+      </div>
+      <p class="hint">{{ tab === 'sales'
+        ? 'Send invoices to customers and record their payments. What customers owe shows in Accounts Receivable.'
+        : 'Enter bills from vendors when they arrive, then record when you pay them. What you owe shows in Accounts Payable.' }}</p>
+
+      <div class="card narrow" v-if="ar.showContact">
+        <h2>New {{ S.who }}</h2>
+        <form @submit.prevent="saveContact">
+          <label>Name <input v-model="ar.contact.name" required maxlength="120"></label>
+          <div class="grid2">
+            <label>Email <input type="email" v-model="ar.contact.email"></label>
+            <label>Phone <input v-model="ar.contact.phone"></label>
+          </div>
+          <label>Address <input v-model="ar.contact.address" placeholder="Street, City, State ZIP"></label>
+          <label>Payment terms (days) <input type="number" min="0" max="365" v-model.number="ar.contact.termsDays"></label>
+          <label class="check" v-if="S.kind === 'bill'"><input type="checkbox" v-model="ar.contact.is1099"> Gets a 1099-NEC (an individual or partnership you pay for services)</label>
+          <button class="primary">Save {{ S.who }}</button> <button type="button" @click="ar.showContact = false">Cancel</button>
+        </form>
+      </div>
+
+      <div class="card" v-if="ar.showDoc">
+        <h2>New {{ S.Doc.toLowerCase() }}</h2>
+        <p class="hint" v-if="!ar.contacts.length">Add a {{ S.who }} first (button above).</p>
+        <form @submit.prevent="saveDoc">
+          <div class="grid4">
+            <label>{{ S.Who }} <select v-model="ar.doc.contactId" required><option value="">Choose…</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+            <label>{{ S.kind === 'invoice' ? 'Invoice number' : "Vendor's bill number" }}
+              <input v-model="ar.doc.number" :placeholder="S.kind === 'invoice' ? 'automatic' : 'from their invoice'" :required="S.kind === 'bill'"></label>
+            <label>Date <input type="date" v-model="ar.doc.date" required></label>
+            <label>Due date <input type="date" v-model="ar.doc.dueDate" placeholder="from terms"></label>
+          </div>
+          <p class="muted small">Leave the due date empty to use the {{ S.who }}'s payment terms.</p>
+          <table class="data lines">
+            <thead><tr><th>{{ S.lineHint }}</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th v-if="S.kind === 'invoice'">Taxable</th><th class="num">Amount</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="(l, i) in ar.doc.lines">
+                <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
+                <td><input v-model="l.description" maxlength="300"></td>
+                <td class="w90"><input v-model="l.quantity" inputmode="decimal" class="num"></td>
+                <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
+                <td v-if="S.kind === 'invoice'"><input type="checkbox" v-model="l.taxable" class="auto-w"></td>
+                <td class="num">{{ money(lineCents(l.quantity, l.unitPrice)) }}</td>
+                <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <button type="button" class="small" @click="ar.doc.lines.push({ accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false })">+ Add line</button>
+          <div class="grid2">
+            <label>Memo (optional) <input v-model="ar.doc.memo" maxlength="500"></label>
+            <label v-if="S.kind === 'invoice'">Sales tax rate % (optional) <input v-model="ar.doc.taxRate" inputmode="decimal" placeholder="e.g. 8.25"></label>
+          </div>
+          <p class="num">Subtotal {{ money(docTotals.sub) }}<span v-if="docTotals.tax"> · Sales tax {{ money(docTotals.tax) }}</span> · <strong>Total {{ money(docTotals.total) }}</strong></p>
+          <button class="primary" :disabled="docTotals.total <= 0 || !ar.doc.contactId">Save {{ S.Doc.toLowerCase() }}</button>
+          <button type="button" @click="ar.showDoc = false">Cancel</button>
+        </form>
+      </div>
+
+      <div class="card" v-if="ar.showPay">
+        <h2>{{ S.payVerb }}</h2>
+        <form @submit.prevent="savePay">
+          <div class="grid4">
+            <label>{{ S.Who }} <select v-model="ar.pay.contactId" @change="loadPayDocs" required><option value="">Choose…</option>
+              <option v-for="c in ar.contacts.filter(c => c.openCents > 0)" :value="c.id">{{ c.name }} ({{ money(c.openCents) }})</option></select></label>
+            <label>Date <input type="date" v-model="ar.pay.date" required></label>
+            <label>{{ S.kind === 'invoice' ? 'Deposited to' : 'Paid from' }} <select v-model="ar.pay.accountId" required><option v-for="a in payAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+            <label>Method <select v-model="ar.pay.method"><option value="check">Check</option><option value="ach">ACH / bank transfer</option><option value="card">Card</option><option value="cash">Cash</option><option value="wire">Wire</option><option value="other">Other</option></select></label>
+          </div>
+          <label>Check or reference number (optional) <input v-model="ar.pay.reference" maxlength="60"></label>
+          <p class="hint" v-if="ar.pay.contactId && !ar.pay.open.length">Nothing open for this {{ S.who }}.</p>
+          <table class="data" v-if="ar.pay.open.length">
+            <thead><tr><th>{{ S.Doc }}</th><th>Date</th><th>Due</th><th class="num">Balance</th><th class="num" class="w150">Payment</th></tr></thead>
+            <tbody>
+              <tr v-for="d in ar.pay.open">
+                <td>{{ d.number }}</td><td>{{ d.date }}</td><td :class="{ bad: d.status === 'overdue' }">{{ d.dueDate }}</td>
+                <td class="num">{{ money(d.balanceCents) }}</td>
+                <td><input v-model="ar.pay.amounts[d.id]" inputmode="decimal" class="num" placeholder="0.00"></td>
+              </tr>
+            </tbody>
+          </table>
+          <button type="button" class="small" v-if="ar.pay.open.length" @click="payInFull">Pay all in full</button>
+          <p class="num"><strong>Payment total {{ money(payTotal) }}</strong></p>
+          <button class="primary" :disabled="payTotal <= 0">Save payment</button>
+          <button type="button" @click="ar.showPay = false">Cancel</button>
+        </form>
+      </div>
+
+      <div class="card statement-doc" v-if="ar.detail">
+        <div class="row">
+          <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small">· {{ statusLabel(ar.detail.status) }}</span></h2>
+          <span>
+            <button @click="printPage">Print</button>
+            <button v-if="can('post') && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
+            <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="voidDoc(ar.detail)">Void</button>
+            <button @click="ar.detail = null">Close</button>
+          </span>
+        </div>
+        <div class="grid2">
+          <div><strong>{{ S.kind === 'invoice' ? company.name : ar.detail.contact.name }}</strong></div>
+          <div class="num">Date {{ ar.detail.date }}<br>Due {{ ar.detail.dueDate }}</div>
+        </div>
+        <p v-if="S.kind === 'invoice'"><span class="muted">Bill to</span><br><strong>{{ ar.detail.contact.name }}</strong><br>
+          <span v-if="ar.detail.contact.address">{{ ar.detail.contact.address }}<br></span><span v-if="ar.detail.contact.email">{{ ar.detail.contact.email }}</span></p>
+        <table class="data">
+          <thead><tr><th>Description</th><th v-if="S.kind === 'bill'">Account</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            <tr v-for="l in ar.detail.lines"><td>{{ l.description || l.accountName }}<span v-if="l.taxable" class="muted small"> (taxable)</span></td>
+              <td v-if="S.kind === 'bill'">{{ l.accountCode }} · {{ l.accountName }}</td>
+              <td class="num">{{ l.quantity }}</td><td class="num">{{ money(l.unitPriceCents) }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            <tr v-if="ar.detail.taxCents"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Subtotal</td><td class="num">{{ money(ar.detail.subtotalCents) }}</td></tr>
+            <tr v-if="ar.detail.taxCents"><td :colspan="3" class="num">Sales tax {{ ar.detail.taxRate }}%</td><td class="num">{{ money(ar.detail.taxCents) }}</td></tr>
+            <tr class="total"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Total</td><td class="num">{{ money(ar.detail.totalCents) }}</td></tr>
+            <tr v-for="p in ar.detail.payments.filter(p => p.status === 'posted')"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Payment {{ p.date }}{{ p.reference ? ' #' + p.reference : '' }}</td><td class="num">({{ money(p.amountCents) }})</td></tr>
+            <tr class="total"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Balance due</td><td class="num">{{ money(ar.detail.balanceCents) }}</td></tr>
+          </tbody>
+        </table>
+        <p v-if="ar.detail.memo">{{ ar.detail.memo }}</p>
+        <p class="muted small">Journal entry #{{ ar.detail.entryNumber }}<span v-if="ar.detail.voidDate"> · voided {{ ar.detail.voidDate }}</span></p>
+      </div>
+
+      <div class="seg">
+        <button :class="{ active: ar.panel === 'docs' }" @click="arPanel('docs')">{{ S.docs }}</button>
+        <button :class="{ active: ar.panel === 'contacts' }" @click="arPanel('contacts')">{{ S.Whos }}</button>
+        <button :class="{ active: ar.panel === 'payments' }" @click="arPanel('payments')">Payments</button>
+        <button :class="{ active: ar.panel === 'aging' }" @click="arPanel('aging')">Aging report</button>
+      </div>
+
+      <div class="card" v-if="ar.panel === 'docs'">
+        <div class="row">
+          <h2>{{ { open: 'Open', paid: 'Paid', void: 'Voided', all: 'All' }[ar.view] }} {{ S.docs.toLowerCase() }}</h2>
+          <select v-model="ar.view" @change="loadAr" class="auto"><option value="open">Open (unpaid)</option><option value="paid">Paid</option><option value="void">Voided</option><option value="all">All</option></select>
+        </div>
+        <p class="hint" v-if="!ar.docs.length">None yet.</p>
+        <table class="data" v-else>
+          <thead><tr><th>Number</th><th>{{ S.Who }}</th><th>Date</th><th>Due</th><th class="num">Total</th><th class="num">Balance</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="d in ar.docs" class="click" @click="openDoc(d)">
+              <td>{{ d.number }}</td><td>{{ d.contactName }}</td><td>{{ d.date }}</td><td>{{ d.dueDate }}</td>
+              <td class="num">{{ money(d.totalCents) }}</td><td class="num">{{ money(d.balanceCents) }}</td>
+              <td :class="{ bad: d.status === 'overdue', ok: d.status === 'paid', muted: d.status === 'void' }">{{ statusLabel(d.status) }}</td>
+              <td class="actions" @click.stop><button class="link" @click="openDoc(d)">view</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" v-if="ar.panel === 'contacts'">
+        <h2>{{ S.Whos }}</h2>
+        <p class="hint" v-if="!ar.contacts.length">None yet. Use “+ New {{ S.who }}” above.</p>
+        <table class="data" v-else>
+          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Terms</th><th v-if="S.kind === 'bill'">1099</th><th class="num">Open</th><th class="num">Overdue</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="c in ar.contacts" :class="{ muted: !c.isActive }">
+              <td>{{ c.name }}</td><td>{{ c.email }}</td><td>{{ c.phone }}</td><td>{{ c.termsDays }} days</td><td v-if="S.kind === 'bill'">{{ c.is1099 ? 'yes' : '' }}</td>
+              <td class="num">{{ money(c.openCents) }}</td><td class="num" :class="{ bad: c.overdueCents > 0 }">{{ money(c.overdueCents) }}</td>
+              <td class="actions"><template v-if="can('post')">
+                <button class="link" v-if="c.openCents > 0" @click="startPay(c.id)">{{ S.kind === 'invoice' ? 'receive payment' : 'pay' }}</button>
+                <button class="link" v-if="!c.openCents" @click="toggleContactActive(c)">{{ c.isActive ? 'make inactive' : 'make active' }}</button>
+              </template></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" v-if="ar.panel === 'payments'">
+        <h2>Payments {{ S.kind === 'invoice' ? 'received' : 'made' }}</h2>
+        <p class="hint" v-if="!ar.payments.length">None yet.</p>
+        <table class="data" v-else>
+          <thead><tr><th>Date</th><th>{{ S.Who }}</th><th>Account</th><th>Method</th><th>For</th><th class="num">Amount</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="p in ar.payments" :class="{ muted: p.status === 'void' }">
+              <td>{{ p.date }}</td><td>{{ p.contactName }}</td><td>{{ p.accountName }}</td><td>{{ p.method }}{{ p.reference ? ' #' + p.reference : '' }}</td>
+              <td>{{ p.applications.map(a => a.number).join(', ') }}</td>
+              <td class="num">{{ money(p.amountCents) }}</td>
+              <td class="actions"><span v-if="p.status === 'void'">void</span><button v-else-if="can('post')" class="link" @click="voidPay(p)">void</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card statement" v-if="ar.panel === 'aging'">
+        <div class="row wrap">
+          <label class="inline">As of <input type="date" v-model="ar.agingAsOf" @change="loadAr"></label>
+          <button @click="printPage">Print</button>
+        </div>
+        <template v-if="ar.aging">
+          <h2>{{ company.name }}</h2>
+          <h3>{{ S.kind === 'invoice' ? 'Accounts Receivable' : 'Accounts Payable' }} Aging</h3>
+          <p class="muted">As of {{ ar.aging.asOf }} · days past the due date</p>
+          <table class="data">
+            <thead><tr><th>{{ S.Who }}</th><th class="num" v-for="b in ar.aging.buckets">{{ b.label }}</th><th class="num">Total</th></tr></thead>
+            <tbody>
+              <tr v-for="r in ar.aging.rows"><td>{{ r.name }}</td><td class="num" v-for="b in ar.aging.buckets">{{ r[b.id] ? money(r[b.id]) : '' }}</td><td class="num">{{ money(r.totalCents) }}</td></tr>
+              <tr class="total"><td>Total</td><td class="num" v-for="b in ar.aging.buckets">{{ money(ar.aging.totals[b.id]) }}</td><td class="num">{{ money(ar.aging.totals.totalCents) }}</td></tr>
+            </tbody>
+          </table>
+          <p v-if="ar.aging.otherEntriesCents" class="muted">Plus {{ money(ar.aging.otherEntriesCents) }} in {{ S.control }} from entries that aren't {{ S.docs.toLowerCase() }} (for example opening balances you imported).</p>
+          <p :class="ar.aging.ties ? 'ok' : 'bad'">{{ ar.aging.ties
+            ? `✓ Ties to ${S.control} in the books (${money(ar.aging.glBalanceCents)}).`
+            : `${S.control} in the books is ${money(ar.aging.glBalanceCents)}; off by ${money(ar.aging.differenceCents)}. Please tell support.` }}</p>
+        </template>
+      </div>
+    </section>
+
     <section v-if="tab === 'bank'">
       <div class="row">
         <h1>Banking</h1>

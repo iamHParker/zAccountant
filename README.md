@@ -4,7 +4,7 @@ Small-business accounting and payroll for Texas, Colorado, California and Washin
 **double-entry books that cannot silently go out of balance**, with payroll tax logic reviewed by a
 Professional Review Board.
 
-Status: **Sprint 4 (importing books)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
+Status: **Sprint 5 (invoices, bills and payments)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
 Target: public beta January 1, 2027.
 
 ## What's here
@@ -69,7 +69,7 @@ In production, create the app login and give it only the rights it needs with `n
 
 **Nightly books check:** the server runs it at about 2 a.m. Central (set `NIGHTLY_JOB=off` to disable, e.g. when a
 separate cron runs `npm run job:nightly`). It posts due recurring entries, re-verifies the audit trail and the
-ledger, confirms the statements balance, and logs a fingerprint of each company's audit chain.
+ledger, confirms the statements balance and that open invoices/bills add up to Accounts Receivable/Payable, and logs a fingerprint of each company's audit chain.
 
 Tests: `npm run test:unit` (no database needed) or `npm test` (all, needs `DATABASE_URL`;
 each test file creates and deletes its own temporary database).
@@ -92,6 +92,10 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `POST …/bank-transactions/:id/{post,match,exclude,undo}`, `GET …/matches` | review a bank line |
 | `GET/POST …/bank-rules`, `DELETE …/bank-rules/:id` | categorization rules |
 | `POST …/imports/preview`, `POST …/imports`, `GET …/imports`, `POST …/imports/:id/undo` | import books: `kind` = accounts, opening (`asOf`), journal, iif; CSV `content` or Excel `base64` |
+| `GET/POST …/customers`, `GET/POST …/vendors`, `PATCH …/contacts/:id` | customers and vendors (with open and overdue balances) |
+| `GET/POST …/invoices`, `GET/POST …/bills`, `GET …/documents/:id`, `POST …/documents/:id/void` | invoices and bills (`status=open\|paid\|void\|all`); send an `Idempotency-Key` |
+| `GET/POST …/payments-received`, `GET/POST …/payments-made`, `GET …/payments/:id`, `POST …/payments/:id/void` | payments applied to invoices/bills (`applications: [{documentId, amount}]`) |
+| `GET …/reports/{ar-aging,ap-aging}?asOf=` | aging by customer/vendor, tied to Accounts Receivable/Payable |
 | `GET/POST …/bank-accounts/:id/reconciliations`, `GET/DELETE …/reconciliations/:id`, `POST …/lines`, `POST …/complete` | bank reconciliation |
 | `POST …/lock` | close books through a date (reopening: owner + 2FA code + reason) |
 | `GET/POST/DELETE …/members` | who has access, and their role (owner, accountant, bookkeeper, viewer) |
