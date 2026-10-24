@@ -139,7 +139,31 @@
     <section v-if="tab === 'journal'">
       <div class="row">
         <h1>Transactions</h1>
-        <button v-if="can('post')" @click="showJE = !showJE">{{ showJE ? 'Close' : 'Advanced journal entry' }}</button>
+        <div>
+          <button @click="showRecurring = !showRecurring">{{ showRecurring ? 'Hide recurring' : `Recurring (${recurring.filter(r => r.isActive).length})` }}</button>
+          <button v-if="can('post')" @click="showJE = !showJE">{{ showJE ? 'Close' : 'Advanced journal entry' }}</button>
+        </div>
+      </div>
+      <div class="card" v-if="showRecurring">
+        <div class="row">
+          <h2>Recurring entries</h2>
+          <button v-if="can('post')" @click="postDueRecurring">Post due entries now</button>
+        </div>
+        <p class="hint">These post automatically each night on their dates. To set one up, use <em>Advanced journal entry</em> and tick “Repeat this entry”.</p>
+        <table class="data" v-if="recurring.length">
+          <thead><tr><th>Name</th><th>How often</th><th class="num">Amount</th><th>Next date</th><th>Posted</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="r in recurring" :key="r.id" :class="{ muted: !r.isActive }">
+              <td>{{ r.name }}<div class="bad small" v-if="r.lastError && r.isActive">⚠ {{ r.lastError }}</div></td>
+              <td>{{ r.frequency }}{{ r.endDate ? ` until ${r.endDate}` : '' }}</td>
+              <td class="num">{{ money(r.amountCents) }}</td>
+              <td>{{ !r.isActive ? 'stopped' : (r.nextDate ?? 'finished') }}</td>
+              <td>{{ r.postedCount }}</td>
+              <td><button v-if="r.isActive && can('post')" class="link" @click="stopRecurring(r)">stop</button></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="hint" v-else>No recurring entries yet.</p>
       </div>
       <div class="card" v-if="showJE">
         <h2>Journal entry</h2>
@@ -161,9 +185,33 @@
             </tbody>
           </table>
           <button type="button" @click="je.lines.push({ accountId: '', debit: '', credit: '' })">Add line</button>
-          <button class="primary" :disabled="jeDiff !== 0">Post entry</button>
+          <label class="check"><input type="checkbox" v-model="je.repeat.on"> Repeat this entry (rent, loan payment, depreciation…)</label>
+          <div class="grid2" v-if="je.repeat.on">
+            <label>How often
+              <select v-model="je.repeat.frequency"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select>
+            </label>
+            <label>Stop after (optional) <input type="date" v-model="je.repeat.endDate"></label>
+            <label>Name <input v-model.trim="je.repeat.name" :placeholder="je.memo || 'e.g. Office rent'"></label>
+          </div>
+          <p class="hint" v-if="je.repeat.on">The date above is the first one. Entries on the 29th–31st post on the last day of shorter months.</p>
+          <button class="primary" :disabled="jeDiff !== 0">{{ je.repeat.on ? 'Save recurring entry' : 'Post entry' }}</button>
         </form>
       </div>
+      <form class="card search" @submit.prevent="loadEntries()">
+        <div class="grid4">
+          <label>Search <input v-model.trim="search.text" placeholder="words, or #number"></label>
+          <label>From <input type="date" v-model="search.from"></label>
+          <label>To <input type="date" v-model="search.to"></label>
+          <label>Account
+            <select v-model="search.accountId"><option value="">Any account</option><option v-for="a in accounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
+          </label>
+          <label>Kind
+            <select v-model="search.source"><option value="">Any</option><option value="simple">Money in/out</option><option value="manual">Journal entry</option><option value="recurring">Recurring</option><option value="payroll">Payroll</option><option value="reversal">Reversal</option></select>
+          </label>
+        </div>
+        <button class="primary">Search</button> <button type="button" class="link" @click="clearSearch">clear</button>
+        <span class="muted small">Showing {{ entries.length }} of {{ entriesTotal }}</span>
+      </form>
       <table class="data">
         <thead><tr><th>#</th><th>Date</th><th>Description</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th><th></th></tr></thead>
         <tbody v-for="e in entries" :key="e.id" class="entry">
@@ -184,7 +232,8 @@
           </tr>
         </tbody>
       </table>
-      <p class="hint" v-if="!entries.length">No transactions yet.</p>
+      <p class="hint" v-if="!entries.length">No transactions found.</p>
+      <button v-if="entries.length < entriesTotal" @click="loadEntries(true)">Show more</button>
     </section>
 
     <!-- REPORTS -->
@@ -463,7 +512,12 @@
       <div class="card narrow" v-if="can('audit')">
         <h2>Audit trail</h2>
         <p class="hint">Every change is recorded in a tamper-evident log. Check that nothing has been altered:</p>
+        <p class="hint" v-if="booksCheck">Last full books check: <strong :class="booksCheck.ok ? 'ok' : 'bad'">{{ booksCheck.ok ? '✓ passed' : '⚠ problems found' }}</strong>
+          {{ new Date(booksCheck.runAt).toLocaleString('en-US', { timeZone: 'America/Chicago' }) }} CT</p>
+        <ul class="warn" v-if="booksCheck && !booksCheck.ok"><li v-for="p in booksCheck.problems">{{ p }}</li></ul>
+        <p class="hint">The full check runs every night: it re-verifies the audit trail, confirms the trial balance and balance sheet balance, and posts recurring entries that are due.</p>
         <button @click="verifyAudit">Verify audit trail</button>
+        <button @click="runBooksCheck">Run full check now</button>
         <p v-if="audit" :class="audit.ok ? 'ok' : 'bad'">{{ audit.ok ? `✓ All ${audit.rows} records verified, and the ledger matches them.` : (audit.brokenAt ? `⚠ Audit record ${audit.brokenAt} failed verification.` : `⚠ Ledger entries ${audit.ledgerMismatches.join(', ')} do not match the audit trail.`) }}</p>
       </div>
       <button class="link" @click="tab = 'new-company'">+ Add another company</button>

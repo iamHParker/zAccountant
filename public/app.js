@@ -22,10 +22,10 @@ function cents(v) {
 
 let onSignInNeeded = () => {};
 
-async function api(method, url, body) {
+async function api(method, url, body, headers = {}) {
   if (method !== 'GET' && body === undefined) body = {}; // writes are always JSON (server CSRF rule)
   const res = await fetch(`/api${url}`, {
-    method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined,
+    method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && !url.startsWith('/auth/') && !url.includes('/lock')) onSignInNeeded(data.next);
@@ -38,6 +38,11 @@ const CAN = {
   post: ['owner', 'accountant', 'bookkeeper'], accounts: ['owner', 'accountant'], close: ['owner', 'accountant'],
   payroll: ['owner', 'accountant'], audit: ['owner', 'accountant'], admin: ['owner'],
 };
+
+// One key per "Save" click: if the request is retried (double click, flaky Wi-Fi), the server posts it only once.
+const newKey = () => crypto.randomUUID();
+const blankSearch = () => ({ text: '', from: '', to: '', accountId: '', source: '' });
+const blankRepeat = () => ({ on: false, name: '', frequency: 'monthly', endDate: '' });
 
 const blankEmployee = () => ({
   firstName: '', lastName: '', ssn: '', workState: 'TX', payFrequency: 'biweekly', payType: 'hourly', payRate: '',
@@ -59,9 +64,9 @@ createApp({
       ],
       typeLabel: { asset: 'Asset', liability: 'Liability', equity: 'Equity', revenue: 'Income', expense: 'Expense' },
       newCompany: { name: '', homeState: 'TX', fiscalYearStartMonth: 1 },
-      accounts: [], dash: null, entries: [],
-      quick: { kind: 'out', date: today(), memo: '', amount: '', bank: '', other: '' },
-      showJE: false, je: { date: today(), memo: '', lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] },
+      accounts: [], dash: null, entries: [], entriesTotal: 0, search: blankSearch(), recurring: [], showRecurring: false, booksCheck: null,
+      quick: { kind: 'out', date: today(), memo: '', amount: '', bank: '', other: '', key: newKey() },
+      showJE: false, je: { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] },
       reportTypes: [
         { id: 'balance-sheet', label: 'Balance Sheet' }, { id: 'income-statement', label: 'Profit & Loss' },
         { id: 'cash-flow', label: 'Cash Flow' }, { id: 'trial-balance', label: 'Trial Balance' },
@@ -100,9 +105,9 @@ createApp({
     companyId() { this.loadCompany(); },
     tab(t) {
       if (t === 'reports') this.loadReport();
-      if (t === 'journal') this.loadEntries();
+      if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if (t === 'payroll' || t === 'settings') this.loadEmployees();
-      if (t === 'settings') this.loadMembers();
+      if (t === 'settings') { this.loadMembers(); this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
     },
     'quick.kind'() { this.quick.other = ''; },
@@ -183,7 +188,34 @@ createApp({
       this.tab === 'home' ? this.loadDash() : this.$options.watch.tab.call(this, this.tab);
     },
     async loadDash() { if (this.companyId) this.dash = await this.run(() => api('GET', `/companies/${this.companyId}/reports/dashboard?asOf=${today()}`)); },
-    async loadEntries() { this.entries = (await this.run(() => api('GET', `/companies/${this.companyId}/entries`))) ?? []; },
+    async loadEntries(more = false) {
+      const p = new URLSearchParams();
+      for (const [k, v] of Object.entries(this.search)) if (v) p.set(k, v);
+      p.set('limit', '100');
+      if (more) p.set('offset', String(this.entries.length));
+      const r = await this.run(() => api('GET', `/companies/${this.companyId}/entries?${p}`));
+      if (!r) return;
+      this.entries = more ? this.entries.concat(r.entries) : r.entries;
+      this.entriesTotal = r.total;
+    },
+    clearSearch() { this.search = blankSearch(); this.loadEntries(); },
+    async loadRecurring() { this.recurring = (await this.run(() => api('GET', `/companies/${this.companyId}/recurring`))) ?? []; },
+    async postDueRecurring() {
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/recurring/post-due`, {}));
+      if (!r) return;
+      const msg = r.posted.length ? `Posted ${r.posted.length} recurring ${r.posted.length === 1 ? 'entry' : 'entries'}.` : 'Nothing is due.';
+      this.flash(r.problems.length ? `${msg} ${r.problems.length} could not be posted — see the list.` : msg, r.problems.length ? 'bad' : 'ok');
+      this.loadRecurring(); this.loadEntries();
+    },
+    async stopRecurring(r) {
+      if (!confirm(`Stop "${r.name}"? Entries already posted stay on the books.`)) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/recurring/${r.id}/stop`, {}), 'Stopped.')) this.loadRecurring();
+    },
+    async loadBooksCheck() { this.booksCheck = await this.run(() => api('GET', `/companies/${this.companyId}/books-check`)); },
+    async runBooksCheck() {
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/books-check`, {}));
+      if (r) { this.flash(r.ok ? 'Books check passed.' : 'Books check found problems.', r.ok ? 'ok' : 'bad'); this.loadBooksCheck(); }
+    },
     async loadEmployees() {
       this.employees = (await this.run(() => api('GET', `/companies/${this.companyId}/employees`))) ?? [];
       this.paychecks = (await this.run(() => api('GET', `/companies/${this.companyId}/paychecks`))) ?? [];
@@ -199,15 +231,25 @@ createApp({
       const body = { date: q.date, memo: q.memo, amount: q.amount,
         fromAccountId: q.kind === 'in' ? q.other : q.bank,
         toAccountId: q.kind === 'in' ? q.bank : q.other };
-      const ok = await this.run(() => api('POST', `/companies/${this.companyId}/entries/simple`, body), 'Saved.');
-      if (ok) { q.memo = ''; q.amount = ''; this.loadDash(); }
+      const ok = await this.run(() => api('POST', `/companies/${this.companyId}/entries/simple`, body, { 'Idempotency-Key': q.key }), 'Saved.');
+      if (ok) { q.memo = ''; q.amount = ''; q.key = newKey(); this.loadDash(); }
     },
     async postJE() {
       const lines = this.je.lines.map((l) => ({ accountId: l.accountId, debit: l.debit || null, credit: l.credit || null }));
-      const ok = await this.run(() => api('POST', `/companies/${this.companyId}/entries`, { date: this.je.date, memo: this.je.memo, lines }), 'Entry posted.');
+      const je = this.je;
+      let ok;
+      if (je.repeat.on) {
+        // A repeating entry is saved as a template; the ones already due are posted right away.
+        ok = await this.run(() => api('POST', `/companies/${this.companyId}/recurring`, {
+          name: je.repeat.name || je.memo, frequency: je.repeat.frequency, startDate: je.date, endDate: je.repeat.endDate || null, memo: je.memo, lines }));
+        if (ok && je.date <= today()) await this.postDueRecurring();
+        else if (ok) this.flash('Recurring entry saved.');
+      } else {
+        ok = await this.run(() => api('POST', `/companies/${this.companyId}/entries`, { date: je.date, memo: je.memo, lines }, { 'Idempotency-Key': je.key }), 'Entry posted.');
+      }
       if (ok) {
-        this.je = { date: this.je.date, memo: '', lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] };
-        this.showJE = false; this.loadEntries();
+        this.je = { date: je.date, memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] };
+        this.showJE = false; this.loadEntries(); this.loadRecurring();
       }
     },
     async reverse(e) {

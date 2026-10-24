@@ -15,7 +15,8 @@
     "test": "node --test \"test/*.test.js\"",
     "test:unit": "node --test \"test/*.unit.test.js\"",
     "verify:books": "node src/db/verify-books.js",
-    "db:grant": "node src/db/grant.js"
+    "db:grant": "node src/db/grant.js",
+    "job:nightly": "node src/jobs/booksCheck.js"
   },
   "license": "UNLICENSED",
   "dependencies": {

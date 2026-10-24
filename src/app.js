@@ -16,6 +16,7 @@ import * as payroll from './services/payrollService.js';
 import * as auth from './services/authService.js';
 import { AuthError } from './services/authService.js';
 import { verifyChain } from './services/audit.js';
+import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -174,7 +175,7 @@ export function createApp(pool) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -235,12 +236,29 @@ export function createApp(pool) {
     reports.getAccountRegister(db, companyId, req.params.accountId, { from: q(req.query.from), to: q(req.query.to) })));
 
   // Journal
+  const idemKey = (req) => req.get('Idempotency-Key') ?? req.body?.idempotencyKey ?? null;
   api.get('/companies/:companyId/entries', route('read', ({ db, req, companyId }) =>
-    ledger.listEntries(db, companyId, { from: q(req.query.from), to: q(req.query.to), limit: q(req.query.limit) })));
-  api.post('/companies/:companyId/entries', route('post', ({ db, req, companyId, actor }) => ledger.postEntry(db, companyId, req.body ?? {}, { actor }), 201));
-  api.post('/companies/:companyId/entries/simple', route('post', ({ db, req, companyId, actor }) => ledger.postSimple(db, companyId, req.body ?? {}, { actor }), 201));
+    ledger.listEntries(db, companyId, {
+      from: q(req.query.from), to: q(req.query.to), text: q(req.query.text), accountId: q(req.query.accountId),
+      min: q(req.query.min), max: q(req.query.max), source: q(req.query.source), limit: q(req.query.limit), offset: q(req.query.offset),
+    })));
+  api.post('/companies/:companyId/entries', route('post', ({ db, req, companyId, actor }) =>
+    ledger.postEntry(db, companyId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) }), 201));
+  api.post('/companies/:companyId/entries/simple', route('post', ({ db, req, companyId, actor }) =>
+    ledger.postSimple(db, companyId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) }), 201));
   api.post('/companies/:companyId/entries/:entryId/reverse', route('post', ({ db, req, companyId, actor }) =>
-    ledger.reverseEntry(db, companyId, req.params.entryId, { date: req.body?.date, memo: req.body?.memo, actor }), 201));
+    ledger.reverseEntry(db, companyId, req.params.entryId, { date: req.body?.date, memo: req.body?.memo, actor, idempotencyKey: idemKey(req) }), 201));
+
+  // Recurring entries
+  api.get('/companies/:companyId/recurring', route('read', ({ db, companyId }) => ledger.listRecurring(db, companyId)));
+  api.post('/companies/:companyId/recurring', route('post', ({ db, req, companyId, actor }) => {
+    const { name, frequency, startDate, endDate, memo, lines } = req.body ?? {};
+    return ledger.createRecurring(db, companyId, { name, frequency, startDate, endDate, memo, lines, actor });
+  }, 201));
+  api.post('/companies/:companyId/recurring/:recurringId/stop', route('post', ({ db, req, companyId, actor }) =>
+    ledger.stopRecurring(db, companyId, req.params.recurringId, { actor })));
+  api.post('/companies/:companyId/recurring/post-due', route('post', ({ db, companyId, actor }) =>
+    ledger.postDueRecurring(db, companyId, { asOf: centralToday(), actor })));
 
   // Reports
   api.get('/companies/:companyId/reports/dashboard', route('read', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
@@ -249,6 +267,8 @@ export function createApp(pool) {
   api.get('/companies/:companyId/reports/income-statement', route('read', ({ db, req, companyId }) => reports.getIncomeStatement(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
   api.get('/companies/:companyId/reports/cash-flow', route('read', ({ db, req, companyId }) => reports.getCashFlow(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
   api.get('/companies/:companyId/audit/verify', route('audit', ({ db, companyId }) => verifyChain(db, companyId)));
+  api.get('/companies/:companyId/books-check', route('read', ({ db, companyId }) => latestBooksCheck(db, companyId)));
+  api.post('/companies/:companyId/books-check', route('audit', ({ db, companyId }) => runBooksCheck(db, companyId)));
 
   // Payroll
   api.get('/companies/:companyId/employees', route('read', ({ db, companyId }) => payroll.listEmployees(db, companyId)));
