@@ -39,6 +39,36 @@ export async function grantRuntimeRole(pool, role) {
   await pool.query(sql);
 }
 
+/**
+ * Make sure the login in `runtimeUrl` (the app's DATABASE_URL) exists with that password and has exactly
+ * the runtime rights. Runs at start-up with the owner connection, so on Railway nobody has to type SQL.
+ * Does nothing when the app connects as the owner itself (local development).
+ */
+export async function ensureRuntimeRole(ownerPool, runtimeUrl) {
+  const u = new URL(runtimeUrl);
+  const role = decodeURIComponent(u.username);
+  const password = decodeURIComponent(u.password);
+  const { rows: [me] } = await ownerPool.query('SELECT current_user AS name, current_database() AS db');
+  if (!role || role === me.name) return { role: me.name, created: false, skipped: true };
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(role)) throw new Error('The DATABASE_URL user name may use only lower-case letters, digits and _');
+  if (password.length < 16) throw new Error('The DATABASE_URL password must be at least 16 characters');
+  const client = await ownerPool.connect();
+  try {
+    const { rows: [exists] } = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [role]);
+    const pw = client.escapeLiteral(password);
+    // A new role has PostgreSQL's defaults: not a superuser, can't create roles or databases, can't skip
+    // row-level security. The app's login can do nothing beyond the grants below.
+    await client.query(exists ? `ALTER ROLE ${role} WITH LOGIN PASSWORD ${pw}` : `CREATE ROLE ${role} WITH LOGIN PASSWORD ${pw}`);
+    const { rows: [r] } = await client.query('SELECT rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb AS too_strong FROM pg_roles WHERE rolname = $1', [role]);
+    if (r.too_strong) throw new Error(`Database role ${role} has more rights than the app should; use a different user name in DATABASE_URL`);
+    await client.query(`GRANT CONNECT ON DATABASE ${client.escapeIdentifier(me.db)} TO ${role}`);
+  } finally {
+    client.release();
+  }
+  await grantRuntimeRole(ownerPool, role);
+  return { role, skipped: false };
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const pool = createPool(process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL);
   grantRuntimeRole(pool, process.argv[2] ?? 'zacc_app')

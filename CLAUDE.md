@@ -54,6 +54,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   download with `?format=csv` (row builders in `src/core/csv.js`). PDFs come from the browser's print window;
   `printPage` prints only the card holding the button (or the section's `.print-me` card).
 
+- Railway: first-time setup steps in `docs/runbooks/railway-setup.md`; the server creates its restricted DB login
+  from `DATABASE_URL` at start-up (`ensureRuntimeRole`).
 - Ops: request logs/metrics in `src/metrics.js`; restore drill and load test in `src/jobs/`; how to run them and
   the results log: `docs/runbooks/operations.md`.
 

@@ -607,6 +607,12 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
         (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject);
     });
     assert.equal(status, 421);
+    // Health checks answer any host name (Railway's checker uses an internal one) and reveal nothing.
+    const health = await new Promise((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port: server.address().port, path: '/readyz', headers: { host: 'healthcheck.railway.app' } },
+        (res) => { res.resume(); resolve(res.statusCode); }).on('error', reject);
+    });
+    assert.equal(health, 200);
     assert.equal((await owner.c.call('POST', lock, { through: '2026-01-01' }, { origin: base })).status, 200);
   });
 });

@@ -38,7 +38,10 @@ export { PERMISSIONS } from './core/permissions.js';
 
 // Host names this server answers to. Anything else is refused, which blocks "DNS rebinding"
 // (a malicious web page tricking the browser into talking to this server).
-const allowedHosts = () => new Set((process.env.ALLOWED_HOSTS ?? 'localhost,127.0.0.1').split(',').map((h) => h.trim().toLowerCase()));
+const allowedHosts = () => new Set([
+  ...(process.env.ALLOWED_HOSTS ?? (process.env.RAILWAY_PUBLIC_DOMAIN ? '' : 'localhost,127.0.0.1')).split(','),
+  process.env.RAILWAY_PUBLIC_DOMAIN ?? '', // Railway tells the app its own address
+].map((h) => h.trim().toLowerCase()).filter(Boolean));
 
 const secureCookies = () => process.env.NODE_ENV === 'production';
 const COOKIE = () => (secureCookies() ? '__Host-zacc_session' : 'zacc_session');
@@ -78,8 +81,16 @@ export function createApp(pool, { log } = {}) {
   const hosts = allowedHosts();
   const metrics = createMetrics({ log });
   app.disable('x-powered-by');
-  if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
+  // Behind Railway's proxy the visitor's address is in X-Forwarded-For (one hop); rate limits need it.
+  const trustProxy = process.env.TRUST_PROXY ?? (process.env.RAILWAY_ENVIRONMENT_NAME ? '1' : null);
+  if (trustProxy) app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy);
   app.use(metrics.middleware);
+  // Health checks answer before the Host check: Railway's checker calls them by an internal host name,
+  // and they reveal nothing.
+  app.get('/healthz', (req, res) => res.json({ ok: true }));
+  app.get('/readyz', async (req, res) => {
+    try { await pool.query('SELECT 1'); res.json({ ok: true }); } catch { res.status(503).json({ ok: false }); }
+  });
   app.use((req, res, next) => {
     const host = (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
     if (!hosts.has(host)) return res.status(421).json({ error: 'Unknown host' });
@@ -115,10 +126,6 @@ export function createApp(pool, { log } = {}) {
     next();
   });
 
-  app.get('/healthz', (req, res) => res.json({ ok: true }));
-  app.get('/readyz', async (req, res) => {
-    try { await pool.query('SELECT 1'); res.json({ ok: true }); } catch { res.status(503).json({ ok: false }); }
-  });
   // Monitoring (Grafana scrapes this). Off unless METRICS_TOKEN is set; the caller must send it as a bearer token.
   app.get('/metrics', (req, res) => {
     if (!process.env.METRICS_TOKEN) return res.status(404).json({ error: 'Not found' });
