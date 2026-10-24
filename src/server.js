@@ -34,4 +34,23 @@ else await ownerPool.end();
 const pool = createPool();
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? (production ? '0.0.0.0' : '127.0.0.1');
-createApp(pool).listen(port, host, () => console.log(`zAccountant running at http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`));
+const server = createApp(pool).listen(port, host, () => console.log(`zAccountant running at http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`));
+
+// Railway stops the old copy with SIGTERM on every deploy: finish requests in flight (each is one
+// database transaction), then close the database connections. Anything still running after 10 s is cut off
+// and rolled back by PostgreSQL, so a half-finished save is never left behind.
+let stopping = false;
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    console.log(JSON.stringify({ level: 'info', msg: 'shutting down', signal }));
+    setTimeout(() => process.exit(1), 10_000).unref();
+    server.close(async () => {
+      await pool.end().catch(() => {});
+      if (process.env.NIGHTLY_JOB !== 'off') await ownerPool.end().catch(() => {});
+      process.exit(0);
+    });
+    server.closeIdleConnections?.();
+  });
+}
