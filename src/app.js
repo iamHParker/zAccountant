@@ -17,6 +17,7 @@ import * as auth from './services/authService.js';
 import * as bank from './services/bankService.js';
 import * as imports from './services/importService.js';
 import * as arap from './services/arapService.js';
+import * as roles from './services/accessService.js';
 import { AuthError } from './services/authService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
@@ -25,16 +26,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
 const q = (v) => (typeof v === 'string' && v !== '' ? v : null); // ignore repeated (?a=1&a=2) or empty params
 
-/** What each role may do. Reading is allowed for every member. */
-export const PERMISSIONS = Object.freeze({
-  read: ['owner', 'accountant', 'bookkeeper', 'viewer'],
-  post: ['owner', 'accountant', 'bookkeeper'],            // record & reverse transactions
-  accounts: ['owner', 'accountant'],                      // change the chart of accounts
-  close: ['owner', 'accountant'],                         // close periods (reopening: owner + fresh 2FA code)
-  payroll: ['owner', 'accountant'],                       // employees, paychecks
-  audit: ['owner', 'accountant'],
-  admin: ['owner'],                                       // settings, members
-});
+/**
+ * Route permissions. ℹ️ Each route names the permission it needs (see src/core/permissions.js), or a
+ * list meaning "any of these", or 'member' for anything every member of the company may see.
+ */
+export { PERMISSIONS } from './core/permissions.js';
 
 // Host names this server answers to. Anything else is refused, which blocks "DNS rebinding"
 // (a malicious web page tricking the browser into talking to this server).
@@ -181,17 +177,21 @@ export function createApp(pool) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
-      let role = null;
+      let access = null;
       if (companyId) {
-        role = await auth.getRole(db, req.user.id, companyId);
-        if (!role) throw new AuthError('Company not found', 404); // don't reveal that other companies exist
-        if (!PERMISSIONS[permission].includes(role)) throw new AuthError(`Your role (${role}) can't do that. Ask the company owner.`, 403);
+        access = await auth.getAccess(db, req.user.id, companyId);
+        if (!access) throw new AuthError('Company not found', 404); // don't reveal that other companies exist
+        const anyOf = permission === 'member' ? [] : [].concat(permission);
+        if (anyOf.length && !anyOf.some((p) => access.permissions.has(p))) {
+          throw new AuthError(`Your role (${access.roleName}) can't do that. Ask the company owner.`, 403);
+        }
       }
-      return handler({ db, req, companyId, role, actor: req.user.email });
+      const can = (p) => Boolean(access?.permissions.has(p));
+      return handler({ db, req, companyId, role: access?.role ?? null, access, can, actor: req.user.email });
     });
     res.status(status).json(body);
   };
@@ -202,7 +202,9 @@ export function createApp(pool) {
     const { name, homeState, fiscalYearStartMonth } = req.body ?? {};
     return ledger.createCompany(db, { name, homeState, fiscalYearStartMonth, actor, ownerUserId: req.user.id });
   }, 201));
-  api.get('/companies/:companyId', route('read', async ({ db, companyId, role }) => ({ ...(await ledger.getCompany(db, companyId)), role })));
+  api.get('/companies/:companyId', route('member', async ({ db, companyId, access }) => ({
+    ...(await ledger.getCompany(db, companyId)), role: access.role, roleName: access.roleName, permissions: [...access.permissions], departmentId: access.departmentId,
+  })));
   api.patch('/companies/:companyId/settings', route('admin', ({ db, req, companyId, actor }) => {
     const { suiRatePct, calculateOnlyPayroll, famliHeadcount } = req.body ?? {};
     return ledger.updateCompanySettings(db, companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount, actor });
@@ -220,10 +222,10 @@ export function createApp(pool) {
   }));
 
   // Members
-  api.get('/companies/:companyId/members', route('read', ({ db, companyId }) => auth.listMembers(db, companyId)));
+  api.get('/companies/:companyId/members', route(['view_books', 'admin', 'time_approve', 'time_all'], ({ db, companyId }) => auth.listMembers(db, companyId)));
   api.post('/companies/:companyId/members', route('admin', async ({ db, req, companyId, actor }) => {
-    const m = await auth.addMember(db, companyId, { email: req.body?.email, role: req.body?.role });
-    await ledger.auditOnly(db, companyId, { action: 'set_member', entity: 'membership', entityId: m.id, actor, payload: { email: m.email, role: m.role } });
+    const m = await auth.addMember(db, companyId, { email: req.body?.email, role: req.body?.role, departmentId: req.body?.departmentId });
+    await ledger.auditOnly(db, companyId, { action: 'set_member', entity: 'membership', entityId: m.id, actor, payload: { email: m.email, role: m.role, roleId: m.roleId, departmentId: m.departmentId } });
     return m;
   }, 201));
   api.delete('/companies/:companyId/members/:userId', route('admin', async ({ db, req, companyId, actor }) => {
@@ -232,18 +234,27 @@ export function createApp(pool) {
     return { ok: true };
   }));
 
+  // Roles and departments
+  api.get('/companies/:companyId/roles', route('member', ({ db, companyId }) => roles.listRoles(db, companyId)));
+  api.post('/companies/:companyId/roles', route('admin', ({ db, req, companyId, actor }) => roles.createRole(db, companyId, req.body ?? {}, { actor }), 201));
+  api.patch('/companies/:companyId/roles/:roleId', route('admin', ({ db, req, companyId, actor }) => roles.updateRole(db, companyId, req.params.roleId, req.body ?? {}, { actor })));
+  api.delete('/companies/:companyId/roles/:roleId', route('admin', ({ db, req, companyId, actor }) => roles.deleteRole(db, companyId, req.params.roleId, { actor })));
+  api.get('/companies/:companyId/departments', route('member', ({ db, companyId }) => roles.listDepartments(db, companyId)));
+  api.post('/companies/:companyId/departments', route('admin', ({ db, req, companyId, actor }) => roles.createDepartment(db, companyId, req.body ?? {}, { actor }), 201));
+  api.delete('/companies/:companyId/departments/:departmentId', route('admin', ({ db, req, companyId, actor }) => roles.deleteDepartment(db, companyId, req.params.departmentId, { actor })));
+
   // Accounts
-  api.get('/companies/:companyId/accounts', route('read', ({ db, companyId }) => ledger.listAccounts(db, companyId)));
+  api.get('/companies/:companyId/accounts', route(['view_books', 'invoices', 'bills'], ({ db, companyId }) => ledger.listAccounts(db, companyId)));
   api.post('/companies/:companyId/accounts', route('accounts', ({ db, req, companyId, actor }) => {
     const { code, name, type, subtype } = req.body ?? {};
     return ledger.createAccount(db, companyId, { code, name, type, subtype, actor });
   }, 201));
-  api.get('/companies/:companyId/accounts/:accountId/register', route('read', ({ db, req, companyId }) =>
+  api.get('/companies/:companyId/accounts/:accountId/register', route('view_books', ({ db, req, companyId }) =>
     reports.getAccountRegister(db, companyId, req.params.accountId, { from: q(req.query.from), to: q(req.query.to) })));
 
   // Journal
   const idemKey = (req) => req.get('Idempotency-Key') ?? req.body?.idempotencyKey ?? null;
-  api.get('/companies/:companyId/entries', route('read', ({ db, req, companyId }) =>
+  api.get('/companies/:companyId/entries', route('view_books', ({ db, req, companyId }) =>
     ledger.listEntries(db, companyId, {
       from: q(req.query.from), to: q(req.query.to), text: q(req.query.text), accountId: q(req.query.accountId),
       min: q(req.query.min), max: q(req.query.max), source: q(req.query.source), limit: q(req.query.limit), offset: q(req.query.offset),
@@ -256,7 +267,7 @@ export function createApp(pool) {
     ledger.reverseEntry(db, companyId, req.params.entryId, { date: req.body?.date, memo: req.body?.memo, actor, idempotencyKey: idemKey(req) }), 201));
 
   // Recurring entries
-  api.get('/companies/:companyId/recurring', route('read', ({ db, companyId }) => ledger.listRecurring(db, companyId)));
+  api.get('/companies/:companyId/recurring', route('view_books', ({ db, companyId }) => ledger.listRecurring(db, companyId)));
   api.post('/companies/:companyId/recurring', route('post', ({ db, req, companyId, actor }) => {
     const { name, frequency, startDate, endDate, memo, lines } = req.body ?? {};
     return ledger.createRecurring(db, companyId, { name, frequency, startDate, endDate, memo, lines, actor });
@@ -270,80 +281,96 @@ export function createApp(pool) {
   const B = '/companies/:companyId/bank-accounts/:bankAccountId';
   api.post(`${B}/import`, route('post', ({ db, req, companyId, actor }) =>
     bank.importStatement(db, companyId, { bankAccountId: req.params.bankAccountId, fileName: req.body?.fileName, content: req.body?.content, preview: req.body?.preview === true, actor })));
-  api.get(`${B}/transactions`, route('read', ({ db, req, companyId }) =>
+  api.get(`${B}/transactions`, route('view_books', ({ db, req, companyId }) =>
     bank.listBankTransactions(db, companyId, { bankAccountId: req.params.bankAccountId, status: q(req.query.status) ?? 'review' })));
-  api.get(`${B}/reconciliations`, route('read', ({ db, req, companyId }) => bank.listReconciliations(db, companyId, { bankAccountId: req.params.bankAccountId })));
+  api.get(`${B}/reconciliations`, route('view_books', ({ db, req, companyId }) => bank.listReconciliations(db, companyId, { bankAccountId: req.params.bankAccountId })));
   api.post(`${B}/reconciliations`, route('post', ({ db, req, companyId, actor }) =>
     bank.startReconciliation(db, companyId, { bankAccountId: req.params.bankAccountId, statementDate: req.body?.statementDate, endingBalance: req.body?.endingBalance, actor }), 201));
   const T = '/companies/:companyId/bank-transactions/:bankTxId';
-  api.get(`${T}/matches`, route('read', ({ db, req, companyId }) => bank.findMatches(db, companyId, req.params.bankTxId)));
+  api.get(`${T}/matches`, route('view_books', ({ db, req, companyId }) => bank.findMatches(db, companyId, req.params.bankTxId)));
   api.post(`${T}/post`, route('post', ({ db, req, companyId, actor }) => bank.postBankTransaction(db, companyId, req.params.bankTxId, { accountId: req.body?.accountId, memo: req.body?.memo, actor })));
   api.post(`${T}/match`, route('post', ({ db, req, companyId, actor }) => bank.matchBankTransaction(db, companyId, req.params.bankTxId, { entryId: req.body?.entryId, actor })));
   api.post(`${T}/exclude`, route('post', ({ db, req, companyId, actor }) => bank.excludeBankTransaction(db, companyId, req.params.bankTxId, { reason: req.body?.reason, actor })));
   api.post(`${T}/undo`, route('post', ({ db, req, companyId, actor }) => bank.undoBankTransaction(db, companyId, req.params.bankTxId, { actor })));
-  api.get('/companies/:companyId/bank-rules', route('read', ({ db, companyId }) => bank.listRules(db, companyId)));
+  api.get('/companies/:companyId/bank-rules', route('view_books', ({ db, companyId }) => bank.listRules(db, companyId)));
   api.post('/companies/:companyId/bank-rules', route('post', ({ db, req, companyId, actor }) => {
     const { matchText, direction, min, max, accountId, priority } = req.body ?? {};
     return bank.createRule(db, companyId, { matchText, direction, min, max, accountId, priority: priority ?? 100, actor });
   }, 201));
   api.delete('/companies/:companyId/bank-rules/:ruleId', route('post', ({ db, req, companyId, actor }) => bank.deleteRule(db, companyId, req.params.ruleId, { actor })));
   const R = '/companies/:companyId/reconciliations/:reconId';
-  api.get(R, route('read', ({ db, req, companyId }) => bank.getReconciliation(db, companyId, req.params.reconId)));
+  api.get(R, route('view_books', ({ db, req, companyId }) => bank.getReconciliation(db, companyId, req.params.reconId)));
   api.post(`${R}/lines`, route('post', ({ db, req, companyId }) => bank.setCleared(db, companyId, req.params.reconId, { lineIds: req.body?.lineIds, cleared: req.body?.cleared !== false })));
   api.post(`${R}/complete`, route('post', ({ db, req, companyId, actor }) => bank.completeReconciliation(db, companyId, req.params.reconId, { actor })));
   api.delete(R, route('post', ({ db, req, companyId }) => bank.cancelReconciliation(db, companyId, req.params.reconId)));
 
   // Customers & invoices, vendors & bills, payments (accounts receivable / payable)
+  // Sales needs "invoices", Bills needs "bills"; anyone who can see the books can also look.
+  const SIDE_PERM = { customer: 'invoices', vendor: 'bills', invoice: 'invoices', bill: 'bills', received: 'invoices', made: 'bills' };
+  const needSide = async (db, can, table, id) => {
+    const { rows: [r] } = await db.query(`SELECT kind FROM ${table} WHERE id = $1`, [id]);
+    if (r && !can(SIDE_PERM[r.kind])) throw new AuthError("Your role can't do that. Ask the company owner.", 403);
+  };
+  const seeSide = async (db, can, table, id) => { if (!can('view_books')) await needSide(db, can, table, id); };
   for (const [path, kind] of [['customers', 'customer'], ['vendors', 'vendor']]) {
-    api.get(`/companies/:companyId/${path}`, route('read', ({ db, req, companyId }) =>
+    api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
       arap.listContacts(db, companyId, { kind, asOf: centralToday(), includeInactive: req.query.inactive === '1' })));
-    api.post(`/companies/:companyId/${path}`, route('post', ({ db, req, companyId, actor }) => arap.createContact(db, companyId, { ...(req.body ?? {}), kind, actor }), 201));
+    api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => arap.createContact(db, companyId, { ...(req.body ?? {}), kind, actor }), 201));
   }
-  api.patch('/companies/:companyId/contacts/:contactId', route('post', ({ db, req, companyId, actor }) => arap.updateContact(db, companyId, req.params.contactId, { ...(req.body ?? {}), actor })));
+  api.patch('/companies/:companyId/contacts/:contactId', route(['invoices', 'bills'], async ({ db, req, companyId, can, actor }) => {
+    await needSide(db, can, 'contacts', req.params.contactId);
+    return arap.updateContact(db, companyId, req.params.contactId, { ...(req.body ?? {}), actor });
+  }));
   for (const [path, kind] of [['invoices', 'invoice'], ['bills', 'bill']]) {
-    api.get(`/companies/:companyId/${path}`, route('read', ({ db, req, companyId }) =>
+    api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
       arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));
-    api.post(`/companies/:companyId/${path}`, route('post', ({ db, req, companyId, actor }) => {
+    api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
       const { contactId, number, date, dueDate, memo, taxRate, lines } = req.body ?? {};
       return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, taxRate, lines, idempotencyKey: idemKey(req), actor });
     }, 201));
   }
-  api.get('/companies/:companyId/documents/:documentId', route('read', ({ db, req, companyId }) => arap.getDocument(db, companyId, req.params.documentId, { today: centralToday() })));
+  api.get('/companies/:companyId/documents/:documentId', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {
+    await seeSide(db, can, 'documents', req.params.documentId);
+    return arap.getDocument(db, companyId, req.params.documentId, { today: centralToday() });
+  }));
   api.post('/companies/:companyId/documents/:documentId/void', route('post', ({ db, req, companyId, actor }) =>
     arap.voidDocument(db, companyId, req.params.documentId, { date: req.body?.date, actor })));
   for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
-    api.get(`/companies/:companyId/${path}`, route('read', ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));
-    api.post(`/companies/:companyId/${path}`, route('post', ({ db, req, companyId, actor }) => {
+    api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));
+    api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
       const { contactId, date, accountId, method, reference, memo, applications } = req.body ?? {};
       return arap.createPayment(db, companyId, { kind, contactId, date, accountId, method, reference, memo, applications, idempotencyKey: idemKey(req), actor });
     }, 201));
   }
-  api.get('/companies/:companyId/payments/:paymentId', route('read', ({ db, req, companyId }) => arap.getPayment(db, companyId, req.params.paymentId)));
+  api.get('/companies/:companyId/payments/:paymentId', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {
+    await seeSide(db, can, 'payments', req.params.paymentId);
+    return arap.getPayment(db, companyId, req.params.paymentId);
+  }));
   api.post('/companies/:companyId/payments/:paymentId/void', route('post', ({ db, req, companyId, actor }) =>
     arap.voidPayment(db, companyId, req.params.paymentId, { date: req.body?.date, actor })));
-  api.get('/companies/:companyId/reports/ar-aging', route('read', ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'invoice', asOf: q(req.query.asOf) ?? centralToday() })));
-  api.get('/companies/:companyId/reports/ap-aging', route('read', ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'bill', asOf: q(req.query.asOf) ?? centralToday() })));
+  api.get('/companies/:companyId/reports/ar-aging', route(['view_books', 'invoices'], ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'invoice', asOf: q(req.query.asOf) ?? centralToday() })));
+  api.get('/companies/:companyId/reports/ap-aging', route(['view_books', 'bills'], ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'bill', asOf: q(req.query.asOf) ?? centralToday() })));
 
   // Importing books (QuickBooks / spreadsheets). Accountant-level: it can change many periods at once.
   const importOpts = (req, actor) => ({ kind: req.body?.kind, asOf: req.body?.asOf, actor,
     file: { fileName: req.body?.fileName, content: req.body?.content, base64: req.body?.base64 ?? null } });
   api.post('/companies/:companyId/imports/preview', route('accounts', ({ db, req, companyId, actor }) => imports.previewImport(db, companyId, importOpts(req, actor))));
   api.post('/companies/:companyId/imports', route('accounts', ({ db, req, companyId, actor }) => imports.commitImport(db, companyId, importOpts(req, actor)), 201));
-  api.get('/companies/:companyId/imports', route('read', ({ db, companyId }) => imports.listImports(db, companyId)));
+  api.get('/companies/:companyId/imports', route('view_books', ({ db, companyId }) => imports.listImports(db, companyId)));
   api.post('/companies/:companyId/imports/:batchId/undo', route('accounts', ({ db, req, companyId, actor }) => imports.undoImport(db, companyId, req.params.batchId, { actor })));
 
   // Reports
-  api.get('/companies/:companyId/reports/dashboard', route('read', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/trial-balance', route('read', ({ db, req, companyId }) => reports.getTrialBalance(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/balance-sheet', route('read', ({ db, req, companyId }) => reports.getBalanceSheet(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
-  api.get('/companies/:companyId/reports/income-statement', route('read', ({ db, req, companyId }) => reports.getIncomeStatement(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
-  api.get('/companies/:companyId/reports/cash-flow', route('read', ({ db, req, companyId }) => reports.getCashFlow(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
+  api.get('/companies/:companyId/reports/dashboard', route('view_books', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  api.get('/companies/:companyId/reports/trial-balance', route('view_books', ({ db, req, companyId }) => reports.getTrialBalance(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  api.get('/companies/:companyId/reports/balance-sheet', route('view_books', ({ db, req, companyId }) => reports.getBalanceSheet(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  api.get('/companies/:companyId/reports/income-statement', route('view_books', ({ db, req, companyId }) => reports.getIncomeStatement(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
+  api.get('/companies/:companyId/reports/cash-flow', route('view_books', ({ db, req, companyId }) => reports.getCashFlow(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
   api.get('/companies/:companyId/audit/verify', route('audit', ({ db, companyId }) => verifyChain(db, companyId)));
-  api.get('/companies/:companyId/books-check', route('read', ({ db, companyId }) => latestBooksCheck(db, companyId)));
+  api.get('/companies/:companyId/books-check', route('view_books', ({ db, companyId }) => latestBooksCheck(db, companyId)));
   api.post('/companies/:companyId/books-check', route('audit', ({ db, companyId }) => runBooksCheck(db, companyId)));
 
   // Payroll
-  api.get('/companies/:companyId/employees', route('read', ({ db, companyId }) => payroll.listEmployees(db, companyId)));
+  api.get('/companies/:companyId/employees', route(['view_books', 'payroll'], ({ db, companyId }) => payroll.listEmployees(db, companyId)));
   api.post('/companies/:companyId/employees', route('payroll', ({ db, req, companyId, actor }) => payroll.createEmployee(db, companyId, req.body ?? {}, { actor }), 201));
   api.post('/companies/:companyId/employees/:employeeId/paychecks/preview', route('payroll', ({ db, req, companyId }) =>
     payroll.previewPaycheck(db, companyId, req.params.employeeId, req.body ?? {})));
@@ -358,13 +385,13 @@ export function createApp(pool) {
   };
   api.post('/companies/:companyId/payroll-runs/preview', route('payroll', ({ db, req, companyId }) => payroll.previewRun(db, companyId, runOpts(req))));
   api.post('/companies/:companyId/payroll-runs', route('payroll', ({ db, req, companyId, actor }) => payroll.postRun(db, companyId, runOpts(req), { actor }), 201));
-  api.get('/companies/:companyId/payroll-runs', route('read', ({ db, companyId }) => payroll.listRuns(db, companyId)));
-  api.get('/companies/:companyId/payroll-runs/:runId', route('read', ({ db, req, companyId }) => payroll.getRun(db, companyId, req.params.runId)));
+  api.get('/companies/:companyId/payroll-runs', route(['view_books', 'payroll'], ({ db, companyId }) => payroll.listRuns(db, companyId)));
+  api.get('/companies/:companyId/payroll-runs/:runId', route(['view_books', 'payroll'], ({ db, req, companyId }) => payroll.getRun(db, companyId, req.params.runId)));
   // Pay stubs and tax totals show pay details, so they need the payroll role (not every member).
   api.get('/companies/:companyId/paychecks/:paycheckId/stub', route('payroll', ({ db, req, companyId }) => payroll.getPayStub(db, companyId, req.params.paycheckId)));
   api.get('/companies/:companyId/reports/payroll-liabilities', route('payroll', ({ db, req, companyId }) =>
     payroll.getPayrollLiabilities(db, companyId, { from: q(req.query.from), to: q(req.query.to) })));
-  api.get('/companies/:companyId/paychecks', route('read', ({ db, req, companyId }) =>
+  api.get('/companies/:companyId/paychecks', route(['view_books', 'payroll'], ({ db, req, companyId }) =>
     payroll.listPaychecks(db, companyId, { year: req.query.year ? Number(req.query.year) : undefined })));
 
   app.use('/api', api);

@@ -98,7 +98,9 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `GET …/reports/{ar-aging,ap-aging}?asOf=` | aging by customer/vendor, tied to Accounts Receivable/Payable |
 | `GET/POST …/bank-accounts/:id/reconciliations`, `GET/DELETE …/reconciliations/:id`, `POST …/lines`, `POST …/complete` | bank reconciliation |
 | `POST …/lock` | close books through a date (reopening: owner + 2FA code + reason) |
-| `GET/POST/DELETE …/members` | who has access, and their role (owner, accountant, bookkeeper, viewer) |
+| `GET/POST/DELETE …/members` | who has access: role (owner, accountant, bookkeeper, viewer, staff, or a custom role id) and department |
+| `GET/POST …/roles`, `PATCH/DELETE …/roles/:id` | permission catalog, built-in roles, custom roles (`{name, permissions}`) |
+| `GET/POST …/departments`, `DELETE …/departments/:id` | departments (Accounting, Engineering, Field…) |
 | `GET …/reports/{dashboard,trial-balance,balance-sheet,income-statement,cash-flow}` | statements |
 | `GET …/audit/verify` | verify the audit hash chain |
 | `GET/POST …/employees`, `POST …/employees/:id/paychecks[/preview]`, `GET …/paychecks` | payroll |

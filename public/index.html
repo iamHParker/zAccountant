@@ -16,10 +16,10 @@
         <option v-for="c in companies" :value="c.id">{{ c.name }}</option>
       </select>
       <nav v-if="company">
-        <button v-for="t in tabs" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
+        <button v-for="t in tabs.filter(t => canTab(t.id))" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
       </nav>
       <div class="who" v-if="auth.user">
-        <span class="muted">{{ auth.user.name }}<template v-if="company"> · {{ roleLabels[company.role] }}</template></span>
+        <span class="muted">{{ auth.user.name }}<template v-if="company"> · {{ company.roleName }}</template></span>
         <button class="link" @click="signOut">Sign out</button>
       </div>
     </template>
@@ -240,7 +240,7 @@
     <section v-if="tab === 'sales' || tab === 'bills'">
       <div class="row wrap">
         <h1>{{ tab === 'sales' ? 'Sales' : 'Bills' }}</h1>
-        <template v-if="can('post')">
+        <template v-if="can(S.perm)">
           <button class="primary" @click="newDoc">+ New {{ S.Doc.toLowerCase() }}</button>
           <button @click="startPay()">{{ S.payVerb }}</button>
           <button @click="ar.showContact = !ar.showContact">+ New {{ S.who }}</button>
@@ -336,7 +336,7 @@
           <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small">· {{ statusLabel(ar.detail.status) }}</span></h2>
           <span>
             <button @click="printPage">Print</button>
-            <button v-if="can('post') && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
+            <button v-if="can(S.perm) && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="voidDoc(ar.detail)">Void</button>
             <button @click="ar.detail = null">Close</button>
           </span>
@@ -399,7 +399,7 @@
             <tr v-for="c in ar.contacts" :class="{ muted: !c.isActive }">
               <td>{{ c.name }}</td><td>{{ c.email }}</td><td>{{ c.phone }}</td><td>{{ c.termsDays }} days</td><td v-if="S.kind === 'bill'">{{ c.is1099 ? 'yes' : '' }}</td>
               <td class="num">{{ money(c.openCents) }}</td><td class="num" :class="{ bad: c.overdueCents > 0 }">{{ money(c.overdueCents) }}</td>
-              <td class="actions"><template v-if="can('post')">
+              <td class="actions"><template v-if="can(S.perm)">
                 <button class="link" v-if="c.openCents > 0" @click="startPay(c.id)">{{ S.kind === 'invoice' ? 'receive payment' : 'pay' }}</button>
                 <button class="link" v-if="!c.openCents" @click="toggleContactActive(c)">{{ c.isActive ? 'make inactive' : 'make active' }}</button>
               </template></td>
@@ -958,26 +958,60 @@
 
     <!-- SETTINGS -->
     <section v-if="tab === 'settings'">
-      <div class="card narrow">
+      <div class="card" v-if="members.length">
         <h2>People with access</h2>
         <table class="data">
-          <tr v-for="m in members"><td>{{ m.name }}<br><span class="muted">{{ m.email }}</span></td><td>{{ roleLabels[m.role] }}</td>
-            <td><button v-if="can('admin') && m.id !== auth.user.id" class="link" @click="removeMember(m)">remove</button></td></tr>
+          <thead><tr><th>Name</th><th>Role</th><th>Department</th><th></th></tr></thead>
+          <tr v-for="m in members"><td>{{ m.name }}<br><span class="muted">{{ m.email }}</span></td><td>{{ m.roleName }}</td><td>{{ m.departmentName }}</td>
+            <td class="actions"><template v-if="can('admin')"><button class="link" @click="editMember(m)">change</button>
+              <button v-if="m.id !== auth.user.id" class="link" @click="removeMember(m)">remove</button></template></td></tr>
         </table>
         <form v-if="can('admin')" @submit.prevent="addMember">
-          <h3>Add someone</h3>
+          <h3>Add someone, or change their role</h3>
           <p class="hint">They need to create a zAccountant account first.</p>
-          <label>Their email <input type="email" v-model.trim="newMember.email" required></label>
-          <label>Role
-            <select v-model="newMember.role">
-              <option value="accountant">Accountant — everything except settings and people</option>
-              <option value="bookkeeper">Bookkeeper — record transactions, see reports</option>
-              <option value="viewer">Viewer — see reports only</option>
-              <option value="owner">Owner — full control</option>
-            </select>
-          </label>
-          <button class="primary">Add</button>
+          <div class="grid4">
+            <label>Their email <input type="email" v-model.trim="newMember.email" required></label>
+            <label>Role
+              <select v-model="newMember.role">
+                <option v-for="r in roles.presets" :value="r.key">{{ r.label }}</option>
+                <option v-for="r in roles.custom" :value="r.id">{{ r.name }}</option>
+              </select>
+            </label>
+            <label>Department
+              <select v-model="newMember.departmentId"><option value="">None</option><option v-for="d in departments" :value="d.id">{{ d.name }}</option></select>
+            </label>
+          </div>
+          <p class="muted small" v-if="roles.permissions.length">This role can:
+            {{ ((roles.presets.find(r => r.key === newMember.role) || roles.custom.find(r => r.id === newMember.role))?.permissions ?? [])
+              .map(k => roles.permissions.find(p => p.key === k)?.label.toLowerCase()).join('; ') }}.</p>
+          <button class="primary">Save</button>
         </form>
+      </div>
+
+      <div class="card" v-if="can('admin')">
+        <div class="row"><h2>Roles</h2><button @click="newRole">+ New role</button></div>
+        <p class="hint">Five roles are built in. Make your own when someone needs a different mix, for example a project manager who sees reports and approves timesheets but doesn't record transactions.</p>
+        <table class="data">
+          <thead><tr><th>Role</th><th v-for="p in roles.permissions" class="perm-col" :title="p.label">{{ p.key.replace('_', ' ') }}</th><th></th></tr></thead>
+          <tr v-for="r in roles.presets"><td>{{ r.label }}</td><td v-for="p in roles.permissions" class="perm-col">{{ r.permissions.includes(p.key) ? '✓' : '' }}</td><td class="muted small">built in</td></tr>
+          <tr v-for="r in roles.custom"><td>{{ r.name }} <span class="muted small">({{ r.members }})</span></td><td v-for="p in roles.permissions" class="perm-col">{{ r.permissions.includes(p.key) ? '✓' : '' }}</td>
+            <td class="actions"><button class="link" @click="editRole(r)">edit</button> <button class="link" v-if="!r.members" @click="deleteRole(r)">delete</button></td></tr>
+        </table>
+        <form v-if="roleEdit" @submit.prevent="saveRole" class="preview">
+          <label>Role name <input v-model="roleEdit.name" maxlength="40" required></label>
+          <label class="check" v-for="p in roles.permissions"><input type="checkbox" :value="p.key" v-model="roleEdit.permissions"> {{ p.label }}</label>
+          <button class="primary">Save role</button> <button type="button" @click="roleEdit = null">Cancel</button>
+        </form>
+      </div>
+
+      <div class="card narrow" v-if="can('admin') || departments.length">
+        <h2>Departments</h2>
+        <p class="hint">Group people (Accounting, Engineering, Field…). Someone with "approve timesheets" approves the time of people in their own department.</p>
+        <table class="data" v-if="departments.length">
+          <tr v-for="d in departments"><td>{{ d.name }}</td><td class="muted small">{{ d.members }} member{{ d.members === 1 ? '' : 's' }}</td>
+            <td><button v-if="can('admin') && !d.members" class="link" @click="deleteDept(d)">delete</button></td></tr>
+        </table>
+        <form v-if="can('admin')" @submit.prevent="addDept" class="row wrap"><input v-model.trim="newDept" placeholder="Department name" maxlength="60" required class="grow"><button>Add</button></form>
       </div>
       <div class="card narrow" v-if="can('close')">
         <h2>Close the books</h2>

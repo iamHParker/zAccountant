@@ -356,6 +356,58 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     await assert.rejects(db.appPool.query('UPDATE payroll_runs SET gross_cents = 1'), /permission denied/);
   });
 
+  await t.test('staff role, custom roles and departments', async () => {
+    const base = `/api/companies/${co.id}`;
+    const dept = await owner.c.call('POST', `${base}/departments`, { name: 'Engineering' });
+    assert.equal(dept.status, 201, JSON.stringify(dept.body));
+    assert.equal((await owner.c.call('POST', `${base}/departments`, { name: ' engineering ' })).status, 400);
+    const pm = await owner.c.call('POST', `${base}/roles`, { name: 'Project Manager', permissions: ['view_books', 'invoices', 'time_approve'] });
+    assert.equal(pm.status, 201, JSON.stringify(pm.body));
+    assert.equal((await owner.c.call('POST', `${base}/roles`, { name: 'Bookkeeper', permissions: ['post'] })).status, 400, 'built-in name');
+    assert.equal((await owner.c.call('POST', `${base}/roles`, { name: 'Bad', permissions: ['fly'] })).status, 400, 'unknown permission');
+
+    const staff = await newUser('staff@example.com');
+    const add = await owner.c.call('POST', `${base}/members`, { email: 'staff@example.com', role: 'staff', departmentId: dept.body.id });
+    assert.equal(add.status, 201, JSON.stringify(add.body));
+    const me = (await staff.c.call('GET', base)).body;
+    assert.deepEqual(me.permissions, ['invoices', 'time_own']);
+    assert.equal(me.departmentId, dept.body.id);
+    // Staff can make invoices...
+    assert.equal((await staff.c.call('GET', `${base}/accounts`)).status, 200);
+    const cust = await staff.c.call('POST', `${base}/customers`, { name: 'Staff Customer' });
+    assert.equal(cust.status, 201, JSON.stringify(cust.body));
+    const inv = await staff.c.call('POST', `${base}/invoices`, { contactId: cust.body.id, date: '2026-12-15', lines: [{ accountId: A['4100'], amount: '250' }] });
+    assert.equal(inv.status, 201, JSON.stringify(inv.body));
+    assert.equal((await staff.c.call('GET', `${base}/documents/${inv.body.id}`)).status, 200);
+    // ...but can't see the books, bills or payroll, or void.
+    for (const path of ['/reports/trial-balance', '/entries', '/bills', '/vendors', '/employees', '/reports/ap-aging']) {
+      assert.equal((await staff.c.call('GET', base + path)).status, 403, path);
+    }
+    assert.equal((await staff.c.call('POST', `${base}/documents/${inv.body.id}/void`, {})).status, 403);
+    assert.equal((await staff.c.call('POST', `${base}/entries/simple`, { date: '2026-12-15', fromAccountId: A['4000'], toAccountId: A['1000'], amount: '1' })).status, 403);
+    // A vendor's record is off limits even by id.
+    const v = (await owner.c.call('POST', `${base}/vendors`, { name: 'Steel Supplier' })).body;
+    assert.equal((await staff.c.call('PATCH', `${base}/contacts/${v.id}`, { phone: '1' })).status, 403);
+
+    // Custom role: sees the books and invoices, can't post journal entries.
+    const pmUser = await newUser('pm@example.com');
+    assert.equal((await owner.c.call('POST', `${base}/members`, { email: 'pm@example.com', role: pm.body.id })).status, 201);
+    assert.equal((await pmUser.c.call('GET', `${base}/reports/trial-balance`)).status, 200);
+    const denied = await pmUser.c.call('POST', `${base}/entries/simple`, { date: '2026-12-15', fromAccountId: A['4000'], toAccountId: A['1000'], amount: '1' });
+    assert.equal(denied.status, 403);
+    assert.match(denied.body.error, /Project Manager/);
+    const members = (await owner.c.call('GET', `${base}/members`)).body;
+    assert.equal(members.find((m) => m.email === 'pm@example.com').roleName, 'Project Manager');
+    assert.equal(members.find((m) => m.email === 'staff@example.com').departmentName, 'Engineering');
+    // Roles and departments in use can't be deleted; changing a role's checkboxes applies right away.
+    assert.equal((await owner.c.call('DELETE', `${base}/roles/${pm.body.id}`, {})).status, 400);
+    assert.equal((await owner.c.call('DELETE', `${base}/departments/${dept.body.id}`, {})).status, 400);
+    assert.equal((await owner.c.call('PATCH', `${base}/roles/${pm.body.id}`, { name: 'Project Manager', permissions: ['invoices'] })).status, 200);
+    assert.equal((await pmUser.c.call('GET', `${base}/reports/trial-balance`)).status, 403);
+    assert.equal((await staff.c.call('POST', `${base}/roles`, { name: 'Sneaky', permissions: ['admin'] })).status, 403);
+    assert.equal((await staff.c.call('POST', `${base}/members`, { email: 'staff@example.com', role: 'owner' })).status, 403);
+  });
+
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
     const lock = `/api/companies/${co.id}/lock`;
     assert.equal((await owner.c.call('POST', lock, '{"through":null}', { 'content-type': 'text/plain' })).status, 415);
