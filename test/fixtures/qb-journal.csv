@@ -1,0 +1,21 @@
+Journal
+"Parker Engineering, LLC"
+"January 1-31, 2026"
+
+,Date,Transaction Type,Num,Name,Memo/Description,Account,Debit,Credit
+,01/02/2026,Journal Entry,OB1,,Opening balance,Operating Checking,"12,345.67",
+,,,,,Opening balance,Opening Balance Equity,,"12,345.67"
+,,,,,,,"$12,345.67","$12,345.67"
+,01/05/2026,Expense,,Adobe,Monthly plan,Software Subscriptions,54.99,
+,,,,Adobe,,Chase Ink,,54.99
+,,,,,,,$54.99,$54.99
+,01/10/2026,Invoice,1001,Smith Residence,Foundation design,Accounts Receivable (A/R),"4,500.00",
+,,,,Smith Residence,Foundation design,Engineering Fees,,"4,500.00"
+,,,,,,,"$4,500.00","$4,500.00"
+,01/20/2026,Payment,,Smith Residence,,Undeposited Funds,"4,500.00",
+,,,,Smith Residence,,Accounts Receivable (A/R),,"4,500.00"
+,01/21/2026,Deposit,,,,Operating Checking,"4,500.00",
+,,,,,,Undeposited Funds,,"4,500.00"
+,01/25/2026,Bill,,Austin Energy,,Utilities:Electric,212.18,
+,,,,Austin Energy,,Accounts Payable (A/P),,212.18
+TOTAL,,,,,,,"$26,112.84","$26,112.84"

@@ -1,0 +1,5 @@
+Entry,Date,Memo,Account,Debit,Credit
+1,01/15/2026,January rent,6300 Rent,1800.00,
+1,01/15/2026,January rent,1000 Checking,,1800.00
+2,01/31/2026,Invoice 1001 - Smith residence foundation design,1100 Accounts Receivable,4500.00,
+2,01/31/2026,Invoice 1001 - Smith residence foundation design,4100 Service Revenue,,4500.00

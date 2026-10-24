@@ -15,6 +15,7 @@ import * as reports from './services/reportService.js';
 import * as payroll from './services/payrollService.js';
 import * as auth from './services/authService.js';
 import * as bank from './services/bankService.js';
+import * as imports from './services/importService.js';
 import { AuthError } from './services/authService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
@@ -94,6 +95,7 @@ export function createApp(pool) {
   });
   // Bank statement files can be a few MB; everything else is small.
   app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '6mb' }));
+  app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
     res.set({
@@ -178,7 +180,7 @@ export function createApp(pool) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -289,6 +291,14 @@ export function createApp(pool) {
   api.post(`${R}/lines`, route('post', ({ db, req, companyId }) => bank.setCleared(db, companyId, req.params.reconId, { lineIds: req.body?.lineIds, cleared: req.body?.cleared !== false })));
   api.post(`${R}/complete`, route('post', ({ db, req, companyId, actor }) => bank.completeReconciliation(db, companyId, req.params.reconId, { actor })));
   api.delete(R, route('post', ({ db, req, companyId }) => bank.cancelReconciliation(db, companyId, req.params.reconId)));
+
+  // Importing books (QuickBooks / spreadsheets). Accountant-level: it can change many periods at once.
+  const importOpts = (req, actor) => ({ kind: req.body?.kind, asOf: req.body?.asOf, actor,
+    file: { fileName: req.body?.fileName, content: req.body?.content, base64: req.body?.base64 ?? null } });
+  api.post('/companies/:companyId/imports/preview', route('accounts', ({ db, req, companyId, actor }) => imports.previewImport(db, companyId, importOpts(req, actor))));
+  api.post('/companies/:companyId/imports', route('accounts', ({ db, req, companyId, actor }) => imports.commitImport(db, companyId, importOpts(req, actor)), 201));
+  api.get('/companies/:companyId/imports', route('read', ({ db, companyId }) => imports.listImports(db, companyId)));
+  api.post('/companies/:companyId/imports/:batchId/undo', route('accounts', ({ db, req, companyId, actor }) => imports.undoImport(db, companyId, req.params.batchId, { actor })));
 
   // Reports
   api.get('/companies/:companyId/reports/dashboard', route('read', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));

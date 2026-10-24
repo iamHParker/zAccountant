@@ -1,0 +1,14 @@
+Account List
+"Parker Engineering, LLC"
+
+Account,Type,Detail Type,Description,Balance,Account #
+Operating Checking,Bank,Checking,,"12,345.67",1010
+Accounts Receivable (A/R),Accounts Receivable,Accounts Receivable (A/R),,"8,000.00",
+Undeposited Funds,Other Current Asset,Undeposited Funds,,0.00,
+Truck,Fixed Asset,Vehicles,,"35,000.00",1550
+Accounts Payable (A/P),Accounts Payable,Accounts Payable (A/P),,"-2,000.00",
+Chase Ink,Credit Card,Credit Card,,-512.40,2110
+Opening Balance Equity,Equity,Opening Balance Equity,,0.00,
+Engineering Fees,Income,Service/Fee Income,,,4110
+Software Subscriptions,Expense,Office/General Administrative Expenses,,,6610
+Utilities:Electric,Expense,Utilities,,,6355
