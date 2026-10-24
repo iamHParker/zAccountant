@@ -41,10 +41,11 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(s.body.next, 'mfa_setup');
     const setup = await c.call('POST', '/api/auth/mfa/setup', {});
     assert.match(setup.body.otpauthUri, /^otpauth:\/\/totp\//);
-    const en = await c.call('POST', '/api/auth/mfa/enable', { code: code(setup.body.secret) });
+    const enabledAt = Date.now();
+    const en = await c.call('POST', '/api/auth/mfa/enable', { code: totpCode(setup.body.secret, enabledAt) });
     assert.equal(en.status, 200, JSON.stringify(en.body));
     assert.equal(en.body.recoveryCodes.length, 8);
-    return { c, secret: setup.body.secret, recoveryCodes: en.body.recoveryCodes };
+    return { c, secret: setup.body.secret, recoveryCodes: en.body.recoveryCodes, enabledAt };
   }
 
   const owner = await newUser('owner@example.com');
@@ -68,9 +69,10 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const l = await c.call('POST', '/api/auth/login', { email: 'OWNER@example.com', password: 'a long enough passphrase' });
     assert.equal(l.body.next, 'mfa_verify');
     assert.equal((await c.call('GET', '/api/companies')).status, 401);
-    // The code used to enable 2FA (current window) was already used → rejected; next window works.
-    assert.equal((await c.call('POST', '/api/auth/mfa/verify', { code: code(owner.secret) })).status, 401);
-    assert.equal((await c.call('POST', '/api/auth/mfa/verify', { code: code(owner.secret, 1) })).status, 200);
+    // The code used to enable 2FA was already used → rejected; the next 30-second window works.
+    // (Codes are taken from the enable time, not "now", so a window boundary can't make this flaky.)
+    assert.equal((await c.call('POST', '/api/auth/mfa/verify', { code: totpCode(owner.secret, owner.enabledAt) })).status, 401);
+    assert.equal((await c.call('POST', '/api/auth/mfa/verify', { code: totpCode(owner.secret, owner.enabledAt + 30_000) })).status, 200);
     assert.equal((await c.call('GET', '/api/companies')).body.length, 1);
     // Recovery codes work once
     const c2 = client();
