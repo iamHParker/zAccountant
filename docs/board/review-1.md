@@ -63,11 +63,11 @@
 | 4 | Major | CO ignored federal-exempt W-4 | **Fixed.** |
 | 5 | Major | FAMLI small-employer test used active employee count | **Fixed.** Employer enters the FAMLI headcount; if unknown, the employer share is charged. |
 | 6 | Major | Pre-2020 W-4 refused | **Fixed.** Worksheet 1A lines 1j–1l ($4,300/allowance, STANDARD table, no HoH). |
-| 7 | Major | Overtime premium not tracked | **Fixed.** 0.5× premium stored on each paycheck for year-end reporting. CA daily overtime (wage-hour rule) backlog. |
-| 8 | Minor | CA annualized vs DE 44 per-period tables differ by 1–2¢ in some cases | **Open.** Sprint 6: use per-period method or document. |
+| 7 | Major | Overtime premium not tracked | **Fixed.** 0.5× premium stored on each paycheck for year-end reporting. CA daily overtime: **fixed in Sprint 6** (timesheets split regular / 1.5× / 2× by the federal weekly and California daily and 7th-day rules; double time is paid at 2×). |
+| 8 | Minor | CA annualized vs DE 44 per-period tables differ by 1–2¢ in some cases | **Fixed (Sprint 6).** Weekly, biweekly, semimonthly and monthly payrolls now use the DE 44 per-period tables (Tables 1–4 and 17–28, transcription checked by re-deriving every "plus" amount); DE 44 Examples A–D reproduced exactly, E–F via the annualized method used for other periods. |
 | 9 | Minor | Step 2 checkbox thresholds differed by 1–2¢ | **Fixed.** Engine now uses the official Pub 15-T annual tables exactly as printed (with a test proving the STANDARD table agrees with the 2026 brackets). |
-| 10 | Minor | W-4 exempt status expiry (Feb 15) and DR 0004 cancellation rules | Backlog (Sprint 6). |
-| 11 | Suggestion | Accrue CA FUTA credit reduction during the year | Backlog (Sprint 6). |
+| 10 | Minor | W-4 exempt status expiry (Feb 15) and DR 0004 cancellation rules | **Fixed (Sprint 6).** An exempt W-4 or DE 4 records the year it covers and lapses after Feb 15 of the next year (federal: Single, no adjustments; CA: Single, zero allowances), with a warning. Colorado follows the effective W-4. |
+| 11 | Suggestion | Accrue CA FUTA credit reduction during the year | **Done (Sprint 6).** Owner enters the expected rate per state; each paycheck accrues it as a separate FUTA line (Form 940). Announced rates can also go in the year's tables. |
 | 12 | Suggestion | YTD from last snapshot | **Fixed** (see B2). |
 
 ## Values verified against official sources

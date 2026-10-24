@@ -129,11 +129,11 @@ async function compute(db, companyId, employeeId, input) {
     gross += dtPay;
   }
   const result = calculatePaycheck({
-    year, payFrequency: emp.payFrequency, grossCents: gross,
+    year, payFrequency: emp.payFrequency, grossCents: gross, payDate: input.payDate,
     preTaxDeductions: input.preTaxDeductions ?? [],
     employee: { workState: emp.workState, w4: emp.w4, stateElections: emp.stateElections },
     ytd,
-    company: { suiRatePct: company.sui_rate_pct ?? undefined, famliHeadcount: company.famli_headcount },
+    company: { suiRatePct: company.sui_rate_pct ?? undefined, famliHeadcount: company.famli_headcount, futaCreditReductionPct: company.futa_credit_reduction ?? {} },
   });
   result.overtime = overtime;
   result.doubleTime = doubleTime;
@@ -232,8 +232,11 @@ export async function voidPaycheck(pool, companyId, paycheckId, { date, reason, 
       `INSERT INTO paychecks (company_id, employee_id, pay_date, tax_year, gross_cents, net_pay_cents, calculation, tables_verified, journal_entry_id, voids_paycheck_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [companyId, pc.employee_id, voidDate, pc.tax_year, -pc.gross_cents, -pc.net_pay_cents, JSON.stringify(voidCalc), pc.tables_verified, je.id, pc.id]);
-    await appendAudit(c, companyId, { action: 'void', entity: 'paycheck', entityId: pc.id, actor, payload: { voidRecordId: v.id, reason: reason.trim(), journalEntryId: je.id } });
-    return { voidRecordId: v.id, journalEntryId: je.id, entryNumber: je.entry_number };
+    // Timesheet hours this paycheck paid become unpaid again, so the next payroll run picks them up.
+    const { rowCount: reopened } = await c.query(
+      'UPDATE time_entries SET paid_run_id = NULL, paid_paycheck_id = NULL, updated_at = now() WHERE company_id = $1 AND paid_paycheck_id = $2', [companyId, pc.id]);
+    await appendAudit(c, companyId, { action: 'void', entity: 'paycheck', entityId: pc.id, actor, payload: { voidRecordId: v.id, reason: reason.trim(), journalEntryId: je.id, timeEntriesReopened: reopened } });
+    return { voidRecordId: v.id, journalEntryId: je.id, entryNumber: je.entry_number, timeEntriesReopened: reopened };
   });
 }
 
@@ -327,17 +330,18 @@ export async function postRun(pool, companyId, opts, { actor = null } = {}) {
       [companyId, opts.payFrequency, opts.periodStart, opts.periodEnd, opts.payDate, opts.paidFromAccountId || null, t.paycheckCount, t.grossCents, t.netPayCents,
         t.employeeTaxCents, t.employerTaxCents, t.deductionCents, key, actor]);
     const members = await runMembers(c, companyId, opts);
-    for (const m of members) await postPaycheck(c, companyId, m.emp.id, { ...m.input, runId: run.id }, { actor });
-    // Hours that came from approved timesheets are marked paid by this run, so they can't be paid twice.
+    // Hours that came from approved timesheets (this period, plus earlier ones approved late or
+    // reopened by a void) are marked paid by this run's paycheck, so they can't be paid twice.
     let timeEntriesPaid = 0;
-    if (opts.fromTimesheets === true) {
-      const { rowCount } = await c.query(
-        `UPDATE time_entries t SET paid_run_id = $2, updated_at = now()
-           FROM employees e
-          WHERE t.company_id = $1 AND e.company_id = $1 AND e.user_id = t.user_id AND e.id = ANY($3::uuid[])
-            AND t.status = 'approved' AND t.paid_run_id IS NULL AND t.work_date BETWEEN $4 AND $5`,
-        [companyId, run.id, members.map((m) => m.emp.id), opts.periodStart, opts.periodEnd]);
-      timeEntriesPaid = rowCount;
+    for (const m of members) {
+      const pc = await postPaycheck(c, companyId, m.emp.id, { ...m.input, runId: run.id }, { actor });
+      if (opts.fromTimesheets === true && m.emp.userId) {
+        const { rowCount } = await c.query(
+          `UPDATE time_entries SET paid_run_id = $2, paid_paycheck_id = $3, updated_at = now()
+            WHERE company_id = $1 AND user_id = $4 AND status = 'approved' AND paid_run_id IS NULL AND work_date <= $5`,
+          [companyId, run.id, pc.paycheckId, m.emp.userId, opts.periodEnd]);
+        timeEntriesPaid += rowCount;
+      }
     }
     await appendAudit(c, companyId, { action: 'create', entity: 'payroll_run', entityId: run.id, actor,
       payload: { payFrequency: opts.payFrequency, periodStart: opts.periodStart, periodEnd: opts.periodEnd, payDate: opts.payDate, ...t, timeEntriesPaid } });
@@ -431,7 +435,7 @@ export async function getPayStub(db, companyId, paycheckId) {
 // Which return / deposit each tax belongs to, so the owner knows what to pay where.
 const AGENCY = (code, state) => {
   if (['FIT', 'SS', 'SS_ER', 'MED', 'MED_ER', 'MED_ADDL'].includes(code)) return { agency: 'IRS', form: 'Form 941 (federal deposit)' };
-  if (code === 'FUTA') return { agency: 'IRS', form: 'Form 940 (FUTA)' };
+  if (code === 'FUTA' || code === 'FUTA_CR') return { agency: 'IRS', form: 'Form 940 (FUTA)' };
   const s = code.slice(0, 2);
   const names = { CA: 'California EDD', CO: 'Colorado', DC: 'District of Columbia', TX: 'Texas Workforce Commission' };
   if (code === 'CO_PIT') return { agency: 'Colorado Dept. of Revenue', form: 'CO wage withholding' };

@@ -209,8 +209,8 @@ export function createApp(pool) {
     ...(await ledger.getCompany(db, companyId)), role: access.role, roleName: access.roleName, permissions: [...access.permissions], departmentId: access.departmentId,
   })));
   api.patch('/companies/:companyId/settings', route('admin', ({ db, req, companyId, actor }) => {
-    const { suiRatePct, calculateOnlyPayroll, famliHeadcount } = req.body ?? {};
-    return ledger.updateCompanySettings(db, companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount, actor });
+    const { suiRatePct, calculateOnlyPayroll, famliHeadcount, futaCreditReduction } = req.body ?? {};
+    return ledger.updateCompanySettings(db, companyId, { suiRatePct, calculateOnlyPayroll, famliHeadcount, futaCreditReduction, actor });
   }));
   api.post('/companies/:companyId/lock', route('close', async ({ db, req, companyId, role, actor }) => {
     const through = req.body?.through ?? null;
