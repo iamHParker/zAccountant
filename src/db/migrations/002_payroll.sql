@@ -28,8 +28,8 @@ CREATE TABLE paychecks (
   calculation       jsonb NOT NULL,          -- full engine output, for audit & pay stub
   tables_verified   boolean NOT NULL,
   journal_entry_id  uuid NOT NULL,
-  voids_paycheck_id uuid,
-  idempotency_key   text,                    -- client-supplied; a repeated request returns the same paycheck                    -- set on a void row: negative amounts that cancel the original
+  voids_paycheck_id uuid,                    -- set on a void row: negative amounts that cancel the original
+  idempotency_key   text,                    -- client-supplied; a repeated request returns the same paycheck
   created_at        timestamptz NOT NULL DEFAULT now(),
   UNIQUE (company_id, id),
   UNIQUE (company_id, idempotency_key),
