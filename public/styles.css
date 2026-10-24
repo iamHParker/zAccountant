@@ -81,3 +81,6 @@ tr.clickable { cursor: pointer; }
 details { margin: 8px 0; }
 details table { margin-top: 6px; }
 .problems ul { max-height: 240px; overflow: auto; }
+td.w90, th.w90 { width: 90px; } td.w120 { width: 120px; } th.w150 { width: 150px; }
+input.auto-w { width: auto; display: inline-block; }
+input.num { text-align: right; }

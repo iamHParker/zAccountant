@@ -125,6 +125,10 @@ async function findByIdempotencyKey(c, companyId, key) {
   return { ...je, lines, replayed: true };
 }
 
+const CONTROL_KEYS = { accounts_receivable: 'Accounts Receivable changes through invoices and customer payments (Sales tab)', accounts_payable: 'Accounts Payable changes through bills and bill payments (Bills tab)' };
+const DOCUMENT_SOURCES_OK = ['invoice', 'bill', 'payment', 'reversal', 'import', 'system'];
+const controlMessage = (accts) => CONTROL_KEYS[accts.find((a) => CONTROL_KEYS[a.system_key]).system_key];
+
 async function insertEntry(c, companyId, entry, { source = 'manual', sourceRef = null, reversesEntryId = null, actor = null, idempotencyKey = null }) {
   const company = await lockCompany(c, companyId);
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
@@ -144,6 +148,11 @@ async function insertEntry(c, companyId, entry, { source = 'manual', sourceRef =
   // (prior-period adjustments) are an accountant-level action, not allowed from normal entry screens.
   if (accts.some((a) => a.system_key === 'retained_earnings') && !['reversal', 'import', 'system'].includes(source)) {
     throw new LedgerError('Journal entry is not valid', ['Retained Earnings is calculated automatically; ask your accountant about prior-period adjustments']);
+  }
+  // Accounts Receivable / Payable are kept by invoices, bills and payments, so the customer and vendor
+  // balances always add up to them. Ordinary entry screens can't post to them directly.
+  if (accts.some((a) => CONTROL_KEYS[a.system_key]) && !DOCUMENT_SOURCES_OK.includes(source)) {
+    throw new LedgerError('Journal entry is not valid', [controlMessage(accts)]);
   }
   if (company.locked_through && entry.date <= company.locked_through) {
     throw new LedgerError('Journal entry is not valid', [`books are closed through ${company.locked_through}`]);
@@ -182,7 +191,7 @@ export async function postSimple(pool, companyId, tx, opts = {}) {
 /** Exposed so other services (payroll) can post inside their own transaction. */
 export { insertEntry };
 
-export async function reverseEntry(pool, companyId, entryId, { date, memo, actor = null, idempotencyKey = null } = {}) {
+export async function reverseEntry(pool, companyId, entryId, { date, memo, actor = null, idempotencyKey = null, fromDocument = false } = {}) {
   return withTransaction(pool, async (c) => {
     const co = await lockCompany(c, companyId);
     const existing = await findByIdempotencyKey(c, companyId, cleanIdempotencyKey(idempotencyKey));
@@ -191,6 +200,7 @@ export async function reverseEntry(pool, companyId, entryId, { date, memo, actor
     if (!orig) throw new LedgerError('Journal entry not found');
     if (orig.reverses_entry_id) throw new LedgerError('Journal entry is not valid', ['a reversing entry cannot itself be reversed; post a new entry']);
     if (orig.source === 'payroll') throw new LedgerError('Journal entry is not valid', ['this is a paycheck; void the paycheck instead so year-to-date wages stay correct']);
+    if (DOCUMENT_ENTRY[orig.source] && !fromDocument) throw new LedgerError('Journal entry is not valid', [`this entry belongs to ${DOCUMENT_ENTRY[orig.source]}; void it there so balances stay correct`]);
     const { rows: [already] } = await c.query('SELECT entry_number FROM journal_entries WHERE company_id = $1 AND reverses_entry_id = $2', [companyId, entryId]);
     if (already) throw new LedgerError('Journal entry is not valid', [`already reversed by entry #${already.entry_number}`]);
     const { rows: lines } = await c.query(
@@ -211,7 +221,8 @@ export async function reverseEntry(pool, companyId, entryId, { date, memo, actor
   });
 }
 
-const SOURCES = ['manual', 'simple', 'payroll', 'import', 'reversal', 'bank', 'recurring', 'system'];
+const DOCUMENT_ENTRY = { invoice: 'an invoice (Sales tab)', bill: 'a bill (Bills tab)', payment: 'a payment (Sales or Bills tab)' };
+const SOURCES = ['manual', 'simple', 'payroll', 'import', 'reversal', 'bank', 'recurring', 'system', 'invoice', 'bill', 'payment'];
 
 /**
  * Journal search. All filters are optional and combine with AND:
@@ -302,6 +313,7 @@ export async function createRecurring(pool, companyId, { name, frequency, startD
         WHERE company_id = $1 AND id = ANY(SELECT x::uuid FROM unnest($2::text[]) x WHERE x ~* '^[0-9a-f-]{36}$')`, [companyId, ids]);
     if (accts.length !== ids.length || accts.some((a) => !a.is_active)) throw new LedgerError('Recurring entry is not valid', ['every line needs an active account of this company']);
     if (accts.some((a) => a.system_key === 'retained_earnings')) throw new LedgerError('Recurring entry is not valid', ['Retained Earnings is calculated automatically']);
+    if (accts.some((a) => CONTROL_KEYS[a.system_key])) throw new LedgerError('Recurring entry is not valid', [controlMessage(accts)]);
     const { rows: [r] } = await c.query(
       `INSERT INTO recurring_entries (company_id, name, frequency, start_date, end_date, memo, lines, next_date, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$4,$8) RETURNING *`,

@@ -17,7 +17,7 @@ export const DEFAULT_CHART = Object.freeze([
   // Liabilities 2000-2999
   { code: '2000', name: 'Accounts Payable', type: 'liability', subtype: 'payable', cashFlow: 'operating', key: 'accounts_payable' },
   { code: '2100', name: 'Credit Card', type: 'liability', subtype: 'credit_card', cashFlow: 'operating' },
-  { code: '2200', name: 'Sales Tax Payable', type: 'liability', subtype: 'current', cashFlow: 'operating' },
+  { code: '2200', name: 'Sales Tax Payable', type: 'liability', subtype: 'current', cashFlow: 'operating', key: 'sales_tax_payable' },
   { code: '2300', name: 'Net Pay Payable', type: 'liability', subtype: 'payroll', cashFlow: 'operating', key: 'net_pay_payable' },
   { code: '2310', name: 'Federal Income Tax Withheld', type: 'liability', subtype: 'payroll', cashFlow: 'operating', key: 'fit_payable' },
   { code: '2320', name: 'Social Security & Medicare Payable', type: 'liability', subtype: 'payroll', cashFlow: 'operating', key: 'fica_payable' },

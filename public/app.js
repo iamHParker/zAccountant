@@ -20,6 +20,34 @@ function cents(v) {
   return Number(m[1].replace(/,/g, '') || 0) * 100 + Number((m[2] ?? '').padEnd(2, '0'));
 }
 
+/** Quantity × price → cents, rounded half-up exactly like the server (BigInt, no floating point). */
+function lineCents(qty, price) {
+  const p = cents(price);
+  const m = /^(\d{1,9})(?:\.(\d{1,4}))?$/.exec(String(qty || '1').trim());
+  if (p == null || !m) return null;
+  const n = (BigInt(m[1]) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0'))) * BigInt(p);
+  return Number((n * 2n + 10000n) / 20000n);
+}
+/** Sales tax on taxable cents at a percent like "8.25", half-up. */
+function taxCents(taxable, pct) {
+  const m = /^(\d+)(?:\.(\d{0,4}))?$/.exec(String(pct ?? '').trim());
+  if (!m) return 0;
+  const ppm = BigInt(m[1]) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0'));
+  return Number((BigInt(taxable) * ppm * 2n + 1000000n) / 2000000n);
+}
+
+// Sales (invoices to customers) and Bills (from vendors) share one screen; these are the differences.
+const SIDES = {
+  sales: { kind: 'invoice', Doc: 'Invoice', docs: 'Invoices', who: 'customer', Who: 'Customer', Whos: 'Customers', contacts: 'customers', docPath: 'invoices',
+    payPath: 'payments-received', agingPath: 'ar-aging', payVerb: 'Receive payment', control: 'Accounts Receivable', lineHint: 'Income account' },
+  bills: { kind: 'bill', Doc: 'Bill', docs: 'Bills', who: 'vendor', Who: 'Vendor', Whos: 'Vendors', contacts: 'vendors', docPath: 'bills',
+    payPath: 'payments-made', agingPath: 'ap-aging', payVerb: 'Pay bills', control: 'Accounts Payable', lineHint: 'Expense account' },
+};
+const blankLine = () => ({ accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
+const blankDoc = () => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', taxRate: '', lines: [blankLine()], key: newKey() });
+const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false });
+const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', open: [], amounts: {}, key: newKey() });
+
 let onSignInNeeded = () => {};
 
 async function api(method, url, body, headers = {}) {
@@ -59,7 +87,8 @@ createApp({
       roleLabels: { owner: 'Owner', accountant: 'Accountant', bookkeeper: 'Bookkeeper', viewer: 'Viewer (read only)' },
       months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       tabs: [
-        { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'bank', label: 'Banking' }, { id: 'reports', label: 'Reports' },
+        { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'sales', label: 'Sales' }, { id: 'bills', label: 'Bills' }, { id: 'bank', label: 'Banking' },
+        { id: 'reports', label: 'Reports' },
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
       typeLabel: { asset: 'Asset', liability: 'Liability', equity: 'Equity', revenue: 'Income', expense: 'Expense' },
@@ -91,11 +120,28 @@ createApp({
         { id: 'journal', label: 'Transactions (journal)', template: 'journal-entries.csv', help: 'QuickBooks: Reports → Journal for the date range → Export to CSV. Or fill in our template (one row per line; rows with the same Entry number form one entry).' },
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
+      ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null,
+        showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay() },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
   },
   computed: {
+    S() { return SIDES[this.tab] ?? SIDES.sales; },
+    docLineAccounts() {
+      const income = this.S.kind === 'invoice';
+      return this.accounts.filter((a) => a.isActive && a.cashFlow !== 'cash' && !['accounts_receivable', 'accounts_payable', 'retained_earnings', 'sales_tax_payable'].includes(a.key)
+        && (income ? a.type === 'revenue' || a.type === 'liability' : a.type !== 'revenue'));
+    },
+    payAccounts() { return this.accounts.filter((a) => a.isActive && (a.cashFlow === 'cash' || (this.S.kind === 'bill' && a.subtype === 'credit_card'))); },
+    docTotals() {
+      const d = this.ar.doc;
+      let sub = 0; let taxable = 0;
+      for (const l of d.lines) { const c = lineCents(l.quantity, l.unitPrice) ?? 0; sub += c; if (l.taxable) taxable += c; }
+      const tax = this.S.kind === 'invoice' && d.taxRate ? taxCents(taxable, d.taxRate) : 0;
+      return { sub, tax, total: sub + tax };
+    },
+    payTotal() { return Object.values(this.ar.pay.amounts).reduce((s, v) => s + (cents(v) ?? 0), 0); },
     bankAccounts() { return this.accounts.filter((a) => a.cashFlow === 'cash'); },
     bankLike() { return this.accounts.filter((a) => a.cashFlow === 'cash' || a.subtype === 'credit_card'); },
     categoryChoices() { return this.accounts.filter((a) => a.id !== this.bank.accountId && a.isActive && a.key !== 'retained_earnings'); },
@@ -121,6 +167,7 @@ createApp({
       if (t === 'settings') { this.loadMembers(); this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'bank') this.loadBank();
+      if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
       if (t === 'accounts') this.loadImports();
     },
     'quick.kind'() { this.quick.other = ''; },
@@ -391,6 +438,68 @@ createApp({
       const open = b.recons.find((r) => r.status === 'open');
       b.recon = open ? await this.run(() => api('GET', `/companies/${this.companyId}/reconciliations/${open.id}`)) : null;
     },
+    lineCents,
+    // ---------------------------------------------------------------- Sales & Bills
+    arBase() { return `/companies/${this.companyId}`; },
+    async loadAr() {
+      const ar = this.ar; const S = this.S; const base = this.arBase();
+      ar.contacts = (await this.run(() => api('GET', `${base}/${S.contacts}`))) ?? [];
+      if (ar.panel === 'docs') ar.docs = (await this.run(() => api('GET', `${base}/${S.docPath}?status=${ar.view}`))) ?? [];
+      if (ar.panel === 'payments') ar.payments = (await this.run(() => api('GET', `${base}/${S.payPath}`))) ?? [];
+      if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
+    },
+    arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.loadAr(); },
+    async saveContact() {
+      const r = await this.run(() => api('POST', `${this.arBase()}/${this.S.contacts}`, { ...this.ar.contact }), `${this.S.Who} added.`);
+      if (!r) return;
+      this.ar.contact = blankContact(); this.ar.showContact = false;
+      if (this.ar.showDoc && !this.ar.doc.contactId) this.ar.doc.contactId = r.id;
+      this.loadAr();
+    },
+    async toggleContactActive(c) {
+      if (await this.run(() => api('PATCH', `${this.arBase()}/contacts/${c.id}`, { isActive: !c.isActive }))) this.loadAr();
+    },
+    newDoc() { this.ar.doc = blankDoc(); this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null; },
+    async saveDoc() {
+      const d = this.ar.doc;
+      const lines = d.lines.filter((l) => l.accountId || l.unitPrice).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1', unitPrice: l.unitPrice, taxable: l.taxable }));
+      const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo, taxRate: d.taxRate || undefined, lines };
+      const r = await this.run(() => api('POST', `${this.arBase()}/${this.S.docPath}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} saved.`);
+      if (!r) return;
+      this.ar.showDoc = false; this.ar.doc = blankDoc(); this.ar.panel = 'docs'; this.ar.view = 'open';
+      await this.loadAr();
+      this.ar.detail = r;
+    },
+    async openDoc(d) { this.ar.detail = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
+    async voidDoc(d) {
+      if (!confirm(`Void ${this.S.Doc.toLowerCase()} ${d.number}? Its entry is reversed; this can't be undone.`)) return;
+      const r = await this.run(() => api('POST', `${this.arBase()}/documents/${d.id}/void`, {}), `${this.S.Doc} ${d.number} voided.`);
+      if (r) { if (this.ar.detail?.id === d.id) this.ar.detail = r; this.loadAr(); }
+    },
+    async startPay(contactId = '') {
+      this.ar.pay = blankPay(); this.ar.pay.accountId = this.payAccounts[0]?.id ?? '';
+      this.ar.showPay = true; this.ar.showDoc = false; this.ar.detail = null;
+      if (contactId) { this.ar.pay.contactId = contactId; await this.loadPayDocs(); }
+    },
+    async loadPayDocs() {
+      const p = this.ar.pay;
+      p.open = p.contactId ? ((await this.run(() => api('GET', `${this.arBase()}/${this.S.docPath}?status=open&contactId=${p.contactId}`))) ?? []).reverse() : [];
+      p.amounts = {};
+    },
+    payInFull() { for (const d of this.ar.pay.open) this.ar.pay.amounts[d.id] = (d.balanceCents / 100).toFixed(2); },
+    async savePay() {
+      const p = this.ar.pay;
+      const applications = p.open.filter((d) => cents(p.amounts[d.id]) > 0).map((d) => ({ documentId: d.id, amount: p.amounts[d.id] }));
+      const body = { contactId: p.contactId, date: p.date, accountId: p.accountId, method: p.method, reference: p.reference, memo: p.memo, applications };
+      const r = await this.run(() => api('POST', `${this.arBase()}/${this.S.payPath}`, body, { 'Idempotency-Key': p.key }), `Payment of ${money(this.payTotal)} recorded.`);
+      if (!r) return;
+      this.ar.showPay = false; this.ar.pay = blankPay(); this.loadAr();
+    },
+    async voidPay(p) {
+      if (!confirm(`Void this ${money(p.amountCents)} payment (for example, a bounced check)? The ${this.S.docs.toLowerCase()} it paid become open again.`)) return;
+      if (await this.run(() => api('POST', `${this.arBase()}/payments/${p.id}/void`, {}), 'Payment voided.')) this.loadAr();
+    },
+    statusLabel(s) { return { open: 'Open', partial: 'Partly paid', overdue: 'Overdue', paid: 'Paid', void: 'Void' }[s] ?? s; },
     acctName(id) { const a = this.accounts.find((x) => x.id === id); return a ? `${a.code} · ${a.name}` : ''; },
     async pickStatement(ev) {
       const f = ev.target.files[0];

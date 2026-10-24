@@ -299,6 +299,40 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal((await bk.c.call('POST', `/api/companies/${co.id}/imports/preview`, body)).status, 403);
   });
 
+  await t.test('invoices, payments and aging through the restricted role', async () => {
+    const base = `/api/companies/${co.id}`;
+    const cust = await owner.c.call('POST', `${base}/customers`, { name: 'Front Range Builders', termsDays: 30 });
+    assert.equal(cust.status, 201, JSON.stringify(cust.body));
+    const inv = { contactId: cust.body.id, date: '2026-12-02', taxRate: '2.9', lines: [{ accountId: A['4000'], description: 'Beam calc', amount: '1000', taxable: true }] };
+    const i1 = await owner.c.call('POST', `${base}/invoices`, inv, { 'Idempotency-Key': 'api-inv-000001' });
+    assert.equal(i1.status, 201, JSON.stringify(i1.body));
+    assert.equal(i1.body.totalCents, 102900);
+    const again = await owner.c.call('POST', `${base}/invoices`, inv, { 'Idempotency-Key': 'api-inv-000001' });
+    assert.equal(again.body.id, i1.body.id);
+    assert.equal((await owner.c.call('GET', `${base}/invoices`)).body.length, 1);
+    const pay = await owner.c.call('POST', `${base}/payments-received`, { contactId: cust.body.id, date: '2026-12-10', accountId: A['1000'], method: 'ach',
+      applications: [{ documentId: i1.body.id, amount: '1029.00' }] });
+    assert.equal(pay.status, 201, JSON.stringify(pay.body));
+    const doc = (await owner.c.call('GET', `${base}/documents/${i1.body.id}`)).body;
+    assert.equal(doc.status, 'paid');
+    const over = await owner.c.call('POST', `${base}/payments-received`, { contactId: cust.body.id, date: '2026-12-11', accountId: A['1000'], applications: [{ documentId: i1.body.id, amount: '1' }] });
+    assert.equal(over.status, 400);
+    assert.match(over.body.error, /more than its balance/);
+    const v = await owner.c.call('POST', `${base}/payments/${pay.body.id}/void`, {});
+    assert.equal(v.status, 200, JSON.stringify(v.body));
+    const aging = (await owner.c.call('GET', `${base}/reports/ar-aging?asOf=2026-12-31`)).body;
+    assert.equal(aging.totals.totalCents, 102900);
+    assert.equal(aging.ties, true);
+    const direct = await owner.c.call('POST', `${base}/entries/simple`, { date: '2026-12-12', fromAccountId: A['1100'], toAccountId: A['1000'], amount: '5' });
+    assert.equal(direct.status, 400);
+    assert.match(direct.body.error, /Sales tab/);
+    // The runtime role can't rewrite a saved invoice's amounts, even with raw SQL.
+    await assert.rejects(db.appPool.query('UPDATE documents SET total_cents = 1'), /permission denied/);
+    await assert.rejects(db.appPool.query('DELETE FROM payment_applications'), /permission denied/);
+    const outsider = await newUser('ar-outsider@example.com');
+    assert.equal((await outsider.c.call('GET', `${base}/invoices`)).status, 404);
+  });
+
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
     const lock = `/api/companies/${co.id}/lock`;
     assert.equal((await owner.c.call('POST', lock, '{"through":null}', { 'content-type': 'text/plain' })).status, 415);

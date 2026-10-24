@@ -16,6 +16,7 @@ import * as payroll from './services/payrollService.js';
 import * as auth from './services/authService.js';
 import * as bank from './services/bankService.js';
 import * as imports from './services/importService.js';
+import * as arap from './services/arapService.js';
 import { AuthError } from './services/authService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
@@ -180,7 +181,7 @@ export function createApp(pool) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -291,6 +292,37 @@ export function createApp(pool) {
   api.post(`${R}/lines`, route('post', ({ db, req, companyId }) => bank.setCleared(db, companyId, req.params.reconId, { lineIds: req.body?.lineIds, cleared: req.body?.cleared !== false })));
   api.post(`${R}/complete`, route('post', ({ db, req, companyId, actor }) => bank.completeReconciliation(db, companyId, req.params.reconId, { actor })));
   api.delete(R, route('post', ({ db, req, companyId }) => bank.cancelReconciliation(db, companyId, req.params.reconId)));
+
+  // Customers & invoices, vendors & bills, payments (accounts receivable / payable)
+  for (const [path, kind] of [['customers', 'customer'], ['vendors', 'vendor']]) {
+    api.get(`/companies/:companyId/${path}`, route('read', ({ db, req, companyId }) =>
+      arap.listContacts(db, companyId, { kind, asOf: centralToday(), includeInactive: req.query.inactive === '1' })));
+    api.post(`/companies/:companyId/${path}`, route('post', ({ db, req, companyId, actor }) => arap.createContact(db, companyId, { ...(req.body ?? {}), kind, actor }), 201));
+  }
+  api.patch('/companies/:companyId/contacts/:contactId', route('post', ({ db, req, companyId, actor }) => arap.updateContact(db, companyId, req.params.contactId, { ...(req.body ?? {}), actor })));
+  for (const [path, kind] of [['invoices', 'invoice'], ['bills', 'bill']]) {
+    api.get(`/companies/:companyId/${path}`, route('read', ({ db, req, companyId }) =>
+      arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));
+    api.post(`/companies/:companyId/${path}`, route('post', ({ db, req, companyId, actor }) => {
+      const { contactId, number, date, dueDate, memo, taxRate, lines } = req.body ?? {};
+      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, taxRate, lines, idempotencyKey: idemKey(req), actor });
+    }, 201));
+  }
+  api.get('/companies/:companyId/documents/:documentId', route('read', ({ db, req, companyId }) => arap.getDocument(db, companyId, req.params.documentId, { today: centralToday() })));
+  api.post('/companies/:companyId/documents/:documentId/void', route('post', ({ db, req, companyId, actor }) =>
+    arap.voidDocument(db, companyId, req.params.documentId, { date: req.body?.date, actor })));
+  for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
+    api.get(`/companies/:companyId/${path}`, route('read', ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));
+    api.post(`/companies/:companyId/${path}`, route('post', ({ db, req, companyId, actor }) => {
+      const { contactId, date, accountId, method, reference, memo, applications } = req.body ?? {};
+      return arap.createPayment(db, companyId, { kind, contactId, date, accountId, method, reference, memo, applications, idempotencyKey: idemKey(req), actor });
+    }, 201));
+  }
+  api.get('/companies/:companyId/payments/:paymentId', route('read', ({ db, req, companyId }) => arap.getPayment(db, companyId, req.params.paymentId)));
+  api.post('/companies/:companyId/payments/:paymentId/void', route('post', ({ db, req, companyId, actor }) =>
+    arap.voidPayment(db, companyId, req.params.paymentId, { date: req.body?.date, actor })));
+  api.get('/companies/:companyId/reports/ar-aging', route('read', ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'invoice', asOf: q(req.query.asOf) ?? centralToday() })));
+  api.get('/companies/:companyId/reports/ap-aging', route('read', ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'bill', asOf: q(req.query.asOf) ?? centralToday() })));
 
   // Importing books (QuickBooks / spreadsheets). Accountant-level: it can change many periods at once.
   const importOpts = (req, actor) => ({ kind: req.body?.kind, asOf: req.body?.asOf, actor,
