@@ -23,6 +23,7 @@ import { AuthError } from './services/authService.js';
 import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows } from './core/csv.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
+import { createMetrics, bearerMatches } from './metrics.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -72,11 +73,13 @@ function rateLimiter({ windowMs, max }) {
   };
 }
 
-export function createApp(pool) {
+export function createApp(pool, { log } = {}) {
   const app = express();
   const hosts = allowedHosts();
+  const metrics = createMetrics({ log });
   app.disable('x-powered-by');
   if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
+  app.use(metrics.middleware);
   app.use((req, res, next) => {
     const host = (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
     if (!hosts.has(host)) return res.status(421).json({ error: 'Unknown host' });
@@ -116,6 +119,14 @@ export function createApp(pool) {
   app.get('/readyz', async (req, res) => {
     try { await pool.query('SELECT 1'); res.json({ ok: true }); } catch { res.status(503).json({ ok: false }); }
   });
+  // Monitoring (Grafana scrapes this). Off unless METRICS_TOKEN is set; the caller must send it as a bearer token.
+  app.get('/metrics', (req, res) => {
+    if (!process.env.METRICS_TOKEN) return res.status(404).json({ error: 'Not found' });
+    if (!bearerMatches(req, process.env.METRICS_TOKEN)) return res.status(401).json({ error: 'Not authorized' });
+    res.type('text/plain; version=0.0.4').send(metrics.render(pool));
+  });
+  // A ceiling on API calls per address (sign-in has its own, much lower, limit below).
+  app.use('/api', rateLimiter({ windowMs: 60_000, max: Number(process.env.API_RATE_LIMIT ?? 1200) }));
 
   // ------------------------------------------------------------------ Sign-in (no session needed)
   const authApi = express.Router();
@@ -486,7 +497,7 @@ export function createApp(pool) {
       42501: 'That change is not allowed',
     };
     if (pgMessages[err.code]) return res.status(400).json({ error: pgMessages[err.code] });
-    console.error(JSON.stringify({ level: 'error', msg: err.message, code: err.code, path: req.path }));
+    console.error(JSON.stringify({ level: 'error', msg: err.message, code: err.code, reqId: req.id, route: req.route?.path ?? 'unmatched' }));
     res.status(500).json({ error: 'Something went wrong on our side. Nothing was saved.' });
   });
   return app;

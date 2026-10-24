@@ -35,9 +35,30 @@ export async function freshDatabase({ withAppRole = false } = {}) {
   return {
     pool,
     appPool,
+    url: url.toString(),
     async drop() {
       if (appPool) await appPool.end();
       await pool.end();
+      const a = new pg.Client({ connectionString: base.toString() });
+      await a.connect();
+      await a.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      await a.end();
+    },
+  };
+}
+
+/** An empty database (no tables), e.g. to restore a backup into. */
+export async function emptyDatabase() {
+  const base = new URL(process.env.DATABASE_URL);
+  const name = `zacc_test_${randomBytes(4).toString('hex')}`;
+  const admin = new pg.Client({ connectionString: base.toString() });
+  await admin.connect();
+  await admin.query(`CREATE DATABASE ${name}`);
+  await admin.end();
+  const url = new URL(base); url.pathname = `/${name}`;
+  return {
+    url: url.toString(),
+    async drop() {
       const a = new pg.Client({ connectionString: base.toString() });
       await a.connect();
       await a.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);

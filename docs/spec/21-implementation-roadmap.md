@@ -101,5 +101,7 @@ custom permissions and departments, timesheets with approval and HoursTracker im
 California overtime), comparative statements (prior period / prior year), CSV export of statements, aging and the
 payroll register, print-to-PDF of reports and pay stubs, the in-app help center, and the Sprint 6 payroll backlog except the two items that need outside people: **DC allowance
 confirmation with OTR** and **CPA/CPP certification of the 2027 tables**.
-Still ahead: Plaid (waiting on keys), Railway setup with Homer (~Nov 15), hardening (S8),
-2027 tables (December).
+Hardening started early: request logs and Prometheus metrics, API rate limit, graceful shutdown on deploy, a
+backup-restore drill and a load test (both passed locally; see `docs/runbooks/operations.md`).
+Still ahead: Plaid (waiting on keys), Railway setup with Homer (~Nov 15), the S8 items that need the live
+environment (outside pentest, status page, alerts wired in Grafana, drill and load test on Railway), 2027 tables (December).

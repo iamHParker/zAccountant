@@ -63,6 +63,11 @@ app (Google/Microsoft Authenticator, 1Password, Authy). `npm run seed` also crea
 | `AUDIT_HMAC_KEY` | production | secret key for the audit hash chain (32+ random characters) |
 | `FIELD_ENCRYPTION_KEY` | production | secret key for SSN / 2FA-secret encryption (32 random bytes, base64) |
 | `ALLOWED_HOSTS` | production | the site's host name, e.g. `app.zaccountant.com` |
+| `TRUST_PROXY` | production | `1` behind Railway's proxy, so rate limits see each visitor's address |
+| `METRICS_TOKEN` | for monitoring | turns on `GET /metrics` for Grafana (send it as a bearer token) |
+| `API_RATE_LIMIT`, `AUTH_RATE_LIMIT` | optional | requests per minute per address (default 1,200), sign-in attempts per 5 minutes (default 30) |
+
+Monitoring, backups (the restore drill) and the load test: [docs/runbooks/operations.md](docs/runbooks/operations.md).
 
 In production, create the app login and give it only the rights it needs with `npm run db:grant`
 (see `src/db/grant.js`). Locally one login is fine; the server refuses to start in production without these.

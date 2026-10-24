@@ -11,7 +11,8 @@ process.env.AUTH_RATE_LIMIT = '1000';
 
 test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
   const db = await freshDatabase({ withAppRole: true });
-  const server = createApp(db.appPool).listen(0, '127.0.0.1');
+  const logs = [];
+  const server = createApp(db.appPool, { log: (line) => logs.push(JSON.parse(line)) }).listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   t.after(async () => { server.close(); await db.drop(); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -568,6 +569,33 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const sum = (await owner.c.call('GET', `${base}/reports/time-summary?from=2026-11-01&to=2026-11-15`)).body;
     assert.equal(sum.jobs.find((j) => j.jobName === 'Smith Residence').minutes, 45 * 60 + 8 * 60);
     assert.equal((await other.c.call('GET', `${base}/reports/time-summary?from=2026-11-01&to=2026-11-15`)).body.totalMinutes, 8 * 60, 'staff see only their own');
+  });
+
+  await t.test('monitoring: request ids, one log line per request (ids only), metrics behind a token', async () => {
+    const r = await owner.c.call('GET', `/api/companies/${co.id}/entries?text=secret%20memo`);
+    assert.match(r.headers['x-request-id'], /^[0-9a-f-]{36}$/);
+    const line = logs.find((l) => l.reqId === r.headers['x-request-id']);
+    assert.deepEqual([line.route, line.status, line.method, line.companyId], ['/api/companies/:companyId/entries', 200, 'GET', co.id]);
+    assert.ok(line.userId);
+    assert.ok(!JSON.stringify(logs).includes('secret memo'), 'query text is never logged');
+    assert.ok(!JSON.stringify(logs).includes('@example.com'), 'emails are never logged');
+    const failed = logs.find((l) => l.route === '/api/auth/login' && l.status === 401);
+    assert.ok(failed, 'a refused sign-in is logged by route, not by who tried');
+
+    const metrics = (path, headers) => fetch(base + path, { headers });
+    assert.equal((await metrics('/metrics')).status, 404); // off until METRICS_TOKEN is set
+    process.env.METRICS_TOKEN = 'test-metrics-token-1234';
+    try {
+      assert.equal((await metrics('/metrics', { authorization: 'Bearer wrong' })).status, 401);
+      const m = await metrics('/metrics', { authorization: 'Bearer test-metrics-token-1234' });
+      assert.equal(m.status, 200);
+      const text = await m.text();
+      assert.match(text, /http_requests_total\{method="GET",route="\/api\/companies\/:companyId\/entries",status="200"\} \d+/);
+      assert.match(text, /http_request_duration_seconds_bucket\{route="\/api\/companies\/:companyId\/entries",le="0.8"\} \d+/);
+      assert.match(text, /db_pool_waiting \d+/);
+    } finally {
+      delete process.env.METRICS_TOKEN;
+    }
   });
 
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
