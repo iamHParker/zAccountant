@@ -4,7 +4,7 @@ Small-business accounting and payroll for Texas, Colorado, California and Washin
 **double-entry books that cannot silently go out of balance**, with payroll tax logic reviewed by a
 Professional Review Board.
 
-Status: **Sprint 5 (invoices, bills and payments)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
+Status: **Sprint 6 (payroll runs and pay stubs)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
 Target: public beta January 1, 2027.
 
 ## What's here
@@ -102,3 +102,5 @@ Everything else needs a fully signed-in session (cookie) and is under `/api/comp
 | `GET …/reports/{dashboard,trial-balance,balance-sheet,income-statement,cash-flow}` | statements |
 | `GET …/audit/verify` | verify the audit hash chain |
 | `GET/POST …/employees`, `POST …/employees/:id/paychecks[/preview]`, `GET …/paychecks` | payroll |
+| `POST …/payroll-runs/preview`, `POST …/payroll-runs`, `GET …/payroll-runs[/:id]` | pay everyone on a schedule for a pay period (`items: [{employeeId, hours, overtimeHours, preTaxDeductions}]`) |
+| `GET …/paychecks/:id/stub`, `GET …/reports/payroll-liabilities?from=&to=` | pay stub with year-to-date; payroll taxes owed by agency (payroll role) |

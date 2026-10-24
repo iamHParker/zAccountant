@@ -93,6 +93,14 @@ async function ytdFor(db, companyId, employeeId, year) {
   };
 }
 
+/** Optional pay period (the days worked) shown on the pay stub. Taxes still follow the pay date. */
+function cleanPeriod({ periodStart, periodEnd, payDate }) {
+  if (!periodStart && !periodEnd) return { start: null, end: null };
+  if (!isIsoDate(periodStart) || !isIsoDate(periodEnd) || periodEnd < periodStart) throw new PayrollError('Pay period must be two dates, start on or before end');
+  if (isIsoDate(payDate) && payDate < periodStart) throw new PayrollError('Pay date cannot be before the pay period starts');
+  return { start: periodStart, end: periodEnd };
+}
+
 async function compute(db, companyId, employeeId, input) {
   if (!isIsoDate(input.payDate)) throw new LedgerError('payDate must be YYYY-MM-DD');
   const company = await getCompany(db, companyId);
@@ -119,6 +127,8 @@ async function compute(db, companyId, employeeId, input) {
     company: { suiRatePct: company.sui_rate_pct ?? undefined, famliHeadcount: company.famli_headcount },
   });
   result.overtime = overtime;
+  result.regularHours = emp.payType === 'hourly' ? hundredthsOfHours(input.hours, 'hours') / 100 : null;
+  result.payRateCents = emp.payRateCents;
   return { company, emp, result, lastPayDate };
 }
 
@@ -139,6 +149,7 @@ export async function postPaycheck(pool, companyId, employeeId, input, { actor =
       const { rows: [dup] } = await c.query('SELECT id, journal_entry_id, calculation FROM paychecks WHERE company_id = $1 AND idempotency_key = $2', [companyId, String(input.idempotencyKey)]);
       if (dup) return { paycheckId: dup.id, journalEntryId: dup.journal_entry_id, duplicate: true, ...dup.calculation };
     }
+    const period = cleanPeriod(input);
     const { company, emp, result, lastPayDate } = await compute(c, companyId, employeeId, input);
     if (lastPayDate && input.payDate < lastPayDate) {
       throw new PayrollError(`Paychecks must be entered in date order; last paycheck for this employee is ${lastPayDate}`);
@@ -161,9 +172,10 @@ export async function postPaycheck(pool, companyId, employeeId, input, { actor =
     const entry = validateEntry({ date: input.payDate, memo: `Payroll: ${emp.firstName} ${emp.lastName}`, lines });
     const je = await insertEntry(c, companyId, entry, { source: 'payroll', sourceRef: employeeId, actor });
     const { rows: [pc] } = await c.query(
-      `INSERT INTO paychecks (company_id, employee_id, pay_date, tax_year, gross_cents, net_pay_cents, calculation, tables_verified, journal_entry_id, idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [companyId, employeeId, input.payDate, result.year, result.grossCents, result.netPayCents, JSON.stringify(result), result.tablesVerified, je.id, input.idempotencyKey ? String(input.idempotencyKey) : null],
+      `INSERT INTO paychecks (company_id, employee_id, pay_date, tax_year, gross_cents, net_pay_cents, calculation, tables_verified, journal_entry_id, idempotency_key, run_id, period_start, period_end)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      [companyId, employeeId, input.payDate, result.year, result.grossCents, result.netPayCents, JSON.stringify(result), result.tablesVerified, je.id, input.idempotencyKey ? String(input.idempotencyKey) : null,
+        input.runId ?? null, period.start, period.end],
     );
     await appendAudit(c, companyId, { action: 'create', entity: 'paycheck', entityId: pc.id, actor, payload: { employeeId, payDate: input.payDate, grossCents: result.grossCents, netPayCents: result.netPayCents, journalEntryId: je.id } });
     return { paycheckId: pc.id, journalEntryId: je.id, entryNumber: je.entry_number, employee: emp, ...result };
@@ -224,6 +236,236 @@ export async function listPaychecks(db, companyId, { year } = {}) {
       WHERE p.company_id = $1 AND ($2::int IS NULL OR p.tax_year = $2)
       ORDER BY p.pay_date DESC, p.created_at DESC`, [companyId, year ?? null]);
   return rows;
+}
+
+// ---------------------------------------------------------------- Payroll runs
+
+const RUN_FREQUENCIES = ['weekly', 'biweekly', 'semimonthly', 'monthly'];
+
+/**
+ * Work out who is in a run: everyone active on this pay schedule, unless `items` names them.
+ * Each item: { employeeId, hours, overtimeHours, preTaxDeductions }. Returns [{ emp, input }].
+ */
+async function runMembers(db, companyId, { payFrequency, payDate, periodStart, periodEnd, paidFromAccountId, items }) {
+  const errors = [];
+  if (!RUN_FREQUENCIES.includes(payFrequency)) errors.push('choose a pay schedule (weekly, biweekly, semimonthly or monthly)');
+  if (!isIsoDate(payDate)) errors.push('pay date must be YYYY-MM-DD');
+  if (!isIsoDate(periodStart) || !isIsoDate(periodEnd) || periodEnd < periodStart) errors.push('pay period must be two dates, start on or before end');
+  else if (isIsoDate(payDate) && payDate < periodStart) errors.push('pay date cannot be before the pay period starts');
+  if (errors.length) throw new PayrollError(`Payroll is not valid: ${errors.join('; ')}`);
+  const emps = (await db.query(`SELECT ${EMP_COLS} FROM employees WHERE company_id = $1 AND active AND pay_frequency = $2 ORDER BY last_name, first_name`, [companyId, payFrequency])).rows;
+  const given = Array.isArray(items) ? new Map(items.map((i) => [i?.employeeId, i])) : null;
+  if (given) {
+    for (const id of given.keys()) if (!emps.some((e) => e.id === id)) errors.push('one of the employees is not active on this pay schedule');
+    if (given.size !== items.length) errors.push('an employee is listed twice');
+  }
+  const members = emps.filter((e) => !given || given.has(e.id)).map((emp) => {
+    const i = given?.get(emp.id) ?? {};
+    return { emp, input: { payDate, periodStart, periodEnd, paidFromAccountId, hours: i.hours, overtimeHours: i.overtimeHours, preTaxDeductions: i.preTaxDeductions ?? [] } };
+  });
+  if (!members.length) errors.push(`no active ${payFrequency} employees to pay`);
+  if (errors.length) throw new PayrollError(`Payroll is not valid: ${[...new Set(errors)].join('; ')}`);
+  return members;
+}
+
+const runTotals = (results) => ({
+  paycheckCount: results.length,
+  grossCents: results.reduce((t, r) => t + r.grossCents, 0),
+  netPayCents: results.reduce((t, r) => t + r.netPayCents, 0),
+  employeeTaxCents: results.reduce((t, r) => t + r.employeeTaxTotalCents, 0),
+  employerTaxCents: results.reduce((t, r) => t + r.employerTaxTotalCents, 0),
+  deductionCents: results.reduce((t, r) => t + r.totalDeductionsCents, 0),
+});
+
+/** Calculate every paycheck in a run without saving anything. Problems are listed per employee. */
+export async function previewRun(db, companyId, opts) {
+  const members = await runMembers(db, companyId, opts);
+  const rows = [];
+  const problems = [];
+  for (const m of members) {
+    try {
+      const { result } = await compute(db, companyId, m.emp.id, m.input);
+      rows.push({ employee: m.emp, ...result });
+    } catch (e) {
+      if (!(e instanceof PayrollError || e instanceof LedgerError)) throw e;
+      problems.push(`${m.emp.firstName} ${m.emp.lastName}: ${e.message}`);
+    }
+  }
+  return { payFrequency: opts.payFrequency, payDate: opts.payDate, periodStart: opts.periodStart, periodEnd: opts.periodEnd,
+    paychecks: rows, problems, totals: runTotals(rows) };
+}
+
+/** Post a whole run in one transaction: either every paycheck is recorded or none is. */
+export async function postRun(pool, companyId, opts, { actor = null } = {}) {
+  const key = opts.idempotencyKey ? String(opts.idempotencyKey).slice(0, 120) : null;
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    if (key) {
+      const { rows: [dup] } = await c.query('SELECT id FROM payroll_runs WHERE company_id = $1 AND idempotency_key = $2', [companyId, key]);
+      if (dup) return { ...(await getRun(c, companyId, dup.id)), duplicate: true };
+    }
+    const { rows: [same] } = await c.query('SELECT pay_date FROM payroll_runs WHERE company_id = $1 AND pay_frequency = $2 AND period_start = $3',
+      [companyId, opts.payFrequency, opts.periodStart]);
+    if (same) throw new PayrollError(`This ${opts.payFrequency} pay period starting ${opts.periodStart} was already paid on ${same.pay_date}`);
+    const pre = await previewRun(c, companyId, opts);
+    if (pre.problems.length) throw new PayrollError(`Payroll was not recorded: ${pre.problems.join('; ')}`);
+    const t = pre.totals;
+    const { rows: [run] } = await c.query(
+      `INSERT INTO payroll_runs (company_id, pay_frequency, period_start, period_end, pay_date, paid_from_account_id, paycheck_count, gross_cents, net_pay_cents,
+         employee_tax_cents, employer_tax_cents, deduction_cents, idempotency_key, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+      [companyId, opts.payFrequency, opts.periodStart, opts.periodEnd, opts.payDate, opts.paidFromAccountId || null, t.paycheckCount, t.grossCents, t.netPayCents,
+        t.employeeTaxCents, t.employerTaxCents, t.deductionCents, key, actor]);
+    const members = await runMembers(c, companyId, opts);
+    for (const m of members) await postPaycheck(c, companyId, m.emp.id, { ...m.input, runId: run.id }, { actor });
+    await appendAudit(c, companyId, { action: 'create', entity: 'payroll_run', entityId: run.id, actor,
+      payload: { payFrequency: opts.payFrequency, periodStart: opts.periodStart, periodEnd: opts.periodEnd, payDate: opts.payDate, ...t } });
+    return getRun(c, companyId, run.id);
+  });
+}
+
+export async function getRun(db, companyId, runId) {
+  if (typeof runId !== 'string' || !/^[0-9a-f-]{36}$/i.test(runId)) throw new LedgerError('Payroll run not found');
+  const { rows: [r] } = await db.query('SELECT * FROM payroll_runs WHERE company_id = $1 AND id = $2', [companyId, runId]);
+  if (!r) throw new LedgerError('Payroll run not found');
+  const { rows: pcs } = await db.query(
+    `SELECT p.id, e.first_name || ' ' || e.last_name AS employee, p.gross_cents AS "grossCents", p.net_pay_cents AS "netPayCents",
+            EXISTS (SELECT 1 FROM paychecks v WHERE v.voids_paycheck_id = p.id) AS voided
+       FROM paychecks p JOIN employees e ON e.id = p.employee_id WHERE p.company_id = $1 AND p.run_id = $2 ORDER BY e.last_name, e.first_name`, [companyId, r.id]);
+  return { ...runOut(r), paychecks: pcs };
+}
+
+const runOut = (r) => ({
+  id: r.id, payFrequency: r.pay_frequency, periodStart: r.period_start, periodEnd: r.period_end, payDate: r.pay_date, paidFromAccountId: r.paid_from_account_id,
+  paycheckCount: r.paycheck_count, grossCents: r.gross_cents, netPayCents: r.net_pay_cents, employeeTaxCents: r.employee_tax_cents,
+  employerTaxCents: r.employer_tax_cents, deductionCents: r.deduction_cents, createdBy: r.created_by, createdAt: r.created_at,
+});
+
+export async function listRuns(db, companyId, { limit = 50 } = {}) {
+  const { rows } = await db.query('SELECT * FROM payroll_runs WHERE company_id = $1 ORDER BY pay_date DESC, created_at DESC LIMIT $2', [companyId, Math.min(Number(limit) || 50, 500)]);
+  return rows.map(runOut);
+}
+
+// ---------------------------------------------------------------- Pay stubs
+
+/**
+ * Everything a pay stub shows: this check and year-to-date (through this check, voids included),
+ * for earnings, pre-tax deductions, each tax withheld, and net pay. Employer taxes are listed for
+ * the employer's copy. Only the last 4 digits of the SSN appear.
+ */
+export async function getPayStub(db, companyId, paycheckId) {
+  if (typeof paycheckId !== 'string' || !/^[0-9a-f-]{36}$/i.test(paycheckId)) throw new LedgerError('Paycheck not found');
+  const { rows: [pc] } = await db.query('SELECT * FROM paychecks WHERE company_id = $1 AND id = $2', [companyId, paycheckId]);
+  if (!pc) throw new LedgerError('Paycheck not found');
+  const emp = await getEmployee(db, companyId, pc.employee_id);
+  const company = await getCompany(db, companyId);
+  const { rows: upTo } = await db.query(
+    `SELECT gross_cents, net_pay_cents, calculation FROM paychecks
+      WHERE company_id = $1 AND employee_id = $2 AND tax_year = $3
+        AND (pay_date, created_at) <= (SELECT pay_date, created_at FROM paychecks WHERE id = $4)`, // exact (µs) timestamps
+    [companyId, pc.employee_id, pc.tax_year, pc.id]);
+  const sumBy = (field) => {
+    const m = new Map();
+    for (const r of upTo) for (const t of r.calculation[field] ?? []) {
+      const k = t.code ?? t.name;
+      m.set(k, (m.get(k) ?? 0) + t.amountCents);
+    }
+    return m;
+  };
+  const ytdEe = sumBy('employeeTaxes');
+  const ytdEr = sumBy('employerTaxes');
+  const ytdDed = sumBy('deductions');
+  const calc = pc.calculation;
+  const ytdGross = upTo.reduce((t, r) => t + r.gross_cents, 0);
+  const ytdNet = upTo.reduce((t, r) => t + r.net_pay_cents, 0);
+  const regular = calc.grossCents - (calc.overtime?.payCents ?? 0);
+  // Rate and hours as they were on this paycheck (older paychecks didn't record them: shown blank).
+  const rate = calc.payRateCents ?? null;
+  const hourly = calc.regularHours != null;
+  const earnings = [{ label: hourly ? 'Regular pay' : 'Salary', amountCents: regular, hours: hourly ? calc.regularHours : null, rateCents: hourly ? rate : null }];
+  if (calc.overtime) {
+    earnings.push({ label: 'Overtime (1.5×)', amountCents: calc.overtime.payCents, hours: calc.overtime.hundredthsOfHours / 100,
+      rateCents: rate == null ? null : Number((BigInt(rate) * 3n + 1n) / 2n) });
+  }
+  const { rows: [v] } = await db.query('SELECT pay_date FROM paychecks WHERE company_id = $1 AND voids_paycheck_id = $2', [companyId, pc.id]);
+  return {
+    paycheckId: pc.id, employer: { name: company.name, state: company.home_state },
+    employee: { name: `${emp.firstName} ${emp.lastName}`, ssnLast4: emp.ssnLast4, workState: emp.workState, payType: emp.payType, payFrequency: emp.payFrequency },
+    payDate: pc.pay_date, periodStart: pc.period_start, periodEnd: pc.period_end, taxYear: pc.tax_year,
+    isVoidRecord: Boolean(pc.voids_paycheck_id), voidedOn: v?.pay_date ?? null,
+    earnings, grossCents: calc.grossCents, ytdGrossCents: ytdGross,
+    deductions: (calc.deductions ?? []).map((d) => ({ label: d.name, amountCents: d.amountCents, ytdCents: ytdDed.get(d.name) ?? 0 })),
+    employeeTaxes: (calc.employeeTaxes ?? []).map((t) => ({ code: t.code, label: t.label, amountCents: t.amountCents, ytdCents: ytdEe.get(t.code) ?? 0 })),
+    employerTaxes: (calc.employerTaxes ?? []).map((t) => ({ code: t.code, label: t.label, amountCents: t.amountCents, ytdCents: ytdEr.get(t.code) ?? 0 })),
+    netPayCents: calc.netPayCents, ytdNetPayCents: ytdNet,
+    tablesVerified: pc.tables_verified,
+  };
+}
+
+// ---------------------------------------------------------------- Payroll tax liabilities
+
+// Which return / deposit each tax belongs to, so the owner knows what to pay where.
+const AGENCY = (code, state) => {
+  if (['FIT', 'SS', 'SS_ER', 'MED', 'MED_ER', 'MED_ADDL'].includes(code)) return { agency: 'IRS', form: 'Form 941 (federal deposit)' };
+  if (code === 'FUTA') return { agency: 'IRS', form: 'Form 940 (FUTA)' };
+  const s = code.slice(0, 2);
+  const names = { CA: 'California EDD', CO: 'Colorado', DC: 'District of Columbia', TX: 'Texas Workforce Commission' };
+  if (code === 'CO_PIT') return { agency: 'Colorado Dept. of Revenue', form: 'CO wage withholding' };
+  if (code.startsWith('CO_FAMLI')) return { agency: 'Colorado FAMLI', form: 'FAMLI premiums' };
+  if (code === 'CO_SUI' || code === 'CO_SUI_ADMIN') return { agency: 'Colorado CDLE', form: 'CO unemployment' };
+  if (code === 'DC_PIT') return { agency: 'DC Office of Tax and Revenue', form: 'DC withholding' };
+  if (code === 'DC_PFL' || code === 'DC_SUI' || code === 'DC_SUI_ADMIN') return { agency: 'DC DOES', form: 'DC unemployment & Paid Family Leave' };
+  if (code === 'TX_SUI' || code === 'TX_SUI_ADMIN') return { agency: 'Texas Workforce Commission', form: 'TX unemployment' };
+  if (s === 'CA') return { agency: 'California EDD', form: 'DE 9 / DE 88 deposit' };
+  return { agency: names[state] ?? state, form: '' };
+};
+
+/**
+ * Payroll taxes for paychecks dated in [from, to]: each tax withheld from employees and owed by the
+ * employer, grouped by the agency it is paid to; plus the balance still owed (unpaid) in each payroll
+ * liability account as of `to`. Calculate-only beta: the owner makes these deposits themselves.
+ */
+export async function getPayrollLiabilities(db, companyId, { from, to }) {
+  if (!isIsoDate(from) || !isIsoDate(to) || to < from) throw new LedgerError('Choose a date range (from on or before to)');
+  const { rows } = await db.query(
+    `SELECT p.calculation, e.work_state FROM paychecks p JOIN employees e ON e.id = p.employee_id
+      WHERE p.company_id = $1 AND p.pay_date BETWEEN $2 AND $3`, [companyId, from, to]);
+  const byCode = new Map();
+  let gross = 0;
+  for (const r of rows) {
+    gross += r.calculation.grossCents;
+    for (const [list, who] of [['employeeTaxes', 'employee'], ['employerTaxes', 'employer']]) {
+      for (const t of r.calculation[list] ?? []) {
+        const row = byCode.get(t.code) ?? { code: t.code, label: t.label.replace(/ \(employer\)$/, ''), who, ...AGENCY(t.code, r.work_state), amountCents: 0, liabilityKey: t.liabilityKey };
+        row.amountCents += t.amountCents;
+        byCode.set(t.code, row);
+      }
+    }
+  }
+  const lines = [...byCode.values()].filter((x) => x.amountCents !== 0);
+  const agencies = new Map();
+  for (const l of lines) {
+    const k = `${l.agency}|${l.form}`;
+    const a = agencies.get(k) ?? { agency: l.agency, form: l.form, totalCents: 0, lines: [] };
+    a.lines.push({ code: l.code, label: l.label, who: l.who, amountCents: l.amountCents });
+    a.totalCents += l.amountCents;
+    agencies.set(k, a);
+  }
+  const { rows: bal } = await db.query(
+    `SELECT a.code, a.name, a.system_key, COALESCE(sum(l.credit_cents - l.debit_cents), 0)::bigint AS owed
+       FROM accounts a LEFT JOIN journal_lines l ON l.account_id = a.id AND l.entry_date <= $2
+      WHERE a.company_id = $1 AND a.subtype = 'payroll' AND a.type = 'liability'
+      GROUP BY a.id ORDER BY a.code`, [companyId, to]);
+  return {
+    from, to, paychecks: rows.length, grossCents: gross,
+    // Federal first (941 deposit, then 940), then state agencies by name.
+    agencies: [...agencies.values()].sort((a, b) => {
+      const rank = (x) => (x.form.startsWith('Form 941') ? 0 : x.form.startsWith('Form 940') ? 1 : 2);
+      return rank(a) - rank(b) || a.agency.localeCompare(b.agency);
+    }),
+    totalCents: lines.reduce((t, l) => t + l.amountCents, 0),
+    unpaid: bal.map((b) => ({ code: b.code, name: b.name, key: b.system_key, owedCents: b.owed })),
+  };
 }
 
 export { PAY_PERIODS };

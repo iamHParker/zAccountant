@@ -109,7 +109,9 @@ createApp({
         revenue: [['operating', 'Sales or services'], ['other', 'Other income (interest…)']],
         expense: [['operating', 'Operating expense'], ['cogs', 'Cost of goods sold'], ['other', 'Other expense (interest…)']],
       },
-      paychecks: [],
+      paychecks: [], runs: [], stub: null,
+      prun: { show: false, payFrequency: 'biweekly', periodStart: '', periodEnd: '', payDate: today(), paidFrom: '', rows: [], preview: null, key: newKey() },
+      liab: { from: today().slice(0, 8) + '01', to: today(), data: null },
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
       lockDate: '', suiRate: '', famliCount: null, audit: null,
@@ -279,7 +281,37 @@ createApp({
     async loadEmployees() {
       this.employees = (await this.run(() => api('GET', `/companies/${this.companyId}/employees`))) ?? [];
       this.paychecks = (await this.run(() => api('GET', `/companies/${this.companyId}/paychecks`))) ?? [];
+      if (this.can('payroll')) this.runs = (await this.run(() => api('GET', `/companies/${this.companyId}/payroll-runs`))) ?? [];
     },
+    // ---------------------------------------------------------------- Payroll runs
+    startRun() {
+      const r = this.prun;
+      Object.assign(r, { show: true, preview: null, key: newKey(), paidFrom: r.paidFrom || this.bankAccounts[0]?.id || '' });
+      this.pc.employee = null;
+      this.runRows();
+    },
+    runRows() {
+      const r = this.prun;
+      r.preview = null;
+      r.rows = this.employees.filter((e) => e.active && e.payFrequency === r.payFrequency).map((e) => ({ emp: e, include: true, hours: '', overtimeHours: '', k401: '' }));
+    },
+    runBody() {
+      const r = this.prun;
+      return { payFrequency: r.payFrequency, periodStart: r.periodStart, periodEnd: r.periodEnd, payDate: r.payDate, paidFromAccountId: r.paidFrom || undefined,
+        items: r.rows.filter((x) => x.include).map((x) => {
+          const k = cents(x.k401);
+          return { employeeId: x.emp.id, hours: x.hours || undefined, overtimeHours: x.overtimeHours || undefined,
+            preTaxDeductions: k ? [{ name: '401(k)', amountCents: k, kind: 'retirement_401k' }] : [] };
+        }) };
+    },
+    async previewRun() { this.prun.preview = await this.run(() => api('POST', `/companies/${this.companyId}/payroll-runs/preview`, this.runBody())); },
+    async postRun() {
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/payroll-runs`, this.runBody(), { 'Idempotency-Key': this.prun.key }),
+        'Payroll recorded in your books.');
+      if (r) { this.prun.show = false; this.prun.preview = null; this.loadEmployees(); }
+    },
+    async openStub(p) { this.stub = await this.run(() => api('GET', `/companies/${this.companyId}/paychecks/${p.id}/stub`)); },
+    async loadLiab() { this.liab.data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/payroll-liabilities?from=${this.liab.from}&to=${this.liab.to}`)); },
     async createCompany() {
       const c = await this.run(() => api('POST', '/companies', this.newCompany), 'Company created. Your books are ready.');
       if (!c) return;

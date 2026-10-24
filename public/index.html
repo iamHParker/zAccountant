@@ -734,7 +734,86 @@
     <!-- PAYROLL -->
     <section v-if="tab === 'payroll'">
       <p class="banner">Payroll is in <strong>calculate-only</strong> mode: we compute paychecks and record them in your books, but you (or your accountant) make the tax deposits and filings. Tax tables are awaiting Professional Review Board certification.</p>
-      <div class="row"><h1>Employees</h1><button v-if="can('payroll')" @click="showNewEmp = !showNewEmp">{{ showNewEmp ? 'Close' : 'Add employee' }}</button></div>
+      <div class="row wrap"><h1>Payroll</h1>
+        <template v-if="can('payroll')">
+          <button class="primary" @click="startRun">Run payroll</button>
+          <button @click="showNewEmp = !showNewEmp">{{ showNewEmp ? 'Close' : 'Add employee' }}</button>
+        </template>
+      </div>
+
+      <div class="card" v-if="prun.show">
+        <h2>Run payroll</h2>
+        <p class="hint">Pays everyone on one pay schedule at once. The pay period is the days worked; taxes follow the pay date.</p>
+        <div class="grid4">
+          <label>Pay schedule <select v-model="prun.payFrequency" @change="runRows"><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="semimonthly">Twice a month</option><option value="monthly">Monthly</option></select></label>
+          <label>Period start <input type="date" v-model="prun.periodStart" @change="prun.preview = null"></label>
+          <label>Period end <input type="date" v-model="prun.periodEnd" @change="prun.preview = null"></label>
+          <label>Pay date <input type="date" v-model="prun.payDate" @change="prun.preview = null"></label>
+        </div>
+        <label>Net pay paid from
+          <select v-model="prun.paidFrom"><option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option><option value="">Not paid yet (hold in Net Pay Payable)</option></select>
+        </label>
+        <p class="hint" v-if="!prun.rows.length">No active employees on this pay schedule.</p>
+        <table class="data" v-else>
+          <thead><tr><th></th><th>Employee</th><th>Pay</th><th class="w90">Hours</th><th class="w90">Overtime</th><th class="w120">401(k)</th></tr></thead>
+          <tbody>
+            <tr v-for="x in prun.rows">
+              <td><input type="checkbox" v-model="x.include" class="auto-w" @change="prun.preview = null"></td>
+              <td>{{ x.emp.firstName }} {{ x.emp.lastName }}</td>
+              <td>{{ money(x.emp.payRateCents) }}{{ x.emp.payType === 'hourly' ? '/hr' : '/check' }}</td>
+              <td><input v-if="x.emp.payType === 'hourly'" v-model.trim="x.hours" inputmode="decimal" class="num" @input="prun.preview = null"></td>
+              <td><input v-if="x.emp.payType === 'hourly'" v-model.trim="x.overtimeHours" inputmode="decimal" class="num" placeholder="0" @input="prun.preview = null"></td>
+              <td><input v-model.trim="x.k401" inputmode="decimal" class="num" placeholder="0" @input="prun.preview = null"></td>
+            </tr>
+          </tbody>
+        </table>
+        <button @click="previewRun" :disabled="!prun.rows.some(x => x.include)">Calculate</button>
+        <button @click="prun.show = false">Cancel</button>
+        <template v-if="prun.preview">
+          <ul class="warn bad" v-if="prun.preview.problems.length"><li v-for="p in prun.preview.problems" class="bad">{{ p }}</li></ul>
+          <table class="data">
+            <thead><tr><th>Employee</th><th class="num">Gross</th><th class="num">Deductions</th><th class="num">Taxes withheld</th><th class="num">Net pay</th><th class="num">Employer taxes</th></tr></thead>
+            <tbody>
+              <tr v-for="p in prun.preview.paychecks"><td>{{ p.employee.firstName }} {{ p.employee.lastName }}</td>
+                <td class="num">{{ money(p.grossCents) }}</td><td class="num">{{ money(p.totalDeductionsCents) }}</td><td class="num">{{ money(p.employeeTaxTotalCents) }}</td>
+                <td class="num">{{ money(p.netPayCents) }}</td><td class="num">{{ money(p.employerTaxTotalCents) }}</td></tr>
+              <tr class="total"><td>{{ prun.preview.totals.paycheckCount }} paycheck{{ prun.preview.totals.paycheckCount === 1 ? '' : 's' }}</td>
+                <td class="num">{{ money(prun.preview.totals.grossCents) }}</td><td class="num">{{ money(prun.preview.totals.deductionCents) }}</td>
+                <td class="num">{{ money(prun.preview.totals.employeeTaxCents) }}</td><td class="num">{{ money(prun.preview.totals.netPayCents) }}</td>
+                <td class="num">{{ money(prun.preview.totals.employerTaxCents) }}</td></tr>
+            </tbody>
+          </table>
+          <ul class="warn"><li v-for="w in [...new Set(prun.preview.paychecks.flatMap(p => p.warnings))]">{{ w }}</li></ul>
+          <button class="primary" :disabled="prun.preview.problems.length > 0 || !prun.preview.paychecks.length" @click="postRun">Record payroll ({{ money(prun.preview.totals.netPayCents) }} net pay)</button>
+        </template>
+      </div>
+
+      <div class="card stub-card" v-if="stub">
+        <div class="row"><h2>Pay stub</h2><span><button @click="printPage">Print</button><button @click="stub = null">Close</button></span></div>
+        <div class="grid2">
+          <div><strong>{{ stub.employer.name }}</strong><br>{{ stub.employee.name }}<span v-if="stub.employee.ssnLast4"> · SSN •••-••-{{ stub.employee.ssnLast4 }}</span></div>
+          <div class="num">Pay date {{ stub.payDate }}<br><span v-if="stub.periodStart">Period {{ stub.periodStart }} to {{ stub.periodEnd }}</span></div>
+        </div>
+        <p class="bad" v-if="stub.isVoidRecord">This is a void record (negative amounts cancel the original paycheck).</p>
+        <p class="bad" v-else-if="stub.voidedOn">This paycheck was voided on {{ stub.voidedOn }}.</p>
+        <table class="data">
+          <thead><tr><th>Earnings</th><th class="num">Hours</th><th class="num">Rate</th><th class="num">This check</th><th class="num">Year to date</th></tr></thead>
+          <tbody>
+            <tr v-for="e in stub.earnings"><td>{{ e.label }}</td><td class="num">{{ e.hours ?? '' }}</td><td class="num">{{ e.rateCents != null ? money(e.rateCents) : '' }}</td><td class="num">{{ money(e.amountCents) }}</td><td></td></tr>
+            <tr class="sub"><td colspan="3">Gross pay</td><td class="num">{{ money(stub.grossCents) }}</td><td class="num">{{ money(stub.ytdGrossCents) }}</td></tr>
+            <tr v-for="d in stub.deductions"><td colspan="3" class="ind">{{ d.label }} (pre-tax)</td><td class="num">{{ money(-d.amountCents) }}</td><td class="num">{{ money(-d.ytdCents) }}</td></tr>
+            <tr v-for="t in stub.employeeTaxes"><td colspan="3" class="ind">{{ t.label }}</td><td class="num">{{ money(-t.amountCents) }}</td><td class="num">{{ money(-t.ytdCents) }}</td></tr>
+            <tr class="total"><td colspan="3">Net pay</td><td class="num">{{ money(stub.netPayCents) }}</td><td class="num">{{ money(stub.ytdNetPayCents) }}</td></tr>
+          </tbody>
+        </table>
+        <h3>Employer taxes (not deducted from pay)</h3>
+        <table class="data">
+          <tbody><tr v-for="t in stub.employerTaxes"><td>{{ t.label }}</td><td class="num">{{ money(t.amountCents) }}</td><td class="num">{{ money(t.ytdCents) }}</td></tr></tbody>
+        </table>
+        <p class="muted small" v-if="!stub.tablesVerified">Calculated with {{ stub.taxYear }} tax tables awaiting Professional Review Board certification.</p>
+      </div>
+
+      <h2>Employees</h2>
       <form class="card" v-if="showNewEmp" @submit.prevent="createEmployee">
         <div class="grid2">
           <label>First name <input v-model.trim="newEmp.firstName" required></label>
@@ -794,13 +873,23 @@
           <td><button v-if="can('payroll')" class="link" @click="startPaycheck(e)">Run paycheck</button></td></tr>
       </table>
 
+      <template v-if="runs.length">
+        <h2>Payroll runs</h2>
+        <table class="data">
+          <thead><tr><th>Pay date</th><th>Period</th><th>Schedule</th><th class="num">Paychecks</th><th class="num">Gross</th><th class="num">Net</th><th class="num">Employer taxes</th></tr></thead>
+          <tr v-for="r in runs.slice(0, 12)"><td>{{ r.payDate }}</td><td>{{ r.periodStart }} to {{ r.periodEnd }}</td><td>{{ r.payFrequency }}</td>
+            <td class="num">{{ r.paycheckCount }}</td><td class="num">{{ money(r.grossCents) }}</td><td class="num">{{ money(r.netPayCents) }}</td><td class="num">{{ money(r.employerTaxCents) }}</td></tr>
+        </table>
+      </template>
+
       <template v-if="paychecks.length">
         <h2>Recent paychecks</h2>
         <table class="data">
           <thead><tr><th>Pay date</th><th>Employee</th><th class="num">Gross</th><th class="num">Net</th><th></th></tr></thead>
           <tr v-for="p in paychecks.slice(0, 20)">
             <td>{{ p.payDate }}</td><td>{{ p.employee }}</td><td class="num">{{ money(p.grossCents) }}</td><td class="num">{{ money(p.netPayCents) }}</td>
-            <td><span class="muted" v-if="p.voidsPaycheckId">void record</span><span class="muted" v-else-if="p.voided">voided</span>
+            <td class="actions"><button v-if="can('payroll')" class="link" @click="openStub(p)">stub</button>
+              <span class="muted" v-if="p.voidsPaycheckId"> void record</span><span class="muted" v-else-if="p.voided"> voided</span>
               <button v-else-if="can('payroll')" class="link" @click="voidPaycheck(p)">void</button></td>
           </tr>
         </table>
@@ -841,6 +930,29 @@
           <ul class="warn"><li v-for="w in pc.result.warnings">{{ w }}</li></ul>
           <button class="primary" @click="postPaycheck">Record this paycheck</button>
         </div>
+      </div>
+
+      <div class="card statement" v-if="can('payroll')">
+        <div class="row wrap">
+          <h2>Payroll taxes owed</h2>
+          <label class="inline">From <input type="date" v-model="liab.from"></label>
+          <label class="inline">To <input type="date" v-model="liab.to"></label>
+          <button @click="loadLiab">Show</button>
+          <button v-if="liab.data" @click="printPage">Print</button>
+        </div>
+        <p class="hint">Taxes from paychecks dated in this range, by where they are paid. During the beta you (or your accountant) make these deposits; record each one as money moved from your bank account to the matching payroll liability account.</p>
+        <template v-if="liab.data">
+          <p class="muted">{{ liab.data.paychecks }} paycheck{{ liab.data.paychecks === 1 ? '' : 's' }}, {{ money(liab.data.grossCents) }} gross wages</p>
+          <table class="data">
+            <template v-for="a in liab.data.agencies">
+              <tr class="head"><td>{{ a.agency }}<span class="muted small" v-if="a.form"> · {{ a.form }}</span></td><td></td><td class="num">{{ money(a.totalCents) }}</td></tr>
+              <tr v-for="l in a.lines"><td class="ind">{{ l.label }}</td><td class="muted small">{{ l.who === 'employee' ? 'withheld' : 'employer' }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            </template>
+            <tr class="total"><td>Total payroll taxes</td><td></td><td class="num">{{ money(liab.data.totalCents) }}</td></tr>
+          </table>
+          <h3>Still unpaid as of {{ liab.data.to }}</h3>
+          <table class="data"><tr v-for="u in liab.data.unpaid"><td>{{ u.code }} · {{ u.name }}</td><td class="num" :class="{ bad: u.owedCents > 0 }">{{ money(u.owedCents) }}</td></tr></table>
+        </template>
       </div>
     </section>
 
