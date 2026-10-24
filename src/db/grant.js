@@ -12,7 +12,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${role};
     GRANT INSERT ON companies, accounts, journal_entries, journal_lines, audit_log, employees, paychecks,
                     recurring_entries, books_checks, bank_transactions, bank_rules, reconciliations, reconciliation_lines, import_batches,
-                    contacts, documents, document_lines, payments, payment_applications, payroll_runs,
+                    contacts, documents, document_lines, payments, payment_applications, payroll_runs, company_roles, departments,
                     users, sessions, memberships TO ${role};
     GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount) ON companies TO ${role};
     GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash) ON users TO ${role};
@@ -26,7 +26,9 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (name, email, phone, address, terms_days, is_1099, is_active) ON contacts TO ${role};
     GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at) ON documents, payments TO ${role};
     GRANT DELETE ON sessions TO ${role};
-    GRANT UPDATE (role) ON memberships TO ${role};
+    GRANT UPDATE (role, custom_role_id, department_id) ON memberships TO ${role};
+    GRANT UPDATE (name, permissions) ON company_roles TO ${role};
+    GRANT DELETE ON company_roles, departments TO ${role};
     GRANT DELETE ON memberships TO ${role};
     GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO ${role};
     REVOKE ALL ON schema_migrations FROM ${role};`;

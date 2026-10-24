@@ -84,3 +84,6 @@ details table { margin-top: 6px; }
 td.w90, th.w90 { width: 90px; } td.w120 { width: 120px; } th.w150 { width: 150px; }
 input.auto-w { width: auto; display: inline-block; }
 input.num { text-align: right; }
+th.perm-col { font-size: 11px; text-align: center; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+td.perm-col { text-align: center; color: var(--ok); }
+input.grow { flex: 1; width: auto; margin: 0; }

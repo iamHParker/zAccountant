@@ -7,12 +7,13 @@
 import { hashPassword, verifyPassword, DUMMY_HASH, passwordProblems, sha256, randomToken, encryptField, decryptField } from '../security/crypto.js';
 import { newTotpSecret, verifyTotp, otpauthUri } from '../security/totp.js';
 import { LedgerError } from '../core/ledger.js';
+import { PRESET_ROLES, PRESET_KEYS } from '../core/permissions.js';
 
 export class AuthError extends Error {
   constructor(message, status = 401) { super(message); this.name = 'AuthError'; this.status = status; }
 }
 
-export const ROLES = Object.freeze(['owner', 'accountant', 'bookkeeper', 'viewer']);
+export const ROLES = PRESET_KEYS;
 const IDLE_MINUTES = 30;
 const ABSOLUTE_HOURS = 12;
 const MAX_FAILED = 10;
@@ -134,31 +135,69 @@ export async function mfaVerify(db, userId, tokenHash, input) {
 }
 
 // ---- Memberships
+
+const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * What this user may do in this company: { role, roleName, permissions: Set, departmentId }, or null
+ * if they are not a member. A custom role's permissions come from its company_roles row.
+ */
+export async function getAccess(db, userId, companyId) {
+  const { rows: [m] } = await db.query(
+    `SELECT m.role, m.department_id, r.name AS custom_name, r.permissions AS custom_permissions
+       FROM memberships m LEFT JOIN company_roles r ON r.id = m.custom_role_id
+      WHERE m.user_id = $1 AND m.company_id = $2`, [userId, companyId]);
+  if (!m) return null;
+  const custom = m.role === 'custom';
+  return {
+    role: m.role, roleName: custom ? m.custom_name : PRESET_ROLES[m.role].label,
+    permissions: new Set(custom ? m.custom_permissions : PRESET_ROLES[m.role].permissions), departmentId: m.department_id,
+  };
+}
+
 export async function getRole(db, userId, companyId) {
-  const { rows: [m] } = await db.query('SELECT role FROM memberships WHERE user_id = $1 AND company_id = $2', [userId, companyId]);
-  return m?.role ?? null;
+  return (await getAccess(db, userId, companyId))?.role ?? null;
 }
 
 export async function listMembers(db, companyId) {
   const { rows } = await db.query(
-    `SELECT u.id, u.email, u.name, m.role FROM memberships m JOIN users u ON u.id = m.user_id
+    `SELECT u.id, u.email, u.name, m.role, m.custom_role_id AS "roleId", r.name AS "customRoleName",
+            m.department_id AS "departmentId", d.name AS "departmentName"
+       FROM memberships m JOIN users u ON u.id = m.user_id
+       LEFT JOIN company_roles r ON r.id = m.custom_role_id LEFT JOIN departments d ON d.id = m.department_id
       WHERE m.company_id = $1 ORDER BY u.name`, [companyId]);
-  return rows;
+  return rows.map((r) => ({ ...r, roleName: r.role === 'custom' ? r.customRoleName : PRESET_ROLES[r.role].label }));
 }
 
-/** Add an existing user to a company (email invitations come with email delivery in a later sprint). */
-export async function addMember(db, companyId, { email, role }) {
-  if (!ROLES.includes(role)) throw new LedgerError(`role must be one of ${ROLES.join(', ')}`);
+/**
+ * Add an existing user to a company, or change their role/department. `role` is a built-in role
+ * (owner, accountant, bookkeeper, viewer, staff) or the id of a custom role. Email invitations come
+ * with email delivery in a later sprint.
+ */
+export async function addMember(db, companyId, { email, role, departmentId = null }) {
+  let preset = role;
+  let customId = null;
+  if (typeof role === 'string' && UUIDISH.test(role)) {
+    const { rows: [r] } = await db.query('SELECT id FROM company_roles WHERE company_id = $1 AND id = $2', [companyId, role]);
+    if (!r) throw new LedgerError('That role does not exist in this company');
+    preset = 'custom'; customId = r.id;
+  } else if (!ROLES.includes(role)) throw new LedgerError(`role must be one of ${ROLES.join(', ')}, or a custom role`);
+  if (departmentId != null && departmentId !== '') {
+    if (typeof departmentId !== 'string' || !UUIDISH.test(departmentId)) throw new LedgerError('That department does not exist');
+    const { rows: [d] } = await db.query('SELECT id FROM departments WHERE company_id = $1 AND id = $2', [companyId, departmentId]);
+    if (!d) throw new LedgerError('That department does not exist');
+  } else departmentId = null;
   const { rows: [u] } = await db.query('SELECT id, email, name FROM users WHERE email = $1', [normEmail(email)]);
   if (!u) throw new LedgerError('No zAccountant user has that email. Ask them to sign up first.');
-  if (role !== 'owner') {
+  if (preset !== 'owner') {
     const { rows: owners } = await db.query("SELECT user_id FROM memberships WHERE company_id = $1 AND role = 'owner'", [companyId]);
     if (owners.length === 1 && owners[0].user_id === u.id) throw new LedgerError('A company must keep at least one owner');
   }
   await db.query(
-    `INSERT INTO memberships (company_id, user_id, role) VALUES ($1,$2,$3)
-     ON CONFLICT (company_id, user_id) DO UPDATE SET role = EXCLUDED.role`, [companyId, u.id, role]);
-  return { ...u, role };
+    `INSERT INTO memberships (company_id, user_id, role, custom_role_id, department_id) VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (company_id, user_id) DO UPDATE SET role = EXCLUDED.role, custom_role_id = EXCLUDED.custom_role_id, department_id = EXCLUDED.department_id`,
+    [companyId, u.id, preset, customId, departmentId]);
+  return { ...u, role: preset, roleId: customId, departmentId };
 }
 
 export async function removeMember(db, companyId, userId) {

@@ -38,9 +38,9 @@ function taxCents(taxable, pct) {
 
 // Sales (invoices to customers) and Bills (from vendors) share one screen; these are the differences.
 const SIDES = {
-  sales: { kind: 'invoice', Doc: 'Invoice', docs: 'Invoices', who: 'customer', Who: 'Customer', Whos: 'Customers', contacts: 'customers', docPath: 'invoices',
+  sales: { kind: 'invoice', perm: 'invoices', Doc: 'Invoice', docs: 'Invoices', who: 'customer', Who: 'Customer', Whos: 'Customers', contacts: 'customers', docPath: 'invoices',
     payPath: 'payments-received', agingPath: 'ar-aging', payVerb: 'Receive payment', control: 'Accounts Receivable', lineHint: 'Income account' },
-  bills: { kind: 'bill', Doc: 'Bill', docs: 'Bills', who: 'vendor', Who: 'Vendor', Whos: 'Vendors', contacts: 'vendors', docPath: 'bills',
+  bills: { kind: 'bill', perm: 'bills', Doc: 'Bill', docs: 'Bills', who: 'vendor', Who: 'Vendor', Whos: 'Vendors', contacts: 'vendors', docPath: 'bills',
     payPath: 'payments-made', agingPath: 'ap-aging', payVerb: 'Pay bills', control: 'Accounts Payable', lineHint: 'Expense account' },
 };
 const blankLine = () => ({ accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
@@ -61,10 +61,11 @@ async function api(method, url, body, headers = {}) {
   return data;
 }
 
-// What each role may do (mirrors PERMISSIONS in src/app.js; the server is the real gatekeeper).
-const CAN = {
-  post: ['owner', 'accountant', 'bookkeeper'], accounts: ['owner', 'accountant'], close: ['owner', 'accountant'],
-  payroll: ['owner', 'accountant'], audit: ['owner', 'accountant'], admin: ['owner'],
+// Which tabs need which permission (any of). The server is the real gatekeeper; this just hides
+// screens someone can't use.
+const TAB_PERMS = {
+  home: ['view_books'], journal: ['view_books'], sales: ['view_books', 'invoices'], bills: ['view_books', 'bills'], bank: ['view_books'],
+  reports: ['view_books'], accounts: ['view_books'], payroll: ['view_books', 'payroll'],
 };
 
 // One key per "Save" click: if the request is retried (double click, flaky Wi-Fi), the server posts it only once.
@@ -83,7 +84,7 @@ createApp({
     return {
       companies: [], companyId: null, company: null, tab: 'home', message: null,
       auth: { screen: 'loading', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
-      members: [], newMember: { email: '', role: 'bookkeeper' },
+      members: [], newMember: { email: '', role: 'bookkeeper', departmentId: '' },
       roleLabels: { owner: 'Owner', accountant: 'Accountant', bookkeeper: 'Bookkeeper', viewer: 'Viewer (read only)' },
       months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       tabs: [
@@ -91,6 +92,8 @@ createApp({
         { id: 'reports', label: 'Reports' },
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
+      roles: { permissions: [], presets: [], custom: [] }, departments: [], newDept: '',
+      roleEdit: null,
       typeLabel: { asset: 'Asset', liability: 'Liability', equity: 'Equity', revenue: 'Income', expense: 'Expense' },
       newCompany: { name: '', homeState: 'TX', fiscalYearStartMonth: 1 },
       accounts: [], dash: null, entries: [], entriesTotal: 0, search: blankSearch(), recurring: [], showRecurring: false, booksCheck: null,
@@ -165,8 +168,8 @@ createApp({
     tab(t) {
       if (t === 'reports') this.loadReport();
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
-      if (t === 'payroll' || t === 'settings') this.loadEmployees();
-      if (t === 'settings') { this.loadMembers(); this.loadBooksCheck(); }
+      if ((t === 'payroll' || t === 'settings') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
+      if (t === 'settings') { this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'bank') this.loadBank();
       if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
@@ -185,7 +188,8 @@ createApp({
   },
   methods: {
     money,
-    can(perm) { return Boolean(this.company && CAN[perm].includes(this.company.role)); },
+    can(perm) { return Boolean(this.company?.permissions?.includes(perm)); },
+    canTab(id) { const need = TAB_PERMS[id]; return !need || need.some((p) => this.can(p)); },
     async goAuth(screen) {
       this.auth.screen = screen; this.auth.code = '';
       if (screen === 'mfa_setup' && !this.auth.setup) {
@@ -228,8 +232,31 @@ createApp({
     },
     async loadMembers() { this.members = (await this.run(() => api('GET', `/companies/${this.companyId}/members`))) ?? []; },
     async addMember() {
-      const m = await this.run(() => api('POST', `/companies/${this.companyId}/members`, this.newMember), 'Member saved.');
-      if (m) { this.newMember = { email: '', role: 'bookkeeper' }; this.loadMembers(); }
+      const m = await this.run(() => api('POST', `/companies/${this.companyId}/members`, { ...this.newMember, departmentId: this.newMember.departmentId || null }), 'Member saved.');
+      if (m) { this.newMember = { email: '', role: 'bookkeeper', departmentId: '' }; this.loadMembers(); this.loadAccess(); }
+    },
+    editMember(m) { this.newMember = { email: m.email, role: m.role === 'custom' ? m.roleId : m.role, departmentId: m.departmentId ?? '' }; },
+    async loadAccess() {
+      this.roles = (await this.run(() => api('GET', `/companies/${this.companyId}/roles`))) ?? this.roles;
+      this.departments = (await this.run(() => api('GET', `/companies/${this.companyId}/departments`))) ?? [];
+    },
+    newRole() { this.roleEdit = { id: null, name: '', permissions: [] }; },
+    editRole(r) { this.roleEdit = { id: r.id, name: r.name, permissions: [...r.permissions] }; },
+    async saveRole() {
+      const r = this.roleEdit;
+      const body = { name: r.name, permissions: r.permissions };
+      const ok = await this.run(() => (r.id ? api('PATCH', `/companies/${this.companyId}/roles/${r.id}`, body) : api('POST', `/companies/${this.companyId}/roles`, body)), 'Role saved.');
+      if (ok) { this.roleEdit = null; this.loadAccess(); this.loadMembers(); }
+    },
+    async deleteRole(r) {
+      if (!confirm(`Delete the role "${r.name}"?`)) return;
+      if (await this.run(() => api('DELETE', `/companies/${this.companyId}/roles/${r.id}`), 'Role deleted.')) this.loadAccess();
+    },
+    async addDept() {
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/departments`, { name: this.newDept }), 'Department added.')) { this.newDept = ''; this.loadAccess(); }
+    },
+    async deleteDept(d) {
+      if (await this.run(() => api('DELETE', `/companies/${this.companyId}/departments/${d.id}`), 'Department deleted.')) this.loadAccess();
     },
     async removeMember(m) {
       if (!confirm(`Remove ${m.name} from ${this.company.name}?`)) return;
@@ -246,7 +273,7 @@ createApp({
       this.accounts = await api('GET', `/companies/${this.companyId}/accounts`);
       this.quick.bank = this.bankAccounts[0]?.id ?? '';
       this.register = null; this.pc.employee = null;
-      if (this.tab === 'new-company') this.tab = 'home';
+      if (this.tab === 'new-company' || !this.canTab(this.tab)) this.tab = this.tabs.find((t) => this.canTab(t.id))?.id ?? 'settings';
       this.tab === 'home' ? this.loadDash() : this.$options.watch.tab.call(this, this.tab);
     },
     async loadDash() { if (this.companyId) this.dash = await this.run(() => api('GET', `/companies/${this.companyId}/reports/dashboard?asOf=${today()}`)); },
