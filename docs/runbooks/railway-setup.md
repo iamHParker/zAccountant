@@ -34,5 +34,8 @@ Homer does these steps in the Railway website; Claude sends them one at a time i
 **Done 2026-10-24:** steps 1–7 at `zaccountant-production.up.railway.app` (Hobby plan). Step 8 waits on Homer's
 choice (Pro, or our own backup job); he chose to decide later, reminder set for Nov 16.
 
+9. **Developer dashboard.** App service → Variables: `DEVELOPER_EMAILS=<Homer's sign-in email>`. The app redeploys
+   and a **Developer** button appears next to ? Help.
+
 Later: custom domain (e.g. app.zaccountant.com, then set `ALLOWED_HOSTS` to include it), `METRICS_TOKEN` for
 Grafana, an uptime monitor on `/healthz`.

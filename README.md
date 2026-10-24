@@ -65,6 +65,8 @@ app (Google/Microsoft Authenticator, 1Password, Authy). `npm run seed` also crea
 | `ALLOWED_HOSTS` | production | the site's host name, e.g. `app.zaccountant.com` |
 | `TRUST_PROXY` | production | `1` behind Railway's proxy, so rate limits see each visitor's address |
 | `METRICS_TOKEN` | for monitoring | turns on `GET /metrics` for Grafana (send it as a bearer token) |
+| `DEVELOPER_EMAILS` | for the Developer dashboard | comma-separated sign-in emails that see the Developer dashboard (beta feedback, server errors, backup download) |
+| `ADMIN_EMAILS` | optional | comma-separated sign-in emails that see the Admin dashboard only |
 | `API_RATE_LIMIT`, `AUTH_RATE_LIMIT` | optional | requests per minute per address (default 1,200), sign-in attempts per 5 minutes (default 30) |
 
 Monitoring, backups (the restore drill) and the load test: [docs/runbooks/operations.md](docs/runbooks/operations.md).

@@ -2,6 +2,7 @@
 // ℹ️ Vue keeps the page in sync with the data below: change `this.tab` and the screen switches.
 import { createApp } from '/vendor/vue.js';
 import { HELP, helpForTab, searchHelp } from '/help.js';
+import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const yearStart = () => today().slice(0, 4) + '-01-01';
@@ -75,6 +76,7 @@ async function api(method, url, body, headers = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && !url.startsWith('/auth/') && !url.includes('/lock')) onSignInNeeded(data.next);
+  if (!res.ok && res.status !== 401) noteError('server', `${method} ${url.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, ':id')} → ${res.status}: ${data.error ?? ''}`, res.headers.get('x-request-id'));
   if (!res.ok) throw Object.assign(new Error(data.error ?? `Request failed (${res.status})`), { details: data.details ?? [] });
   return data;
 }
@@ -121,6 +123,9 @@ createApp({
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
       help: { q: '', id: 'start', from: 'home' },
+      version: '',
+      fb: { open: false, note: '', picture: null, pictureSource: null, busy: false, error: '' },
+      dev: { from: 'home', summary: null, status: 'new', list: null, report: null, text: '', note: '', copied: false },
       roles: { permissions: [], presets: [], custom: [] }, departments: [], newDept: '',
       roleEdit: null,
       typeLabel: { asset: 'Asset', liability: 'Liability', equity: 'Equity', revenue: 'Income', expense: 'Expense' },
@@ -227,10 +232,12 @@ createApp({
     'quick.kind'() { this.quick.other = ''; },
   },
   async mounted() {
+    startRecorder();
     onSignInNeeded = (next) => this.goAuth(next ?? 'signin');
     try {
       const me = await api('GET', '/auth/me');
       this.auth.user = me.user;
+      this.version = me.version ?? '';
       if (me.next) return this.goAuth(me.next);
       await this.enterApp();
     } catch { this.goAuth('signin'); }
@@ -255,14 +262,14 @@ createApp({
       const a = this.auth;
       const r = await this.run(() => api('POST', '/auth/login', { email: a.email, password: a.password }));
       if (!r) return;
-      a.password = ''; a.user = r.user;
+      a.password = ''; a.user = r.user; this.version = r.version ?? '';
       this.goAuth(r.next);
     },
     async signUp() {
       const a = this.auth;
       const r = await this.run(() => api('POST', '/auth/signup', { email: a.email, password: a.password, name: a.name }));
       if (!r) return;
-      a.password = ''; a.user = r.user;
+      a.password = ''; a.user = r.user; this.version = r.version ?? '';
       this.goAuth(r.next);
     },
     async enableMfa() {
@@ -325,6 +332,75 @@ createApp({
       window.addEventListener('afterprint', done);
       window.print();
     },
+    /** Beta feedback: open the dialog (the picture is taken only if the tester asks for one). */
+    openFeedback() { Object.assign(this.fb, { open: true, error: '' }); },
+    closeFeedback() { this.fb.open = false; },
+    async takePicture() {
+      const f = this.fb;
+      f.busy = true; f.error = '';
+      try { f.picture = await pictureOfScreen(); f.pictureSource = 'screen'; } catch (e) { f.error = `The screen picture didn't work (${e.message}). You can attach a photo instead.`; }
+      f.busy = false;
+    },
+    async choosePhoto(e) {
+      const f = this.fb;
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      if (!file) return;
+      f.busy = true; f.error = '';
+      try { f.picture = await pictureFromFile(file); f.pictureSource = 'photo'; } catch (err) { f.error = err.message; }
+      f.busy = false;
+    },
+    removePicture() { this.fb.picture = null; this.fb.pictureSource = null; },
+    async sendFeedback() {
+      const f = this.fb;
+      if (!f.note.trim()) { f.error = 'Say in a few words what went wrong.'; return; }
+      f.busy = true; f.error = '';
+      const tabLabel = this.tab === 'help' ? 'Help' : this.tab === 'developer' ? 'Developer' : (this.tabs.find((t) => t.id === this.tab)?.label ?? this.tab);
+      const panel = this.tab === 'reports' ? this.reportTypes.find((r) => r.id === this.report.type)?.label
+        : ['sales', 'bills'].includes(this.tab) ? { docs: this.S.docs, contacts: this.S.Whos, payments: 'Payments', aging: 'Aging report' }[this.ar.panel]
+          : this.tab === 'bank' ? this.bank.view : '';
+      try {
+        const r = await api('POST', '/feedback', {
+          note: f.note, companyId: this.company ? this.companyId : null, picture: f.picture, pictureSource: f.pictureSource,
+          context: captureContext({ tab: this.company ? tabLabel : 'Welcome (no company yet)', panel: panel ?? '', role: this.company?.roleName ?? '' }),
+        });
+        Object.assign(f, { open: false, note: '', picture: null, pictureSource: null });
+        this.flash(`Report ${r.number} sent. Thank you!`);
+      } catch (e) { f.error = e.message; }
+      f.busy = false;
+    },
+    /** Developer dashboard (platform developers only; the server checks too). */
+    openDeveloper() {
+      if (this.tab === 'developer') { this.tab = this.dev.from; return; }
+      this.dev.from = this.tab === 'help' ? this.help.from : this.tab;
+      this.tab = 'developer';
+      this.loadDev();
+    },
+    async loadDev() {
+      this.dev.summary = await this.run(() => api('GET', '/developer/summary'));
+      await this.loadDevReports();
+    },
+    async loadDevReports() {
+      this.dev.list = await this.run(() => api('GET', `/developer/reports${this.dev.status ? `?status=${this.dev.status}` : ''}`));
+    },
+    async openDevReport(id) {
+      const r = await this.run(() => api('GET', `/developer/reports/${id}`));
+      if (!r) return;
+      Object.assign(this.dev, { report: r, text: r.claudeDraft, note: r.developerNote, copied: false });
+    },
+    async saveDevReport(change, done = 'Saved.') {
+      const d = this.dev;
+      const ok = await this.run(() => api('PATCH', `/developer/reports/${d.report.id}`, change), done);
+      if (ok) { await this.openDevReport(d.report.id); this.loadDevReports(); }
+      return ok;
+    },
+    async copyForClaude() {
+      const d = this.dev;
+      try { await navigator.clipboard.writeText(d.text); } catch { this.flash('The browser would not copy. Select the text and copy it yourself.', 'bad'); return; }
+      await this.saveDevReport({ claudeText: d.text, status: 'sent_to_claude' }, 'Copied. Paste it into your Claude project chat (and attach the picture if it helps).');
+      d.copied = true;
+    },
+    resetClaudeText() { this.saveDevReport({ claudeText: null }, 'Back to the automatic write-up.'); },
     /** The "?" button: open the guide for the screen you're on. */
     openHelp() {
       if (this.tab === 'help') { this.tab = this.help.from; return; }

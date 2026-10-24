@@ -201,6 +201,18 @@ and <em>Run full check now</em> also proves the trial balance and balance sheet 
 <p><strong>Recovery codes:</strong> save them somewhere safe when you set up. If you lose your phone, each code signs you in once.</p>
 <p>Social Security numbers are encrypted before they're stored, and each company's data is walled off by the database itself.</p>`,
   },
+  {
+    id: 'feedback', tab: null, title: 'Beta feedback: telling us about a problem',
+    words: 'bug error problem report beta feedback picture screenshot photo broken wrong',
+    html: `
+<p>Press <strong>🐞 Beta feedback</strong> at the top of any screen, say what happened and what you expected, and press <strong>Send</strong>.
+You'll get a report number to quote if you talk to us about it.</p>
+<p>The report automatically includes which screen you're on, your last few clicks (the buttons' names only, never what you typed)
+and any error messages, so you don't have to copy them.</p>
+<p><strong>Pictures help.</strong> <em>Take a picture of the screen</em> adds what's behind the feedback box. <em>Attach a photo or picture</em>
+lets you add a screenshot you took yourself, or a phone photo of the screen. The picture shows whatever is on your screen,
+including amounts from your books; only the zAccountant developers can see it, and you can remove it before sending.</p>`,
+  },
 ];
 
 /** The guide to open with the "?" button on a screen. */
