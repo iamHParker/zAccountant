@@ -88,6 +88,9 @@ async function cleanTrip(c, companyId, input, errors, partial = false) {
   return out;
 }
 
+/** 6000 → "60", 3333 → "33.33" */
+const bpText = (bp) => (bp / 100).toFixed(2).replace(/\.?0+$/, '');
+
 async function saveTripJobs(c, companyId, tripId, jobs) {
   await c.query('DELETE FROM trip_jobs WHERE trip_id = $1', [tripId]);
   for (const j of jobs) await c.query('INSERT INTO trip_jobs (company_id, trip_id, job_id, share_bp) VALUES ($1,$2,$3,$4)', [companyId, tripId, j.jobId, j.shareBp]);
@@ -122,7 +125,14 @@ export async function updateTrip(pool, companyId, tripId, input, { actor = null 
       const { rows: billed } = await c.query(`SELECT DISTINCT j.name, l.job_id FROM document_lines l JOIN documents d ON d.id = l.document_id JOIN jobs j ON j.id = l.job_id
         WHERE d.status = 'posted' AND l.job_id IS NOT NULL AND (l.trip_cost_id IN (SELECT id FROM trip_costs WHERE trip_id = $1)
           OR l.time_entry_id IN (SELECT id FROM time_entries WHERE trip_id = $1))`, [tripId]);
-      for (const b of billed) if (!v.jobs.some((j) => j.jobId === b.job_id)) errors.push(`${b.name} has already billed part of this trip, so it stays on the list`);
+      // ...and keeps its share: later "pull in unbilled" lines use the share, so changing it would bill more or less than 100%.
+      const { rows: oldShares } = await c.query('SELECT job_id, share_bp FROM trip_jobs WHERE trip_id = $1', [tripId]);
+      for (const b of billed) {
+        const now = v.jobs.find((j) => j.jobId === b.job_id);
+        const was = oldShares.find((s) => s.job_id === b.job_id);
+        if (!now) errors.push(`${b.name} has already billed part of this trip, so it stays on the list`);
+        else if (was && now.shareBp !== was.share_bp) errors.push(`${b.name} has already billed part of this trip at ${bpText(was.share_bp)}%, so its share stays ${bpText(was.share_bp)}%`);
+      }
     }
     if (errors.length) throw new LedgerError('Trip is not valid', errors);
     const cols = { name: 'name', startDate: 'start_date', endDate: 'end_date', notes: 'notes', isActive: 'is_active' };

@@ -430,6 +430,10 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const dept = await owner.c.call('POST', `${base}/departments`, { name: 'Engineering' });
     assert.equal(dept.status, 201, JSON.stringify(dept.body));
     assert.equal((await owner.c.call('POST', `${base}/departments`, { name: ' engineering ' })).status, 400);
+    const renamed = await owner.c.call('PUT', `${base}/departments/${dept.body.id}`, { name: 'Engineering & Design' });
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
+    assert.equal(renamed.body.name, 'Engineering & Design');
+    assert.equal((await owner.c.call('PUT', `${base}/departments/${dept.body.id}`, { name: 'Engineering' })).status, 200);
     const pm = await owner.c.call('POST', `${base}/roles`, { name: 'Project Manager', permissions: ['view_books', 'invoices', 'time_approve'] });
     assert.equal(pm.status, 201, JSON.stringify(pm.body));
     assert.equal((await owner.c.call('POST', `${base}/roles`, { name: 'Bookkeeper', permissions: ['post'] })).status, 400, 'built-in name');

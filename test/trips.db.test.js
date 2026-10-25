@@ -108,6 +108,9 @@ test('trips: costs and travel time shared by project, billed once per project', 
     await assert.rejects(trips.voidTripCost(pool, co.id, air.id), /billed on invoice/);
     await assert.rejects(trips.removeTravelTime(pool, co.id, viewer, trip.id, trip.time[0].id), /billed on invoice 2601/);
     await assert.rejects(trips.updateTrip(pool, co.id, trip.id, { jobs: [{ jobId: small.id, share: '10' }] }), (e) => e.details.some((d) => /already billed part/.test(d)));
+    // CPA review B4: a project that has billed keeps its share too (later pulls would bill more or less than 100%).
+    await assert.rejects(trips.updateTrip(pool, co.id, trip.id, { jobs: [{ jobId: big.id, share: '70' }, { jobId: small.id, share: '10' }] }),
+      (e) => e.details.some((d) => /share stays 80%/.test(d)));
   });
 
   await t.test('edit a cost: void + corrected copy, receipt photo moves along', async () => {

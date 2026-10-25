@@ -95,6 +95,22 @@ export async function createDepartment(pool, companyId, { name }, { actor = null
   });
 }
 
+/** Rename a department (members stay in it). */
+export async function renameDepartment(pool, companyId, departmentId, { name }, { actor = null } = {}) {
+  if (typeof departmentId !== 'string' || !UUIDISH.test(departmentId)) throw new LedgerError('Department not found');
+  const n = cleanName(name, 60, 'Department');
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows: [dup] } = await c.query('SELECT 1 FROM departments WHERE company_id = $1 AND id <> $2 AND lower(trim(name)) = lower($3)', [companyId, departmentId, n]);
+    if (dup) throw new LedgerError(`There is already a department named "${n}"`);
+    const { rows: [old] } = await c.query('SELECT name FROM departments WHERE company_id = $1 AND id = $2', [companyId, departmentId]);
+    if (!old) throw new LedgerError('Department not found');
+    await c.query('UPDATE departments SET name = $3 WHERE company_id = $1 AND id = $2', [companyId, departmentId, n]);
+    await appendAudit(c, companyId, { action: 'rename', entity: 'department', entityId: departmentId, actor, payload: { from: old.name, to: n } });
+    return { id: departmentId, name: n };
+  });
+}
+
 export async function deleteDepartment(pool, companyId, departmentId, { actor = null } = {}) {
   if (typeof departmentId !== 'string' || !UUIDISH.test(departmentId)) throw new LedgerError('Department not found');
   return withTransaction(pool, async (c) => {

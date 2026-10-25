@@ -43,6 +43,7 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 - **Backups:** nightly off-site backup is built (`src/jobs/offsiteBackup.js`, pg_dump → AES-GCM → S3-compatible
   bucket, migration 027); off until Homer creates the bucket and sets the `BACKUP_*` variables (runbook section 4).
   Needs one real restore drill from the bucket before alpha (Dec 1).
+- **Edit sweep** (CPA review 2026-10-25, `docs/board/edit-sweep.md`): batches 1-5 of missing edits; tick them off there.
 - Tax-ready level 1 is built (see below). Level 2+ (printed forms, e-file) is not planned: a CPA partner does real
   preparation through an accountant's role. Tax line numbers are `verified: false` until the Board checks them.
 - Front page claims: the Security section's "Coming" list (encryption on the user's side so we can't read the data;

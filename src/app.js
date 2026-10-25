@@ -227,6 +227,7 @@ export function createApp(pool, { log } = {}) {
     const s = await fullSession(req);
     res.status(201).json(await auth.passkeyRegister(pool, s.user.id, { credential: req.body?.credential, name: req.body?.name }, relyingParty(req)));
   });
+  authApi.put('/passkeys/:id', async (req, res) => res.json(await auth.renamePasskey(pool, (await fullSession(req)).user.id, req.params.id, { name: req.body?.name })));
   authApi.delete('/passkeys/:id', async (req, res) => {
     await auth.removePasskey(pool, (await fullSession(req)).user.id, req.params.id);
     res.json({ ok: true });
@@ -453,6 +454,7 @@ export function createApp(pool, { log } = {}) {
   api.delete('/companies/:companyId/roles/:roleId', route('admin', ({ db, req, companyId, actor }) => roles.deleteRole(db, companyId, req.params.roleId, { actor })));
   api.get('/companies/:companyId/departments', route('member', ({ db, companyId }) => roles.listDepartments(db, companyId)));
   api.post('/companies/:companyId/departments', route('admin', ({ db, req, companyId, actor }) => roles.createDepartment(db, companyId, req.body ?? {}, { actor }), 201));
+  api.put('/companies/:companyId/departments/:departmentId', route('admin', ({ db, req, companyId, actor }) => roles.renameDepartment(db, companyId, req.params.departmentId, req.body ?? {}, { actor })));
   api.delete('/companies/:companyId/departments/:departmentId', route('admin', ({ db, req, companyId, actor }) => roles.deleteDepartment(db, companyId, req.params.departmentId, { actor })));
 
   // Accounts
@@ -516,7 +518,7 @@ export function createApp(pool, { log } = {}) {
   api.get(R, route('view_books', ({ db, req, companyId }) => bank.getReconciliation(db, companyId, req.params.reconId)));
   api.post(`${R}/lines`, route('post', ({ db, req, companyId }) => bank.setCleared(db, companyId, req.params.reconId, { lineIds: req.body?.lineIds, cleared: req.body?.cleared !== false })));
   api.post(`${R}/complete`, route('post', ({ db, req, companyId, actor }) => bank.completeReconciliation(db, companyId, req.params.reconId, { actor })));
-  api.delete(R, route('post', ({ db, req, companyId }) => bank.cancelReconciliation(db, companyId, req.params.reconId)));
+  api.delete(R, route('post', ({ db, req, companyId, actor }) => bank.cancelReconciliation(db, companyId, req.params.reconId, { actor })));
 
   // Customers & invoices, vendors & bills, payments (accounts receivable / payable)
   // Sales needs "invoices", Bills needs "bills"; anyone who can see the books can also look.
