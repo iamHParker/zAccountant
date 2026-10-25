@@ -484,6 +484,12 @@ export function createApp(pool, { log } = {}) {
   }));
   api.post('/companies/:companyId/documents/:documentId/void', route('post', ({ db, req, companyId, actor }) =>
     arap.voidDocument(db, companyId, req.params.documentId, { date: req.body?.date, actor })));
+  // Edit = void + corrected copy in one step, so it needs the same permission as Void.
+  api.put('/companies/:companyId/documents/:documentId', route('post', async ({ db, req, companyId, can, actor }) => {
+    await needSide(db, can, 'documents', req.params.documentId);
+    const { contactId, number, date, dueDate, memo, project, taxRate, lines } = req.body ?? {};
+    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, taxRate, lines, idempotencyKey: idemKey(req), actor });
+  }));
   for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
@@ -497,6 +503,11 @@ export function createApp(pool, { log } = {}) {
   }));
   api.post('/companies/:companyId/payments/:paymentId/void', route('post', ({ db, req, companyId, actor }) =>
     arap.voidPayment(db, companyId, req.params.paymentId, { date: req.body?.date, actor })));
+  api.put('/companies/:companyId/payments/:paymentId', route('post', async ({ db, req, companyId, can, actor }) => {
+    await needSide(db, can, 'payments', req.params.paymentId);
+    const { contactId, date, accountId, method, reference, memo, applications } = req.body ?? {};
+    return arap.replacePayment(db, companyId, req.params.paymentId, { contactId, date, accountId, method, reference, memo, applications, idempotencyKey: idemKey(req), actor });
+  }));
   api.get('/companies/:companyId/reports/ar-aging', report(['view_books', 'invoices'], 'Accounts Receivable Aging',
     ({ db, req, companyId }) => arap.getAging(db, companyId, { kind: 'invoice', asOf: q(req.query.asOf) ?? centralToday() }), agingRows));
   api.get('/companies/:companyId/reports/ap-aging', report(['view_books', 'bills'], 'Accounts Payable Aging',

@@ -51,7 +51,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 ## How the code is built (rules to keep)
 - Money is **integer cents**; rounding is half-up with BigInt (`src/core/money.js`). Hours are whole minutes.
 - Double-entry ledger enforced by the database (deferred balance trigger), append-only history, period lock,
-  HMAC audit chain. AR/AP control accounts accept only document postings.
+  HMAC audit chain. AR/AP control accounts accept only document postings. Edit of an invoice/bill/payment = void +
+  corrected copy in one transaction (`replaced_by_id`, migration 020); a saved record is never updated in place.
 - Row-level security via `withScope`; the runtime DB role gets column-level grants (`src/db/grant.js`) — add a
   grant for every new table/column the app writes.
 - Every API route names a permission (`src/core/permissions.js`); the UI hides what a role can't use, but the

@@ -554,7 +554,8 @@
       </div>
 
       <div class="card" v-if="ar.showDoc">
-        <h2>New {{ S.Doc.toLowerCase() }}</h2>
+        <h2>{{ ar.doc.editId ? 'Edit ' + S.Doc.toLowerCase() + ' ' + ar.doc.editNumber : 'New ' + S.Doc.toLowerCase() }}</h2>
+        <p class="hint" v-if="ar.doc.editId">Saving voids the old {{ S.Doc.toLowerCase() }} and records this corrected one in its place{{ S.kind === 'invoice' ? ', with the same number unless you change it' : '' }}. The old one stays in history, marked replaced.</p>
         <p class="hint" v-if="!ar.contacts.length">Add a {{ S.who }} first (button above).</p>
         <form @submit.prevent="saveDoc">
           <div class="grid4">
@@ -617,17 +618,18 @@
             </div>
           </div>
           <p class="num">Subtotal {{ money(docTotals.sub) }}<span v-if="docTotals.tax"> · Sales tax {{ money(docTotals.tax) }}</span> · <strong>Total {{ money(docTotals.total) }}</strong></p>
-          <button class="primary" :disabled="docTotals.total <= 0 || !ar.doc.contactId">Save {{ S.Doc.toLowerCase() }}</button>
+          <button class="primary" :disabled="docTotals.total <= 0 || !ar.doc.contactId">{{ ar.doc.editId ? 'Save changes' : 'Save ' + S.Doc.toLowerCase() }}</button>
           <button type="button" @click="ar.showDoc = false">Cancel</button>
         </form>
       </div>
 
       <div class="card" v-if="ar.showPay">
-        <h2>{{ S.payVerb }}</h2>
+        <h2>{{ ar.pay.editId ? 'Edit payment' : S.payVerb }}</h2>
+        <p class="hint" v-if="ar.pay.editId">Saving voids the old payment and records this corrected one in its place. The old one stays in history, marked replaced.</p>
         <form @submit.prevent="savePay">
           <div class="grid4">
             <label>{{ S.Who }} <select v-model="ar.pay.contactId" @change="loadPayDocs" required><option value="">Choose…</option>
-              <option v-for="c in ar.contacts.filter(c => c.openCents > 0)" :value="c.id">{{ c.name }} ({{ money(c.openCents) }})</option></select></label>
+              <option v-for="c in ar.contacts.filter(c => c.openCents > 0 || c.id === ar.pay.contactId)" :value="c.id">{{ c.name }} ({{ money(c.openCents) }})</option></select></label>
             <label>Date <input type="date" v-model="ar.pay.date" required></label>
             <label>{{ S.kind === 'invoice' ? 'Deposited to' : 'Paid from' }} <select v-model="ar.pay.accountId" required><option v-for="a in payAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
             <label>Method <select v-model="ar.pay.method"><option value="check">Check</option><option value="ach">ACH / bank transfer</option><option value="card">Card</option><option value="cash">Cash</option><option value="wire">Wire</option><option value="other">Other</option></select></label>
@@ -646,17 +648,18 @@
           </table>
           <button type="button" class="small" v-if="ar.pay.open.length" @click="payInFull">Pay all in full</button>
           <p class="num"><strong>Payment total {{ money(payTotal) }}</strong></p>
-          <button class="primary" :disabled="payTotal <= 0">Save payment</button>
+          <button class="primary" :disabled="payTotal <= 0">{{ ar.pay.editId ? 'Save changes' : 'Save payment' }}</button>
           <button type="button" @click="ar.showPay = false">Cancel</button>
         </form>
       </div>
 
       <div class="card statement-doc print-me" v-if="ar.detail">
         <div class="row">
-          <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small no-print">· {{ statusLabel(ar.detail.status) }}</span></h2>
+          <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small no-print">· {{ ar.detail.replacedById ? 'Replaced by a corrected copy' : statusLabel(ar.detail.status) }}</span></h2>
           <span>
             <button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button>
             <button v-if="can(S.perm) && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
+            <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="editDoc(ar.detail)">Edit</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="voidDoc(ar.detail)">Void</button>
             <button @click="ar.detail = null">Close</button>
           </span>
@@ -738,7 +741,7 @@
             <tr v-for="d in ar.docs" class="click" @click="openDoc(d)">
               <td>{{ d.number }}</td><td>{{ d.contactName }}</td><td>{{ d.date }}</td><td>{{ d.dueDate }}</td>
               <td class="num">{{ money(d.totalCents) }}</td><td class="num">{{ money(d.balanceCents) }}</td>
-              <td :class="{ bad: d.status === 'overdue', ok: d.status === 'paid', muted: d.status === 'void' }">{{ statusLabel(d.status) }}</td>
+              <td :class="{ bad: d.status === 'overdue', ok: d.status === 'paid', muted: d.status === 'void' }">{{ d.replacedById ? 'Replaced' : statusLabel(d.status) }}</td>
               <td class="actions" @click.stop><button class="link" @click="openDoc(d)">view</button></td>
             </tr>
           </tbody>
@@ -774,7 +777,8 @@
               <td>{{ p.date }}</td><td>{{ p.contactName }}</td><td>{{ p.accountName }}</td><td>{{ p.method }}{{ p.reference ? ' #' + p.reference : '' }}</td>
               <td>{{ p.applications.map(a => a.number).join(', ') }}</td>
               <td class="num">{{ money(p.amountCents) }}</td>
-              <td class="actions"><span v-if="p.status === 'void'">void</span><button v-else-if="can('post')" class="link" @click="voidPay(p)">void</button></td>
+              <td class="actions"><span v-if="p.status === 'void'">{{ p.replacedById ? 'replaced' : 'void' }}</span><template v-else-if="can('post')">
+                <button class="link" @click="editPay(p)">edit</button> <button class="link" @click="voidPay(p)">void</button></template></td>
             </tr>
           </tbody>
         </table>

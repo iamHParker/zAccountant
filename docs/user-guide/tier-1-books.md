@@ -88,8 +88,13 @@ much goes to each open invoice (**Pay all in full** fills them in). One payment 
 
 ### Mistakes and reports
 
-- An invoice with no payments can be **voided**. It stays on record, marked void. To undo a payment, void the
-  payment first.
+- To fix a mistake on an invoice, open it and press **Edit**. The form opens filled in; change what's wrong and press
+  **Save changes**. Behind the scenes the old invoice is voided and the corrected one takes its place with the same
+  number. The old one stays in the Voided list, marked "Replaced". Bills work the same way.
+- To fix a payment (wrong amount, date or check number), open the **Payments** tab and press **edit** on its row.
+- An invoice that already has a payment can't be edited until the payment is fixed: edit or void the payment first.
+- An invoice with no payments can also be **voided** outright. It stays on record, marked void.
+- Edit and Void need the owner's or accountant's permission, because both reverse a saved entry.
 - The **Aging report** shows who owes you and how late, in 30-day groups, and checks that it agrees with Accounts
   Receivable.
 

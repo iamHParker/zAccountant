@@ -31,7 +31,10 @@ lines, customers, employees, timesheets) and line memos are not in it. Alpha use
 - Saving a document posts one journal entry: invoice = Dr Accounts Receivable, Cr income per line, Cr Sales Tax
   Payable. Bill = Dr expense per line, Cr Accounts Payable. Payments are `payments` plus `payment_applications`.
 - Open balance = total − posted payments, so the aging reports always add up to the control accounts.
-- Documents are never edited: they are voided (entry reversed) and entered again.
+- Documents are never edited: they are voided (entry reversed) and entered again. **Edit** (`PUT …/documents/:id`,
+  `PUT …/payments/:id`, permission `post`) does both in one transaction: `replaceDocument` / `replacePayment` void the
+  old record with `replaced_by_id` set to the new id, then post the copy (an invoice keeps its number; the number index
+  skips replaced invoices). Migration 020.
 - **Professional-services invoices (migration 016):**
   - `invoice_items` holds saved rates. Kind `service` is hours × rate; kind `expense` is a cost passed on, usually
     quantity 1 and untaxed. A rate with no price means "type it on the invoice".

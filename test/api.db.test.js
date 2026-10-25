@@ -456,6 +456,11 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.deepEqual([listed.name, listed.email, listed.phone, listed.address, listed.termsDays, listed.openCents],
       ['Staff Customer LLC', 'ap@staffcustomer.com', '512-555-0100', '1 Main St, Austin, TX 78701', 15, 25000]);
     assert.equal((await staff.c.call('PATCH', `${base}/contacts/${cust.body.id}`, { email: 'not an email' })).status, 400);
+    // Editing an invoice voids it, so it needs the Void permission (the owner's or accountant's).
+    assert.equal((await staff.c.call('PUT', `${base}/documents/${inv.body.id}`, { contactId: cust.body.id, date: '2026-12-15', lines: [{ accountId: A['4100'], amount: '260' }] })).status, 403);
+    const ownerEdit = await owner.c.call('PUT', `${base}/documents/${inv.body.id}`, { contactId: cust.body.id, date: '2026-12-15', lines: [{ accountId: A['4100'], amount: '260' }] });
+    assert.equal(ownerEdit.status, 200, JSON.stringify(ownerEdit.body));
+    assert.deepEqual([ownerEdit.body.number, ownerEdit.body.totalCents], [inv.body.number, 26000]);
     // ...but can't see the books, bills or payroll, or void.
     for (const path of ['/reports/trial-balance', '/entries', '/bills', '/vendors', '/employees', '/reports/ap-aging']) {
       assert.equal((await staff.c.call('GET', base + path)).status, 403, path);
