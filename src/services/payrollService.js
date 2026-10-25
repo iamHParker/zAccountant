@@ -3,7 +3,7 @@ import { withTransaction } from '../db/pool.js';
 import { calculatePaycheck, paycheckJournalLines, PayrollError, PAY_PERIODS, SUPPORTED_STATES } from '../payroll/engine.js';
 import { validateEntry, isIsoDate, LedgerError } from '../core/ledger.js';
 import { toCents } from '../core/money.js';
-import { insertEntry, getCompany } from './ledgerService.js';
+import { insertEntry, getCompany, assertNotCleared } from './ledgerService.js';
 import { appendAudit } from './audit.js';
 import { encryptField } from '../security/crypto.js';
 
@@ -215,6 +215,7 @@ export async function voidPaycheck(pool, companyId, paycheckId, { date, reason, 
     const voidDate = date ?? pc.pay_date;
     if (!isIsoDate(voidDate) || voidDate < pc.pay_date) throw new PayrollError('Void date must be on or after the pay date');
     if (voidDate.slice(0, 4) !== String(pc.tax_year)) throw new PayrollError('A paycheck must be voided in the same tax year; otherwise issue a correction');
+    await assertNotCleared(c, companyId, pc.journal_entry_id);
     const { rows: lines } = await c.query(
       `SELECT account_id AS "accountId", credit_cents AS "debitCents", debit_cents AS "creditCents"
          FROM journal_lines WHERE company_id = $1 AND entry_id = $2 ORDER BY id`, [companyId, pc.journal_entry_id]);
@@ -658,6 +659,7 @@ export async function voidDeposit(pool, companyId, depositId, { date, actor = nu
     const depDate = d.deposit_date instanceof Date ? d.deposit_date.toISOString().slice(0, 10) : String(d.deposit_date);
     const voidDate = date ?? depDate;
     if (!isIsoDate(voidDate) || voidDate < depDate) throw new PayrollError('Void date must be on or after the deposit date');
+    await assertNotCleared(c, companyId, d.journal_entry_id);
     const { rows: lines } = await c.query(
       `SELECT account_id AS "accountId", credit_cents AS "debitCents", debit_cents AS "creditCents"
          FROM journal_lines WHERE company_id = $1 AND entry_id = $2 ORDER BY id`, [companyId, d.journal_entry_id]);

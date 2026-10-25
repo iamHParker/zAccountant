@@ -165,3 +165,10 @@ See chapter 3. Prices stay `null` until Homer sets them. Stripe comes in Decembe
 role has `UPDATE (name)` on `accounts`, nothing else). Number, type, kind and cash-flow section never change once
 created, so reports can't shift underneath posted entries. Audited as `rename` with the old and new names.
 
+## Edit rules after the CPA sweep (`docs/board/edit-sweep.md`)
+Where people expect an edit, and how each kind of record allows it, follow the CPA sweep. Posted history is corrected by
+reversal or void + corrected copy, master data is edited in place with an audit entry. Any reversal or void of an entry calls
+`ledgerService.assertNotCleared`: it refuses an entry with a line ticked in a reconciliation, or one a bank transaction is
+posted or matched to (Banking's Undo passes `bankLineOk`). `reverseEntry` calls it; paycheck and deposit voids call it
+directly. A trip project that has billed keeps its share (`tripService.updateTrip`).
+

@@ -58,7 +58,10 @@ change anything yet.
   into principal and interest. Each line is a debit or a credit, and the entry saves only when the "Difference" is
   $0.00. Rule of thumb: money arriving in an account you own is a debit; income is a credit.
 - **Mistakes are never erased.** Press **reverse** on an entry: a new entry cancels it out, and the history stays
-  complete for your accountant. Then enter it again correctly.
+  complete for your accountant. Then enter it again correctly. Entries that belong to something else say where to
+  change them instead (*void on Sales*, *Bills*, *Trips*, *Payroll*, or *Banking (Undo)*), so that record stays right.
+  An entry the bank already agrees with (posted or matched in Banking, or ticked in a reconciliation) can't be reversed
+  here: undo it in Banking first; a reconciled one stays as it is.
 - **Recurring entries** (rent, a loan payment): tick "repeat" on a journal entry. Entries that are due post each
   night, or press **Post due entries now**.
 - **Search** by words, dates, account, an amount range, or where the entry came from (bank, invoice, payroll…).
@@ -185,7 +188,8 @@ is already on an invoice can't be edited or voided until that invoice is.
 
 1. **+ New trip**: a name (Dallas, Oct 4-6) and the dates. Under **Projects and their share of the trip**, pick each
    project and type its share in percent: a major client might carry 80% and a smaller job 10%. **Split evenly** fills
-   in equal shares. The shares can add up to less than 100%; the rest isn't billed to anyone.
+   in equal shares. The shares can add up to less than 100%; the rest isn't billed to anyone. Once a project has billed
+   part of the trip, its share is fixed (so the trip never bills more or less than its shares); the others can change.
 2. **+ Add cost** for each expense: pick what it was (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other), the
    date, who was paid, the amount, the expense account, and what you paid with (bank, credit card, or an owner account
    when you paid personally). For **Mileage**, type the miles and the rate per mile (the IRS standard mileage rate for
@@ -299,6 +303,7 @@ report ties out" when its own check passes. If you ever see ⚠, please send a �
 - **Roles:** five are built in. **+ New role** makes a custom mix, for example a project manager who sees reports and
   approves timesheets but doesn't record transactions.
 - **Departments:** group people (Accounting, Engineering, Field). A department's approver approves its timesheets.
+  **rename** changes its name (its members stay); **delete** only when nobody is in it.
 - **Invoice letterhead and logo**, **Invoice rates and items:** see section 4.
 - **Back up your books:** while zAccountant is in alpha testing, keep your own copy.
   - **Download the book file** (owner only) gives one `.zacc` file with everything: transactions, invoices and bills

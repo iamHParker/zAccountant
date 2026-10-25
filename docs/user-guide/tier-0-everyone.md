@@ -99,7 +99,7 @@ send us a screenshot or tell us about a problem some other way, mention that num
 - **Sign in with Face ID, Touch ID or Windows Hello.** On each phone or computer you use, open **Settings → Sign in
   with Face ID, Touch ID or Windows Hello**, give the device a name, type your 6-digit authenticator code and press
   **Add this device**. From then on, choose **Sign in with Face ID or a passkey** on the sign-in screen: nothing is
-  typed, so a camera over your shoulder sees nothing. Lost the device? Remove its passkey in the same place. Your
+  typed, so a camera over your shoulder sees nothing. **rename** gives a passkey a clearer name. Lost the device? Remove its passkey in the same place. Your
   password and code still work as the backup.
 - Never share your password or recovery codes. zAccountant staff will never ask for them.
 - Social Security numbers and authenticator secrets are encrypted before they are stored.

@@ -194,7 +194,7 @@ export async function undoBankTransaction(pool, companyId, bankTxId, { actor = n
     }
     const { rows: [rev] } = t.journal_entry_id
       ? await c.query('SELECT 1 FROM journal_entries WHERE company_id = $1 AND reverses_entry_id = $2', [companyId, t.journal_entry_id]) : { rows: [] };
-    if (t.status === 'posted' && !rev) await reverseEntry(c, companyId, t.journal_entry_id, { memo: `Undo bank posting: ${t.description}`.slice(0, 500), actor });
+    if (t.status === 'posted' && !rev) await reverseEntry(c, companyId, t.journal_entry_id, { memo: `Undo bank posting: ${t.description}`.slice(0, 500), actor, fromBank: true });
     await c.query(`UPDATE bank_transactions SET status = 'review', journal_entry_id = NULL, note = NULL, reviewed_by = NULL, reviewed_at = NULL WHERE company_id = $1 AND id = $2`,
       [companyId, t.id]);
     await appendAudit(c, companyId, { action: 'undo', entity: 'bank_transaction', entityId: t.id, actor, payload: { was: t.status, entryId: t.journal_entry_id } });
@@ -362,7 +362,7 @@ export async function completeReconciliation(pool, companyId, reconId, { actor =
 }
 
 /** Abandon a reconciliation that is still in progress (nothing in the books changes). */
-export async function cancelReconciliation(pool, companyId, reconId) {
+export async function cancelReconciliation(pool, companyId, reconId, { actor = null } = {}) {
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     const { rows: [r] } = await c.query('SELECT * FROM reconciliations WHERE company_id = $1 AND id::text = $2 FOR UPDATE', [companyId, String(reconId)]);
@@ -370,6 +370,7 @@ export async function cancelReconciliation(pool, companyId, reconId) {
     if (r.status !== 'open') throw new LedgerError('A finished reconciliation cannot be cancelled');
     await c.query('DELETE FROM reconciliation_lines WHERE company_id = $1 AND reconciliation_id = $2', [companyId, r.id]);
     await c.query('DELETE FROM reconciliations WHERE company_id = $1 AND id = $2', [companyId, r.id]);
+    await appendAudit(c, companyId, { action: 'cancel', entity: 'reconciliation', entityId: String(r.id), actor, payload: { bankAccountId: r.bank_account_id, statementDate: r.statement_date } });
     return { ok: true };
   });
 }

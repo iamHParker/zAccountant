@@ -72,6 +72,8 @@ test('banking: import, review, rules, match, reconcile', { skip: !hasDb && 'DATA
     assert.deepEqual((await bank.findMatches(pool, co.id, b2.id)).map((e) => e.id), [p1.id], 'an entry matches one bank line only');
     await assert.rejects(bank.matchBankTransaction(pool, co.id, b2.id, { entryId: p2.id }), /does not match/);
     await bank.matchBankTransaction(pool, co.id, b2.id, { entryId: p1.id });
+    // CPA review B1: a matched entry can't be reversed from Transactions (Banking would still call it handled).
+    await assert.rejects(ledger.reverseEntry(pool, co.id, p1.id), /matched to the bank transaction.*Banking/);
     const income = await ledger.postSimple(pool, co.id, { date: '2026-03-15', memo: 'Wrong amount', fromAccountId: A['4000'], toAccountId: checking, amount: '4499.99' });
     const acme = (await list()).find((x) => x.description.startsWith('CLIENT'));
     assert.equal((await bank.findMatches(pool, co.id, acme.id)).length, 0, 'amount must match to the penny');
@@ -91,7 +93,8 @@ test('banking: import, review, rules, match, reconcile', { skip: !hasDb && 'DATA
     assert.ok(entries.some((e) => e.reversesEntryId === posted.journalEntryId));
     await bank.postBankTransaction(pool, co.id, hd.id, { accountId: hd.suggestedAccountId });
     const acme = (await list()).find((x) => x.description.startsWith('CLIENT'));
-    await bank.postBankTransaction(pool, co.id, acme.id, { accountId: A['4000'] });
+    const acmePosted = await bank.postBankTransaction(pool, co.id, acme.id, { accountId: A['4000'] });
+    await assert.rejects(ledger.reverseEntry(pool, co.id, acmePosted.journalEntryId), /posted to the bank transaction.*Banking/);
     await bank.excludeBankTransaction(pool, co.id, extra.id, { reason: 'test charge' });
     assert.equal((await list()).length, 0);
   });
@@ -121,6 +124,7 @@ test('banking: import, review, rules, match, reconcile', { skip: !hasDb && 'DATA
     assert.equal(next.beginningCents, 1007443);
     const acme = (await list('posted')).find((x) => x.description.startsWith('CLIENT'));
     await assert.rejects(bank.undoBankTransaction(pool, co.id, acme.id), /reconciliation/);
+    await assert.rejects(ledger.reverseEntry(pool, co.id, acme.journalEntryId), /reconciliation/);
     const unbalanced = await bank.startReconciliation(pool, co.id, { bankAccountId: A['1000'], statementDate: '2026-05-31', endingBalance: '1' }).catch((e) => e);
     assert.match(unbalanced.message, /already in progress/);
     await bank.cancelReconciliation(pool, co.id, next.id);

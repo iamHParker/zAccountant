@@ -253,7 +253,23 @@ export async function postSimple(pool, companyId, tx, opts = {}) {
 /** Exposed so other services (payroll) can post inside their own transaction. */
 export { insertEntry };
 
-export async function reverseEntry(pool, companyId, entryId, { date, memo, actor = null, idempotencyKey = null, fromDocument = false } = {}) {
+/**
+ * An entry the bank already agrees with can't be cancelled from here (CPA review 2026-10-25, B1/B2):
+ * - a line of it is ticked in a bank reconciliation: the statement would no longer tie out;
+ * - a bank transaction is posted to it or matched with it: Banking would still say it's handled.
+ * Banking's own Undo passes `bankLineOk` (it resets the bank line in the same transaction).
+ */
+export async function assertNotCleared(c, companyId, entryId, { bankLineOk = false } = {}) {
+  const { rows: [rec] } = await c.query(
+    `SELECT 1 FROM reconciliation_lines rl JOIN journal_lines l ON l.id = rl.journal_line_id WHERE l.company_id = $1 AND l.entry_id = $2 LIMIT 1`, [companyId, entryId]);
+  if (rec) throw new LedgerError('Journal entry is not valid', ['this entry is ticked in a bank reconciliation, so the bank statement depends on it; it can no longer be reversed or voided']);
+  if (bankLineOk) return;
+  const { rows: [bank] } = await c.query(
+    `SELECT status, description FROM bank_transactions WHERE company_id = $1 AND journal_entry_id = $2 AND status IN ('posted', 'matched') LIMIT 1`, [companyId, entryId]);
+  if (bank) throw new LedgerError('Journal entry is not valid', [`this entry is ${bank.status} to the bank transaction "${bank.description}"; undo that in Banking first`]);
+}
+
+export async function reverseEntry(pool, companyId, entryId, { date, memo, actor = null, idempotencyKey = null, fromDocument = false, fromBank = false } = {}) {
   return withTransaction(pool, async (c) => {
     const co = await lockCompany(c, companyId);
     const existing = await findByIdempotencyKey(c, companyId, cleanIdempotencyKey(idempotencyKey));
@@ -265,6 +281,7 @@ export async function reverseEntry(pool, companyId, entryId, { date, memo, actor
     if (DOCUMENT_ENTRY[orig.source] && !fromDocument) throw new LedgerError('Journal entry is not valid', [`this entry belongs to ${DOCUMENT_ENTRY[orig.source]}; void it there so balances stay correct`]);
     const { rows: [already] } = await c.query('SELECT entry_number FROM journal_entries WHERE company_id = $1 AND reverses_entry_id = $2', [companyId, entryId]);
     if (already) throw new LedgerError('Journal entry is not valid', [`already reversed by entry #${already.entry_number}`]);
+    await assertNotCleared(c, companyId, entryId, { bankLineOk: fromBank });
     const { rows: lines } = await c.query(
       `SELECT account_id AS "accountId", debit_cents AS "debitCents", credit_cents AS "creditCents", memo
          FROM journal_lines WHERE entry_id = $1 ORDER BY id`, [entryId]);

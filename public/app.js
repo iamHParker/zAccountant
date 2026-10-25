@@ -192,6 +192,12 @@ const HOME_CARDS = [
   { id: 'entry', icon: '✍️', title: 'Journal entry', hint: 'Debits and credits by hand', perms: ['post'], go: { tab: 'journal', then: 'openJE' } },
   { id: 'backup', icon: '💾', title: 'Back up your books', hint: 'Download the .zacc book file', perms: ['admin'], go: { tab: 'settings', then: 'scrollToBackup' } },
 ];
+// Entries that belong to another record: the Transactions tab sends people there instead of offering "reverse"
+// (the server refuses it, CPA review B3). Same list as DOCUMENT_ENTRY in ledgerService.js, plus payroll and Banking.
+const ENTRY_OWNER = {
+  invoice: { where: 'Sales', what: 'invoice' }, bill: { where: 'Bills', what: 'bill' }, payment: { where: 'Sales or Bills', what: 'payment' },
+  trip: { where: 'Trips', what: 'trip' }, payroll: { where: 'Payroll', what: "year-to-date pay" }, bank: { where: 'Banking (Undo)', what: 'bank line' },
+};
 const DEFAULT_HOME = { left: ['stats'], right: ['invoice', 'paid', 'bill', 'bank', 'card', 'trip', 'pnl'] };
 
 /** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
@@ -231,7 +237,7 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '',
-      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null,
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null, ENTRY_OWNER,
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
       statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
       fb: { open: false, note: '', picture: null, pictureSource: null, busy: false, error: '' },
@@ -476,6 +482,11 @@ createApp({
         }
       } finally { p.busy = false; }
     },
+    async renamePasskey(k) {
+      const name = prompt('New name for this passkey', k.name);
+      if (name == null || !name.trim() || name.trim() === k.name) return;
+      if (await this.run(() => api('PUT', `/auth/passkeys/${k.id}`, { name }), 'Passkey renamed.')) this.loadPasskeys();
+    },
     async removePasskey(k) {
       if (!confirm(`Remove the passkey "${k.name}"? That device will need your password and code again.`)) return;
       if (await this.run(() => api('DELETE', `/auth/passkeys/${k.id}`), 'Passkey removed.')) await this.loadPasskeys();
@@ -510,6 +521,11 @@ createApp({
     },
     async addDept() {
       if (await this.run(() => api('POST', `/companies/${this.companyId}/departments`, { name: this.newDept }), 'Department added.')) { this.newDept = ''; this.loadAccess(); }
+    },
+    async renameDept(d) {
+      const name = prompt('New name for this department', d.name);
+      if (name == null || !name.trim() || name.trim() === d.name) return;
+      if (await this.run(() => api('PUT', `/companies/${this.companyId}/departments/${d.id}`, { name }), 'Department renamed.')) this.loadAccess();
     },
     async deleteDept(d) {
       if (await this.run(() => api('DELETE', `/companies/${this.companyId}/departments/${d.id}`), 'Department deleted.')) this.loadAccess();

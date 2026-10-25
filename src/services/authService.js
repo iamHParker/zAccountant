@@ -209,6 +209,16 @@ export async function listPasskeys(db, userId) {
   return rows;
 }
 
+/** Rename one of the person's own passkeys ("iPhone" → "Homer's iPhone 16"). */
+export async function renamePasskey(db, userId, id, { name }) {
+  if (typeof id !== 'string' || !UUIDISH.test(id)) throw new AuthError('Passkey not found', 404);
+  const label = typeof name === 'string' ? name.trim() : '';
+  if (!label || label.length > 60) throw new LedgerError('Name this passkey (for example "Homer\'s iPhone"), at most 60 characters');
+  const { rows: [k] } = await db.query('UPDATE passkeys SET name = $3 WHERE id = $1 AND user_id = $2 RETURNING id, name', [id, userId, label]);
+  if (!k) throw new AuthError('Passkey not found', 404);
+  return k;
+}
+
 export async function removePasskey(db, userId, id) {
   if (typeof id !== 'string' || !UUIDISH.test(id)) throw new AuthError('Passkey not found', 404);
   const { rowCount } = await db.query('DELETE FROM passkeys WHERE id = $1 AND user_id = $2', [id, userId]);

@@ -651,7 +651,8 @@
               <template v-if="i === 0">
                 <span class="muted" v-if="e.reversedByNumber">reversed by #{{ e.reversedByNumber }}</span>
                 <span class="muted" v-else-if="e.reversesEntryId">reversal</span>
-                <button v-else-if="can('post') && e.source !== 'payroll'" class="link" @click="reverse(e)">reverse</button>
+                <span class="muted small" v-else-if="ENTRY_OWNER[e.source]" :title="'Change it there so the ' + ENTRY_OWNER[e.source].what + ' stays right'">void on {{ ENTRY_OWNER[e.source].where }}</span>
+                <button v-else-if="can('post')" class="link" @click="reverse(e)">reverse</button>
               </template>
             </td>
           </tr>
@@ -2172,7 +2173,7 @@
         <table class="data" v-if="passkeys.list.length">
           <thead><tr><th>Passkey</th><th>Added</th><th>Last used</th><th></th></tr></thead>
           <tr v-for="k in passkeys.list"><td>{{ k.name }}</td><td>{{ usDate(k.createdAt) }}</td><td>{{ k.lastUsedAt ? usDate(k.lastUsedAt) : 'never' }}</td>
-            <td class="actions"><button class="link" @click="removePasskey(k)">remove</button></td></tr>
+            <td class="actions"><button class="link" @click="renamePasskey(k)">rename</button> <button class="link" @click="removePasskey(k)">remove</button></td></tr>
         </table>
         <form @submit.prevent="addPasskey" class="grid4">
           <label>Name for this device <input v-model.trim="passkeys.name" maxlength="60" required></label>
@@ -2254,7 +2255,7 @@
         <p class="hint">Group people (Accounting, Engineering, Field…). Someone with "approve timesheets" approves the time of people in their own department.</p>
         <table class="data" v-if="departments.length">
           <tr v-for="d in departments"><td>{{ d.name }}</td><td class="muted small">{{ d.members }} member{{ d.members === 1 ? '' : 's' }}</td>
-            <td><button v-if="can('admin') && !d.members" class="link" @click="deleteDept(d)">delete</button></td></tr>
+            <td class="actions"><button v-if="can('admin')" class="link" @click="renameDept(d)">rename</button> <button v-if="can('admin') && !d.members" class="link" @click="deleteDept(d)">delete</button></td></tr>
         </table>
         <form v-if="can('admin')" @submit.prevent="addDept" class="row wrap"><input v-model.trim="newDept" placeholder="Department name" maxlength="60" required class="grow"><button>Add</button></form>
       </div>
