@@ -163,6 +163,8 @@ const HOME_CARDS = [
   { id: 'bill', icon: '📄', title: 'Enter a bill', hint: 'Something you owe a vendor', perms: ['bills'], go: { tab: 'bills', then: 'newDoc' } },
   { id: 'paybill', icon: '💸', title: 'Pay a bill', hint: 'Record a bill payment', perms: ['bills'], go: { tab: 'bills', then: 'startPay' } },
   { id: 'bank', icon: '🏦', title: 'Banking', hint: 'Review imported bank transactions', perms: ['view_books'], go: { tab: 'bank' } },
+  { id: 'card', icon: '💳', title: 'Credit cards', hint: 'Statement charges, matching and reconciling', perms: ['view_books'], go: { tab: 'bank', before: 'pickCard' } },
+  { id: 'paycard', icon: '🔁', title: 'Pay the credit card', hint: 'Money from the bank to the card', perms: ['post'], go: { tab: 'home', then: 'payCard' } },
   { id: 'trip', icon: '✈️', title: 'New trip', hint: 'Costs and travel time for a trip', perms: ['bills'], go: { tab: 'trips', then: 'newTrip' } },
   { id: 'mileiq', icon: '🚗', title: 'Import from MileIQ', hint: "Your monthly drive report", perms: ['bills'], go: { tab: 'trips', then: 'openMileIq' } },
   { id: 'time', icon: '⏱️', title: 'Timesheet', hint: 'Enter or approve hours', perms: ['time_own', 'time_approve', 'time_all'], feature: 'timesheets', go: { tab: 'time' } },
@@ -173,7 +175,7 @@ const HOME_CARDS = [
   { id: 'entry', icon: '✍️', title: 'Journal entry', hint: 'Debits and credits by hand', perms: ['post'], go: { tab: 'journal', then: 'openJE' } },
   { id: 'backup', icon: '💾', title: 'Back up your books', hint: 'Download the .zacc book file', perms: ['admin'], go: { tab: 'settings', then: 'scrollToBackup' } },
 ];
-const DEFAULT_HOME = { left: ['stats'], right: ['invoice', 'paid', 'bill', 'bank', 'trip', 'pnl'] };
+const DEFAULT_HOME = { left: ['stats'], right: ['invoice', 'paid', 'bill', 'bank', 'card', 'trip', 'pnl'] };
 
 /** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
 function weekStartOf(iso) {
@@ -292,6 +294,8 @@ createApp({
     },
     payTotal() { return Object.values(this.ar.pay.amounts).reduce((s, v) => s + (cents(v) ?? 0), 0); },
     bankAccounts() { return this.accounts.filter((a) => a.cashFlow === 'cash'); },
+    /** Record a transaction's bank list: Money out can also be charged to a credit card. */
+    quickBanks() { return this.quick.kind === 'out' ? this.bankAccounts.concat(this.accounts.filter((a) => a.isActive && a.subtype === 'credit_card')) : this.bankAccounts; },
     bankLike() { return this.accounts.filter((a) => a.cashFlow === 'cash' || a.subtype === 'credit_card'); },
     categoryChoices() { return this.accounts.filter((a) => a.id !== this.bank.accountId && a.isActive && a.key !== 'retained_earnings'); },
     quickChoices() {
@@ -340,7 +344,10 @@ createApp({
       if (t === 'accounts') this.loadImports();
       if (t === 'time') this.loadTime(true);
     },
-    'quick.kind'() { this.quick.other = ''; },
+    'quick.kind'() {
+      this.quick.other = '';
+      if (!this.quickBanks.some((a) => a.id === this.quick.bank)) this.quick.bank = this.bankAccounts[0]?.id ?? '';
+    },
   },
   async mounted() {
     startRecorder();
@@ -699,12 +706,32 @@ createApp({
       if (this.home.editing) return;
       if (c.id === 'stats') { this.home.view = 'stats'; if (!this.home.stats) await this.loadStats(); return; }
       const g = c.go;
+      if (g.before && (await this[g.before]()) === false) return;
       if (g.report) { this.report.type = g.report; this.report.data = null; }
       this.tab = g.tab;
       await this.$nextTick();
       if (g.then) await this[g.then]();
     },
     openJE() { this.showJE = true; },
+    cardAccounts() { return this.accounts.filter((a) => a.isActive && a.subtype === 'credit_card'); },
+    /** Credit cards card: open Banking on the first card (cards import statements and reconcile like a bank). */
+    pickCard() {
+      const card = this.cardAccounts()[0];
+      if (!card) { this.flash('Add your credit card on the Accounts page first (type Liability, kind Credit card).', 'bad'); this.tab = 'accounts'; return false; }
+      this.bank.accountId = card.id;
+      return true;
+    },
+    /** Pay the credit card: Record a transaction as a Transfer from the bank to the card. */
+    payCard() {
+      const card = this.cardAccounts()[0];
+      if (!card) { this.flash('Add your credit card on the Accounts page first (type Liability, kind Credit card).', 'bad'); this.tab = 'accounts'; return; }
+      this.quick.kind = 'transfer';
+      this.$nextTick(() => {
+        this.quick.other = card.id;
+        if (!this.quick.memo) this.quick.memo = `Payment to ${card.name}`;
+        document.querySelector('.record-card input[inputmode="decimal"]')?.focus();
+      });
+    },
     openMileIq() { this.$nextTick(() => { const d = document.querySelector('details.mileiq'); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth' }); } }); },
     scrollToBackup() { this.$nextTick(() => document.querySelector('.backup-card')?.scrollIntoView({ behavior: 'smooth' })); },
     async loadStats() { this.home.stats = await this.run(() => api('GET', `/companies/${this.companyId}/reports/statistics?asOf=${today()}`)); },

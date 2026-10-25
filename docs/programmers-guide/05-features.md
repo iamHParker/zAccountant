@@ -9,7 +9,7 @@ Companies, chart of accounts (types and subtypes decide where an account appears
 
 ## Home cards and Statistics (`homeLayoutService.js`, `reportService.getStatistics`, migration 029)
 The card catalog is `HOME_CARDS` in `public/app.js` (id, icon, title, permissions, plan feature, and `go`: a tab plus
-an optional method to run there). The server stores only each person's `{ left, right }` id lists (`home_layouts`,
+an optional method to run there, or `before`, run first, which can return false to stay put: the Credit cards card picks the card account that way). The server stores only each person's `{ left, right }` id lists (`home_layouts`,
 RLS on company *and* user; route permission `member`) and checks their shape; the browser skips unknown ids and cards
 the role can't use. `GET /reports/statistics` (view_books): 12 calendar months ending with `asOf` (income = revenue
 credits − debits, expenses = expense debits − credits, cash = running balance of `cash_flow = 'cash'` accounts), the

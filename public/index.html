@@ -440,7 +440,7 @@
               <label>Description <input v-model.trim="quick.memo" placeholder="e.g. Office rent for March" required></label>
               <label>Amount <input v-model.trim="quick.amount" inputmode="decimal" placeholder="0.00" required></label>
               <label>{{ quick.kind === 'in' ? 'Deposited to' : quick.kind === 'out' ? 'Paid from' : 'From' }}
-                <select v-model="quick.bank" required><option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
+                <select v-model="quick.bank" required><option v-for="a in quickBanks" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
               </label>
               <label>{{ quick.kind === 'in' ? 'What was it for? (income or source)' : quick.kind === 'out' ? 'What was it for? (expense)' : 'To' }}
                 <select v-model="quick.other" required>

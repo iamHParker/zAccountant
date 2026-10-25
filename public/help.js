@@ -23,7 +23,7 @@ so the books always balance. You don't need to know debits and credits for every
   },
   {
     id: 'home-cards', tab: 'home', title: 'Home cards and Statistics',
-    words: 'home cards shortcuts arrange move add remove drag statistics chart graph month income expenses cash dashboard',
+    words: 'home cards credit card pay shortcuts arrange move add remove drag statistics chart graph month income expenses cash dashboard',
     html: `
 <p>The cards beside <em>Record a transaction</em> are shortcuts: press one to go straight to that job.</p>
 <ol>
@@ -32,7 +32,10 @@ so the books always balance. You don't need to know debits and credits for every
   <li><strong>Done arranging</strong>. Your cards are yours alone and follow you to your phone.</li>
 </ol>
 <p>The <strong>Statistics</strong> card opens 12 months of income and expenses, cash at each month's end, this year's largest expenses,
-and what customers owe you and you owe vendors. <strong>Show the numbers</strong> gives the table.</p>`,
+and what customers owe you and you owe vendors. <strong>Show the numbers</strong> gives the table.</p>
+<p><strong>Credit cards</strong> opens Banking on your card, to import its statement, match charges and reconcile.
+<strong>Pay the credit card</strong> fills in <em>Record a transaction</em> as a Transfer from the bank to the card.
+A single charge goes in as <em>Money out</em> with the card as <em>Paid from</em>.</p>`,
   },
   {
     id: 'journal', tab: 'journal', title: 'Recording transactions',
