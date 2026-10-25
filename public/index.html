@@ -531,7 +531,7 @@
         <template v-if="can(S.perm)">
           <button class="primary" @click="newDoc">+ New {{ S.Doc.toLowerCase() }}</button>
           <button @click="startPay()">{{ S.payVerb }}</button>
-          <button @click="ar.showContact = !ar.showContact">+ New {{ S.who }}</button>
+          <button @click="newContact">+ New {{ S.who }}</button>
         </template>
       </div>
       <p class="hint">{{ tab === 'sales'
@@ -539,7 +539,7 @@
         : 'Enter bills from vendors when they arrive, then record when you pay them. What you owe shows in Accounts Payable.' }}</p>
 
       <div class="card narrow" v-if="ar.showContact">
-        <h2>New {{ S.who }}</h2>
+        <h2>{{ ar.contact.id ? 'Edit ' + S.who : 'New ' + S.who }}</h2>
         <form @submit.prevent="saveContact">
           <label>Name <input v-model="ar.contact.name" required maxlength="120"></label>
           <div class="grid2">
@@ -549,7 +549,7 @@
           <label>Address <input v-model="ar.contact.address" placeholder="Street, City, State ZIP"></label>
           <label>Payment terms (days) <input type="number" min="0" max="365" v-model.number="ar.contact.termsDays"></label>
           <label class="check" v-if="S.kind === 'bill'"><input type="checkbox" v-model="ar.contact.is1099"> Gets a 1099-NEC (an individual or partnership you pay for services)</label>
-          <button class="primary">Save {{ S.who }}</button> <button type="button" @click="ar.showContact = false">Cancel</button>
+          <button class="primary">{{ ar.contact.id ? 'Save changes' : 'Save ' + S.who }}</button> <button type="button" @click="ar.showContact = false">Cancel</button>
         </form>
       </div>
 
@@ -755,6 +755,7 @@
               <td>{{ c.name }}</td><td>{{ c.email }}</td><td>{{ c.phone }}</td><td>{{ c.termsDays }} days</td><td v-if="S.kind === 'bill'">{{ c.is1099 ? 'yes' : '' }}</td>
               <td class="num">{{ money(c.openCents) }}</td><td class="num" :class="{ bad: c.overdueCents > 0 }">{{ money(c.overdueCents) }}</td>
               <td class="actions"><template v-if="can(S.perm)">
+                <button class="link" @click="editContact(c)">edit</button>
                 <button class="link" v-if="c.openCents > 0" @click="startPay(c.id)">{{ S.kind === 'invoice' ? 'receive payment' : 'pay' }}</button>
                 <button class="link" v-if="!c.openCents" @click="toggleContactActive(c)">{{ c.isActive ? 'make inactive' : 'make active' }}</button>
               </template></td>

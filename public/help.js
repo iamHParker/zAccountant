@@ -41,7 +41,7 @@ automatically each night, or press <em>Post due entries now</em>.</p>
     words: 'invoice customer receive payment accounts receivable aging overdue void',
     html: `
 <ol>
-  <li>Add a customer (name, email, payment terms such as 30 days).</li>
+  <li>Add a customer (name, email, payment terms such as 30 days). To change one later, open the Customers tab and press <strong>edit</strong>.</li>
   <li>Make a <strong>new invoice</strong>: lines with quantity, price and income account; tick taxable lines and enter the
       sales-tax rate. Saving the invoice records the income and what the customer owes you (Accounts Receivable).</li>
   <li>When the customer pays, press <strong>Receive payment</strong>, pick the bank account, and apply the money to one or

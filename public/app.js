@@ -965,11 +965,25 @@ createApp({
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
     },
     arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.loadAr(); },
+    newContact() {
+      const open = this.ar.showContact && !this.ar.contact.id;
+      this.ar.contact = blankContact(); this.ar.showContact = !open;
+    },
+    // Edit a customer or vendor: the same form, filled in; saving sends only the form's fields (PATCH).
+    editContact(c) {
+      this.ar.contact = { id: c.id, name: c.name, email: c.email ?? '', phone: c.phone ?? '', address: c.address ?? '', termsDays: c.termsDays, is1099: !!c.is1099 };
+      this.ar.showContact = true;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
     async saveContact() {
-      const r = await this.run(() => api('POST', `${this.arBase()}/${this.S.contacts}`, { ...this.ar.contact }), `${this.S.Who} added.`);
+      const { id, ...fields } = this.ar.contact;
+      if (this.S.kind !== 'bill') delete fields.is1099;
+      const r = id
+        ? await this.run(() => api('PATCH', `${this.arBase()}/contacts/${id}`, fields), `${this.S.Who} updated.`)
+        : await this.run(() => api('POST', `${this.arBase()}/${this.S.contacts}`, fields), `${this.S.Who} added.`);
       if (!r) return;
       this.ar.contact = blankContact(); this.ar.showContact = false;
-      if (this.ar.showDoc && !this.ar.doc.contactId) this.ar.doc.contactId = r.id;
+      if (!id && this.ar.showDoc && !this.ar.doc.contactId) this.ar.doc.contactId = r.id;
       this.loadAr();
     },
     async toggleContactActive(c) {

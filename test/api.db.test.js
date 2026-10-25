@@ -448,6 +448,14 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const inv = await staff.c.call('POST', `${base}/invoices`, { contactId: cust.body.id, date: '2026-12-15', lines: [{ accountId: A['4100'], amount: '250' }] });
     assert.equal(inv.status, 201, JSON.stringify(inv.body));
     assert.equal((await staff.c.call('GET', `${base}/documents/${inv.body.id}`)).status, 200);
+    // ...and edit a customer (Sales → Customers → edit): every field the form sends, the open invoice kept.
+    const ed = await staff.c.call('PATCH', `${base}/contacts/${cust.body.id}`,
+      { name: 'Staff Customer LLC', email: 'ap@staffcustomer.com', phone: '512-555-0100', address: '1 Main St, Austin, TX 78701', termsDays: 15 });
+    assert.equal(ed.status, 200, JSON.stringify(ed.body));
+    const listed = (await staff.c.call('GET', `${base}/customers`)).body.find((c) => c.id === cust.body.id);
+    assert.deepEqual([listed.name, listed.email, listed.phone, listed.address, listed.termsDays, listed.openCents],
+      ['Staff Customer LLC', 'ap@staffcustomer.com', '512-555-0100', '1 Main St, Austin, TX 78701', 15, 25000]);
+    assert.equal((await staff.c.call('PATCH', `${base}/contacts/${cust.body.id}`, { email: 'not an email' })).status, 400);
     // ...but can't see the books, bills or payroll, or void.
     for (const path of ['/reports/trial-balance', '/entries', '/bills', '/vendors', '/employees', '/reports/ap-aging']) {
       assert.equal((await staff.c.call('GET', base + path)).status, 403, path);
