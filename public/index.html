@@ -70,6 +70,8 @@
         <label>Password <input type="password" v-model="auth.password" autocomplete="current-password" required></label>
         <button class="primary">Sign in</button>
       </form>
+      <p v-if="passkeys.supported"><button class="passkey-btn" @click="signInPasskey">Sign in with Face ID or a passkey</button></p>
+      <p class="hint" v-if="passkeys.supported">Nothing to type, so nothing a camera can see. Add a passkey first in <strong>Settings → Sign in with Face ID</strong>.</p>
       <p class="hint">New to zAccountant? <button class="link" @click="auth.screen = 'signup'">Create an account</button></p>
       <p class="hint"><a href="/">← About zAccountant: services and prices</a></p>
     </section>
@@ -1904,6 +1906,22 @@
 
     <!-- SETTINGS -->
     <section v-if="tab === 'settings'">
+      <div class="card" v-if="passkeys.supported">
+        <h2>Sign in with Face ID, Touch ID or Windows Hello</h2>
+        <p class="hint">A passkey lets this phone or computer sign you in with your face, fingerprint or device PIN: no password
+          or code to type where a camera could see it. Add one on each device you use. Your password and authenticator code
+          still work as the backup.</p>
+        <table class="data" v-if="passkeys.list.length">
+          <thead><tr><th>Passkey</th><th>Added</th><th>Last used</th><th></th></tr></thead>
+          <tr v-for="k in passkeys.list"><td>{{ k.name }}</td><td>{{ usDate(k.createdAt) }}</td><td>{{ k.lastUsedAt ? usDate(k.lastUsedAt) : 'never' }}</td>
+            <td class="actions"><button class="link" @click="removePasskey(k)">remove</button></td></tr>
+        </table>
+        <form @submit.prevent="addPasskey" class="grid4">
+          <label>Name for this device <input v-model.trim="passkeys.name" maxlength="60" required></label>
+          <label>6-digit code from your authenticator app <input v-model.trim="passkeys.code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+          <label class="end"><button class="primary" :disabled="passkeys.busy">Add this device</button></label>
+        </form>
+      </div>
       <div class="card" v-if="can('view_books')">
         <h2>Back up your books</h2>
         <p class="hint">zAccountant is in alpha testing, so keep your own copy. Download both files every month (or after

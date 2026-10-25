@@ -265,10 +265,13 @@ and <em>Run full check now</em> also proves the trial balance and balance sheet 
   },
   {
     id: 'security', tab: null, title: 'Signing in and keeping your account safe',
-    words: 'password two-step 2fa authenticator recovery code security sign in lost phone',
+    words: 'password two-step 2fa authenticator recovery code security sign in lost phone passkey face id touch id windows hello pin',
     html: `
 <p>Two-step sign-in is required for everyone: your password plus a 6-digit code from an authenticator app
 (Google or Microsoft Authenticator, 1Password, Authy).</p>
+<p><strong>Face ID, Touch ID, Windows Hello:</strong> on each device you use, open <em>Settings → Sign in with Face ID</em>,
+name the device, type your 6-digit code and press <em>Add this device</em>. Then choose <em>Sign in with Face ID or a passkey</em>
+on the sign-in screen: nothing to type, so nothing a camera can see. Remove a lost device's passkey there too.</p>
 <p><strong>Recovery codes:</strong> save them somewhere safe when you set up. If you lose your phone, each code signs you in once.</p>
 <p>Social Security numbers are encrypted before they're stored, and each company's data is walled off by the database itself.</p>`,
   },
