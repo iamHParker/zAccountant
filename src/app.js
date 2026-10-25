@@ -20,7 +20,8 @@ import * as arap from './services/arapService.js';
 import * as roles from './services/accessService.js';
 import * as time from './services/timesheetService.js';
 import { AuthError } from './services/authService.js';
-import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows } from './core/csv.js';
+import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
+import * as tax from './services/taxService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
 import { createMetrics, bearerMatches } from './metrics.js';
@@ -530,6 +531,18 @@ export function createApp(pool, { log } = {}) {
   api.get('/companies/:companyId/audit/verify', route('audit', ({ db, companyId }) => verifyChain(db, companyId)));
   api.get('/companies/:companyId/books-check', route('view_books', ({ db, companyId }) => latestBooksCheck(db, companyId)));
   api.post('/companies/:companyId/books-check', route('audit', ({ db, companyId }) => runBooksCheck(db, companyId)));
+
+  // Tax-ready, level 1: totals for the tax preparer (no forms printed or filed).
+  api.get('/companies/:companyId/tax-categories', route('view_books', ({ db, companyId }) => tax.getTaxCategories(db, companyId)));
+  api.put('/companies/:companyId/tax-categories', route('accounts', ({ db, req, companyId, actor }) =>
+    tax.setTaxCategories(db, companyId, { items: req.body?.items, actor })));
+  api.get('/companies/:companyId/reports/tax-summary', report('view_books', 'Tax Summary',
+    ({ db, req, companyId }) => tax.getTaxSummary(db, companyId, { from: q(req.query.from), to: q(req.query.to) }), taxSummaryRows));
+  api.get('/companies/:companyId/reports/tax-1099', report(['view_books', 'bills'], '1099-NEC Totals',
+    ({ db, req, companyId }) => tax.get1099Totals(db, companyId, { year: q(req.query.year) }), nec1099Rows));
+  // W-2 totals show pay details, so they need the payroll role.
+  api.get('/companies/:companyId/reports/tax-w2', report('payroll', 'W-2 and W-3 Totals',
+    ({ db, req, companyId }) => tax.getW2Totals(db, companyId, { year: q(req.query.year) }), w2Rows));
 
   // Payroll
   api.get('/companies/:companyId/employees', route(['view_books', 'payroll'], ({ db, companyId }) => payroll.listEmployees(db, companyId)));

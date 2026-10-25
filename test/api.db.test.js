@@ -731,7 +731,7 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
 
   await t.test('plans: admins switch features per company and the server refuses what the plan leaves out', async () => {
     const coInfo = (await owner.c.call('GET', `/api/companies/${co.id}`)).body;
-    assert.deepEqual([coInfo.plan, coInfo.features], ['beta', ['payroll', 'timesheets']], 'every company starts on Beta tester with everything');
+    assert.deepEqual([coInfo.plan, coInfo.features], ['beta', ['payroll', 'tax', 'timesheets']], 'every company starts on Beta tester with everything');
     assert.equal((await owner.c.call('GET', '/api/admin/companies')).status, 403);
     assert.equal((await owner.c.call('PUT', `/api/admin/companies/${co.id}/plan`, { plan: 'basic', reason: 'x' })).status, 403);
 
@@ -821,6 +821,65 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(u.body.entity_type, 'sole_proprietor'); assert.equal(u.body.books_start_date, '2026-01-01', 'unchanged when not sent');
     assert.equal((await owner.c.call('GET', `/api/companies/${id}/setup`)).body.setupDone, true);
     assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/setup`)).body.setupDone, false, 'made in this test run, so not set by the migration');
+  });
+
+  await t.test('Tax-ready: tax summary by return line, account categories, 1099-NEC and W-2/W-3 totals', async () => {
+    const id = (await owner.c.call('POST', '/api/companies', { name: 'Tax Co', homeState: 'TX', fiscalYearStartMonth: 1, entityType: 's_corp' })).body.id;
+    const b = `/api/companies/${id}`;
+    const acct = Object.fromEntries((await owner.c.call('GET', `${b}/accounts`)).body.map((a) => [a.code, a.id]));
+    // A 1099 vendor paid $2,500 by check and $100 by card; another vendor (not marked) paid $3,000.
+    const surveyor = (await owner.c.call('POST', `${b}/vendors`, { name: 'Ace Surveying', is1099: true })).body;
+    const office = (await owner.c.call('POST', `${b}/vendors`, { name: 'Big Office LLC' })).body;
+    let billNo = 0;
+    const pay = async (vendor, amount, account, method) => {
+      const bill = await owner.c.call('POST', `${b}/bills`, { contactId: vendor.id, number: `B-${++billNo}`, date: '2026-02-01', lines: [{ accountId: acct['6250'], amount }] });
+      assert.equal(bill.status, 201, JSON.stringify(bill.body));
+      const p = await owner.c.call('POST', `${b}/payments-made`, { contactId: vendor.id, date: '2026-02-15', accountId: acct[account], method, applications: [{ documentId: bill.body.id, amount }] });
+      assert.equal(p.status, 201, JSON.stringify(p.body));
+    };
+    await pay(surveyor, '2500', '1000', 'check');
+    await pay(surveyor, '100', '2100', 'card');
+    await pay(office, '3000', '1000', 'ach');
+    const n = (await owner.c.call('GET', `${b}/reports/tax-1099?year=2026`)).body;
+    assert.equal(n.thresholdCents, 200000, '$2,000 for payments made in 2026');
+    assert.deepEqual(n.vendors.map((v) => [v.name, v.paidCents, v.byCardCents, v.needsForm]), [['Ace Surveying', 250000, 10000, true]]);
+    assert.deepEqual(n.toCheck.map((v) => v.name), ['Big Office LLC']);
+    assert.equal(n.formsNeeded, 1);
+    const csv = await owner.c.call('GET', `${b}/reports/tax-1099?year=2026&format=csv`);
+    assert.match(csv.text, /Ace Surveying,2500\.00,100\.00,yes,no/);
+
+    // One monthly paycheck of $5,000 (Texas: no state income tax).
+    const emp = (await owner.c.call('POST', `${b}/employees`, { firstName: 'Ann', lastName: 'Lee', workState: 'TX', payFrequency: 'monthly', payType: 'salary', payRate: '5000', w4: {} })).body;
+    const pc = await owner.c.call('POST', `${b}/employees/${emp.id}/paychecks`, { payDate: '2026-03-31', paidFromAccountId: acct['1000'] });
+    assert.equal(pc.status, 201, JSON.stringify(pc.body));
+    const w2 = (await owner.c.call('GET', `${b}/reports/tax-w2?year=2026`)).body;
+    const ann = w2.employees[0];
+    assert.equal(ann.box1, 500000); assert.equal(ann.box3, 500000); assert.equal(ann.box5, 500000);
+    assert.equal(ann.box4, 31000, '6.2% of 5,000.00'); assert.equal(ann.box6, 7250, '1.45% of 5,000.00');
+    assert.deepEqual(ann.state, {}, 'Texas has no state income tax');
+    assert.equal(w2.w3.forms, 1); assert.equal(w2.w3.box1, 500000);
+
+    // Form 1120-S: wages on line 8, professional fees under other deductions (5,600.00 = 2,500 + 100 + 3,000).
+    let t2 = (await owner.c.call('GET', `${b}/reports/tax-summary?from=2026-01-01&to=2026-12-31`)).body;
+    assert.equal(t2.formName, 'Form 1120-S');
+    const line = (n) => t2.lines.find((g) => g.line === n)?.cents;
+    assert.equal(line('8'), 500000); assert.equal(line('20'), 560000);
+    assert.ok(t2.suggestedCount > 0);
+    // The owner says the wages were officer pay: line 7 instead.
+    assert.equal((await owner.c.call('PUT', `${b}/tax-categories`, { items: [{ accountId: acct['6400'], category: 'officer_compensation' }] })).status, 200);
+    t2 = (await owner.c.call('GET', `${b}/reports/tax-summary?from=2026-01-01&to=2026-12-31`)).body;
+    assert.equal(line('7'), 500000); assert.equal(line('8'), undefined);
+    const cats = (await owner.c.call('GET', `${b}/tax-categories`)).body;
+    const wages = cats.accounts.find((a) => a.code === '6400');
+    assert.equal(wages.suggested, false); assert.equal(wages.place, 'Line 7: Compensation of officers');
+    assert.equal((await owner.c.call('PUT', `${b}/tax-categories`, { items: [{ accountId: acct['6400'], category: 'yacht' }] })).status, 400);
+    assert.equal((await owner.c.call('PUT', `${b}/tax-categories`, { items: [{ accountId: acct['1000'], category: 'wages' }] })).status, 400, 'balance-sheet account');
+    // Back to the suggestion.
+    assert.equal((await owner.c.call('PUT', `${b}/tax-categories`, { items: [{ accountId: acct['6400'], category: null }] })).status, 200);
+    assert.equal((await owner.c.call('GET', `${b}/tax-categories`)).body.accounts.find((a) => a.code === '6400').suggested, true);
+    // Personal books have no business return.
+    await owner.c.call('PUT', `${b}/setup`, { entityType: 'individual' });
+    assert.equal((await owner.c.call('GET', `${b}/reports/tax-summary?from=2026-01-01&to=2026-12-31`)).body.form, null);
   });
 
   await t.test('cross-site requests and foreign Host headers are refused', async () => {

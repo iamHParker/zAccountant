@@ -929,7 +929,8 @@
           <button v-for="r in reportTypes.filter((r) => can(r.perm) && (!r.feature || has(r.feature)))" :class="{ active: report.type === r.id }" @click="report.type = r.id; loadReport()">{{ r.label }}</button>
         </div>
         <label v-if="reportIsRange" class="inline">From <input type="date" v-model="report.from" @change="loadReport"></label>
-        <label class="inline">{{ reportIsRange ? 'To' : 'As of' }} <input type="date" v-model="report.to" @change="loadReport"></label>
+        <label v-if="!reportIsYearly" class="inline">{{ reportIsRange ? 'To' : 'As of' }} <input type="date" v-model="report.to" @change="loadReport"></label>
+        <label v-else class="inline">Tax year <input type="number" class="year" min="2000" max="2100" v-model.number="report.year" @change="loadReport"></label>
         <label v-if="report.type === 'balance-sheet' || report.type === 'income-statement'" class="inline">Compare with
           <select class="auto" v-model="report.compare" @change="loadReport">
             <option value="none">nothing</option>
@@ -943,7 +944,8 @@
       <div class="card statement print-me" v-if="report.data">
         <h2>{{ company.name }}</h2>
         <h3>{{ reportTypes.find(r => r.id === report.type).label }}</h3>
-        <p class="muted">{{ report.data.asOf ? 'As of ' + report.data.asOf : (report.type === 'payroll-register' ? 'Pay dates ' : '') + report.data.from + ' to ' + report.data.to }}<template v-if="report.data.comparison">, compared with {{ report.data.comparison.asOf || report.data.comparison.from + ' to ' + report.data.comparison.to }}</template></p>
+        <p class="muted" v-if="reportIsYearly">Calendar year {{ report.data.year }}{{ report.type === 'tax-w2' ? ' (by pay date)' : ' (by payment date)' }}</p>
+        <p class="muted" v-else>{{ report.data.asOf ? 'As of ' + report.data.asOf : (report.type === 'payroll-register' ? 'Pay dates ' : '') + report.data.from + ' to ' + report.data.to }}<template v-if="report.data.comparison">, compared with {{ report.data.comparison.asOf || report.data.comparison.from + ' to ' + report.data.comparison.to }}</template></p>
 
         <template v-if="report.type === 'trial-balance'">
           <table class="data">
@@ -1048,7 +1050,68 @@
             </template>
           </table>
         </template>
-        <p v-if="report.type !== 'payroll-register'" :class="reportCheck === 0 ? 'ok' : 'bad'">{{ reportCheck === 0 ? '✓ This report ties out.' : '⚠ This report does not tie out by ' + money(reportCheck) }}</p>
+        <template v-if="report.type === 'tax-summary'">
+          <p v-if="!report.data.form">{{ report.data.message }}
+            <button v-if="can('admin')" class="link no-print" @click="setupGo(1)">Company setup</button></p>
+          <template v-else>
+            <p><strong>{{ report.data.formName }}</strong> ({{ report.data.entityLabel }}). Totals for your tax preparer: this is not a return and is not filed.
+              <button v-if="can('admin')" class="link no-print" @click="setupGo(1)">Change the type of business</button></p>
+            <p class="hint" v-if="report.data.suggestedCount">{{ report.data.suggestedCount }} account(s) use a <em>suggested</em> category. Check each one, or
+              <button v-if="can('accounts')" class="link" @click="acceptTaxSuggestions">accept all suggestions</button>.</p>
+            <table class="data tax">
+              <thead><tr><th>Line</th><th>Description / account</th><th class="num">Amount</th><th class="no-print" v-if="can('accounts') && taxCats">Tax category</th></tr></thead>
+              <template v-for="g in report.data.lines">
+                <tr class="sub"><td>{{ g.line }}</td><td>{{ g.title }}</td><td class="num">{{ money(g.cents) }}</td><td class="no-print" v-if="can('accounts') && taxCats"></td></tr>
+                <tr v-for="a in g.accounts"><td></td><td class="ind">{{ a.code }} · {{ a.name }} <span class="tag" v-if="a.suggested">suggested</span></td><td class="num">{{ money(a.cents) }}</td>
+                  <td class="no-print" v-if="can('accounts') && taxCats"><select class="auto" :value="a.category" @change="saveTaxCategories([{ accountId: a.id, category: $event.target.value }], 'Saved.')" :aria-label="'Tax category for ' + a.name">
+                    <option v-for="c in taxCats.categories" :value="c.key">{{ c.label }}</option></select></td></tr>
+              </template>
+              <tr class="total"><td></td><td>Ordinary business income (before items reported elsewhere)</td><td class="num">{{ money(report.data.ordinaryIncomeCents) }}</td><td class="no-print" v-if="can('accounts') && taxCats"></td></tr>
+            </table>
+            <template v-if="report.data.elsewhere.length">
+              <h4>Reported elsewhere</h4>
+              <table class="data tax">
+                <template v-for="g in report.data.elsewhere"><tr v-for="a in g.accounts"><td>{{ g.note }}</td><td>{{ a.code }} · {{ a.name }}</td><td class="num">{{ money(a.cents) }}</td>
+                  <td class="no-print" v-if="can('accounts') && taxCats"><select class="auto" :value="a.category" @change="saveTaxCategories([{ accountId: a.id, category: $event.target.value }], 'Saved.')" :aria-label="'Tax category for ' + a.name">
+                    <option v-for="c in taxCats.categories" :value="c.key">{{ c.label }}</option></select></td></tr></template>
+              </table>
+            </template>
+            <p class="muted small">Line numbers follow the IRS's {{ report.data.source.taxYear }} instructions and are not yet checked by the review board; they can move from year to year. Meals are shown in full: generally only half is deductible.</p>
+          </template>
+        </template>
+
+        <template v-if="report.type === 'tax-1099'">
+          <p>A Form 1099-NEC is needed for each vendor marked <em>1099</em> who was paid {{ money(report.data.thresholdCents) }} or more in {{ report.data.year }}.
+            <span v-if="!report.data.thresholdConfirmed">(The amount for {{ report.data.year }} is not confirmed yet; this is the latest known.)</span></p>
+          <table class="data">
+            <thead><tr><th>Vendor</th><th class="num">Paid (cash, check, ACH)</th><th class="num">Paid by card</th><th>Form needed</th><th>Address on file</th></tr></thead>
+            <tr v-for="v in report.data.vendors"><td>{{ v.name }}</td><td class="num">{{ money(v.paidCents) }}</td><td class="num">{{ money(v.byCardCents) }}</td><td>{{ v.needsForm ? 'Yes' : 'No' }}</td><td :class="{ bad: v.needsForm && !v.hasAddress }">{{ v.hasAddress ? 'Yes' : 'No' }}</td></tr>
+            <tr class="total"><td>{{ report.data.formsNeeded }} form(s) needed</td><td class="num">{{ money(report.data.totalCents) }}</td><td colspan="3"></td></tr>
+          </table>
+          <p class="muted" v-if="!report.data.vendors.length">No vendor marked 1099 was paid in {{ report.data.year }}. Mark a vendor in Bills → Vendors.</p>
+          <p class="muted small">Card and payment-app payments are left out: the card company reports those on Form 1099-K. You will also need each vendor's tax ID (from their Form W-9).</p>
+          <template v-if="report.data.toCheck.length">
+            <h4>Worth a second look</h4>
+            <p class="hint">These vendors are not marked 1099 but were paid over the threshold. Corporations and sellers of goods usually don't get one; individuals and LLCs paid for services usually do.</p>
+            <table class="data"><tr v-for="v in report.data.toCheck"><td>{{ v.name }}</td><td class="num">{{ money(v.paidCents) }}</td></tr></table>
+          </template>
+        </template>
+
+        <template v-if="report.type === 'tax-w2'">
+          <div class="scroll-x">
+            <table class="data register">
+              <thead><tr><th>Employee</th><th class="num">Box 1 Wages</th><th class="num">Box 2 Fed. tax</th><th class="num">Box 3 SS wages</th><th class="num">Box 4 SS tax</th>
+                <th class="num">Box 5 Medicare wages</th><th class="num">Box 6 Medicare tax</th><th class="num">Box 12 D (401k)</th><th>State: box 16 wages / box 17 tax</th></tr></thead>
+              <tr v-for="e in [...report.data.employees, { employee: 'W-3 total (' + report.data.w3.forms + ' forms)', total: true, ...report.data.w3 }]" :class="{ total: e.total }">
+                <td>{{ e.employee }}</td><td class="num">{{ money(e.box1) }}</td><td class="num">{{ money(e.box2) }}</td><td class="num">{{ money(e.box3) }}</td><td class="num">{{ money(e.box4) }}</td>
+                <td class="num">{{ money(e.box5) }}</td><td class="num">{{ money(e.box6) }}</td><td class="num">{{ money(e.box12D) }}</td>
+                <td><span v-for="(s, st) in e.state">{{ st }}: {{ money(s.box16) }} / {{ money(s.box17) }} </span></td></tr>
+            </table>
+          </div>
+          <p class="muted" v-if="!report.data.employees.length">No paychecks were dated in {{ report.data.year }}.</p>
+          <p class="muted small" v-for="n in report.data.notes">{{ n }}</p>
+        </template>
+        <p v-if="reportTies" :class="reportCheck === 0 ? 'ok' : 'bad'">{{ reportCheck === 0 ? '✓ This report ties out.' : '⚠ This report does not tie out by ' + money(reportCheck) }}</p>
       </div>
     </section>
 

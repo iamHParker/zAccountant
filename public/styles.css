@@ -27,6 +27,8 @@ button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid
 button.primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 button.link { border: 0; background: none; color: var(--brand); padding: 0; text-decoration: underline; }
+input.year { width: 6em; }
+.tag { font-size: 11px; font-weight: 600; color: var(--muted, #6b7385); border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; vertical-align: middle; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
 .seg button { margin: 0; border: 0; border-radius: 0; }
 .seg button.active { background: var(--brand); color: var(--brand-ink); }

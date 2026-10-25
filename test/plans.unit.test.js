@@ -15,6 +15,7 @@ test('which API paths need which feature', () => {
   for (const p of ['/employees', '/employees/x/paychecks', '/paychecks/x/stub', '/payroll-runs/preview', '/payroll-deposits', '/payroll-hours',
     '/reports/payroll-register', '/reports/payroll-liabilities']) assert.equal(featureForPath(p), 'payroll', p);
   for (const p of ['/time-entries', '/time-entries/import', '/jobs', '/jobs/x', '/reports/time-summary']) assert.equal(featureForPath(p), 'timesheets', p);
+  for (const p of ['/tax-categories', '/reports/tax-summary', '/reports/tax-1099', '/reports/tax-w2']) assert.equal(featureForPath(p), 'tax', p);
   for (const p of ['', '/accounts', '/entries/simple', '/reports/balance-sheet', '/invoices', '/settings', '/employeesX', '/jobsite'])
     assert.equal(featureForPath(p), null, p);
 });

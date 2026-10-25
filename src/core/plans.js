@@ -10,6 +10,7 @@
 export const FEATURES = {
   payroll: 'Payroll (employees, paychecks, tax deposits, payroll reports)',
   timesheets: 'Timesheets (time entry, approvals, jobs, HoursTracker import)',
+  tax: 'Tax-ready (accounts mapped to return lines, tax summary, 1099-NEC and W-2/W-3 totals)',
 };
 
 export const PLANS = {
@@ -19,6 +20,7 @@ export const PLANS = {
 export const ADD_ONS = {
   payroll: { name: 'Payroll', features: ['payroll'], monthlyCents: null },
   timesheets: { name: 'Timesheets', features: ['timesheets'], monthlyCents: null },
+  tax: { name: 'Tax-ready', features: ['tax'], monthlyCents: null },
 };
 
 /** A company with no plan row yet is on this one (every company made during the beta). */
@@ -37,6 +39,7 @@ const GATES = [
   [/^\/reports\/payroll-(register|liabilities)(\/|$)/, 'payroll'],
   [/^\/(time-entries|jobs)(\/|$)/, 'timesheets'],
   [/^\/reports\/time-summary(\/|$)/, 'timesheets'],
+  [/^\/(tax-categories|reports\/tax-(summary|1099|w2))(\/|$)/, 'tax'],
 ];
 
 /** The feature a company API path needs, or null. `rest` is the part after /companies/<id>. */

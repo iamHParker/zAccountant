@@ -14,7 +14,7 @@ export async function grantRuntimeRole(pool, role) {
                     recurring_entries, books_checks, bank_transactions, bank_rules, reconciliations, reconciliation_lines, import_batches,
                     contacts, documents, document_lines, payments, payment_applications, payroll_runs, company_roles, departments, jobs, time_entries, payroll_deposits,
                     users, sessions, memberships, feedback_reports, company_plans, plan_changes,
-                    company_logos, invoice_items TO ${role};
+                    company_logos, invoice_items, account_tax_categories TO ${role};
     GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount, futa_credit_reduction, default_sales_tax_rate,
                   invoice_address, invoice_note, invoice_footer, entity_type, books_start_date, setup_done) ON companies TO ${role};
     GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash) ON users TO ${role};
@@ -36,6 +36,8 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (name, code, customer_id, is_active) ON jobs TO ${role};
     GRANT UPDATE (job_id, work_date, minutes, start_time, end_time, notes, billable, status, review_note, reviewed_by, reviewed_at, paid_run_id, paid_paycheck_id, updated_at) ON time_entries TO ${role};
     GRANT DELETE ON time_entries TO ${role};
+    GRANT UPDATE (category, updated_at, updated_by) ON account_tax_categories TO ${role};
+    GRANT DELETE ON account_tax_categories TO ${role};
     GRANT UPDATE (status, claude_text, developer_note, updated_at, updated_by) ON feedback_reports TO ${role};
     GRANT UPDATE (plan, add_ons, updated_at, updated_by) ON company_plans TO ${role};
     GRANT UPDATE (picture, picture_type, updated_at, updated_by) ON company_logos TO ${role};

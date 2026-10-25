@@ -101,7 +101,7 @@ and finish when the difference is $0.00. Reconciled items are locked so they can
   },
   {
     id: 'reports', tab: 'reports', title: 'Reports, comparisons and exports',
-    words: 'balance sheet profit loss income statement cash flow trial balance compare prior year csv excel pdf print payroll register',
+    words: 'balance sheet profit loss income statement cash flow trial balance compare prior year csv excel pdf print payroll register tax schedule c 1065 1120 1120-s 1099 nec w-2 w-3 cpa',
     html: `
 <ul>
   <li><strong>Balance Sheet</strong>: what the business owns and owes on a date. Assets = Liabilities + Equity, always.</li>
@@ -109,6 +109,15 @@ and finish when the difference is $0.00. Reconciled items are locked so they can
   <li><strong>Cash Flow</strong>: why cash went up or down (operations, buying equipment, loans and owner money).</li>
   <li><strong>Trial Balance</strong>: every account's balance; what your accountant asks for.</li>
   <li><strong>Payroll Register</strong> (payroll role): every paycheck with each tax and deduction.</li>
+</ul>
+<p><strong>Tax-ready</strong> (totals for your tax preparer; nothing is filed):</p>
+<ul>
+  <li><strong>Tax Summary</strong>: income and expenses on the lines of your return (Schedule C, 1065, 1120-S or 1120, from the
+    type of business you chose). Each account has a tax category; a <em>suggested</em> one is our guess, so check it and change it in
+    the list beside the account, or press <em>accept all suggestions</em>.</li>
+  <li><strong>1099-NEC</strong>: for a tax year, what each vendor marked 1099 was paid by cash, check or ACH, and who needs a form
+    ($600 for 2025 payments, $2,000 from 2026). Card payments are left out: the card company reports them.</li>
+  <li><strong>W-2 / W-3</strong> (payroll role): each employee's W-2 boxes for the year, and the W-3 totals.</li>
 </ul>
 <p><strong>Compare with</strong> "the period before" or "a year earlier" puts the two side by side with the change in dollars and percent.
 "—" means the earlier amount was zero, so there's no percent.</p>

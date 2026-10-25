@@ -76,5 +76,14 @@ report is sent only when the tester presses Send, with an optional JPEG of the s
 Developers triage reports, edit a Claude-ready write-up (the reporter's name and email are left out), see the last
 100 server errors, and download a database backup (`src/jobs/backup.js`, pg_dump).
 
+## Tax-ready level 1 (`taxService.js`, `src/core/taxLines.js`, migration 018; plan feature `tax`)
+Accounts get a tax CATEGORY (`account_tax_categories`; no row = `suggestCategory`, shown as suggested), and each form
+(`TAX_FORMS`: Schedule C, 1065, 1120-S, 1120) places a category on a line or names where it goes instead
+(`placeOf`). The form comes from `companies.entity_type` (`FORM_FOR_ENTITY`; individual = none). `taxSummary` is
+pure and tested with hand totals. Line numbers are from the IRS 2025 instructions, `verified: false`.
+`get1099Totals`: posted payments made, by payment date, card payments (method card or a credit-card account) left
+out; threshold by year in `NEC_THRESHOLD`. `getW2Totals`: sums each paycheck's stored calculation (void rows are
+negative). Routes: `GET/PUT tax-categories`, `reports/tax-summary|tax-1099|tax-w2` (CSV via `report()`).
+
 ## Plans and the Admin dashboard (`planService.js`, `src/core/plans.js`)
 See chapter 3. Prices stay `null` until Homer sets them. Stripe comes in December 2026.
