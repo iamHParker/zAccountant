@@ -2350,6 +2350,15 @@
     </template>
     </template>
   </main>
+  <footer class="status-bar" v-if="auth.user && !auth.screen" aria-label="Status bar">
+    <span class="status-left muted">{{ company?.name }}</span>
+    <span class="zoom" role="group" aria-label="Zoom">
+      <button type="button" class="zoom-step" @click="setZoom(zoom - 10)" :disabled="zoom <= ZOOM_MIN" title="Zoom out" aria-label="Zoom out">−</button>
+      <input type="range" :min="ZOOM_MIN" :max="ZOOM_MAX" step="10" :value="zoom" @input="setZoom(+$event.target.value)" aria-label="Zoom level">
+      <button type="button" class="zoom-step" @click="setZoom(zoom + 10)" :disabled="zoom >= ZOOM_MAX" title="Zoom in" aria-label="Zoom in">+</button>
+      <button type="button" class="zoom-pct" @click="setZoom(100)" title="Back to 100%">{{ zoom }}%</button>
+    </span>
+  </footer>
 </div>
 </body>
 </html>

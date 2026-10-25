@@ -82,6 +82,11 @@ const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '',
 const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
   expenseAccountId: '', paidFromAccountId: '', photos: [], photoBusy: false, key: newKey() });
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
+// Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
+const ZOOM_MIN = 50; const ZOOM_MAX = 200;
+const lastZoom = () => { try { const z = Number(localStorage.getItem('zacc.zoom')); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 100; } catch { return 100; } };
+const keepZoom = (z) => { try { localStorage.setItem('zacc.zoom', String(z)); } catch { /* private window: not kept */ } };
+const applyZoom = (z) => document.documentElement.style.setProperty('--zoom', String(z / 100));
 const lastMileRate = () => { try { return localStorage.getItem('zacc.mileRate') ?? ''; } catch { return ''; } };
 const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } catch { /* private window: not kept */ } };
 // The accounts last used for costs that came in from the Road page.
@@ -214,6 +219,7 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '',
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX,
       fb: { open: false, note: '', picture: null, pictureSource: null, busy: false, error: '' },
       adm: { from: 'home', data: null, changes: [], edit: null, q: '' },
       dev: { from: 'home', summary: null, status: 'new', list: null, report: null, text: '', note: '', copied: false },
@@ -350,6 +356,7 @@ createApp({
     },
   },
   async mounted() {
+    applyZoom(this.zoom);
     startRecorder();
     onSignInNeeded = (next) => this.goAuth(next ?? 'signin');
     try {
@@ -713,6 +720,12 @@ createApp({
       if (g.then) await this[g.then]();
     },
     openJE() { this.showJE = true; },
+    /** Status bar zoom: whole steps of 10%, between ZOOM_MIN and ZOOM_MAX. */
+    setZoom(z) {
+      this.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z / 10) * 10));
+      applyZoom(this.zoom);
+      keepZoom(this.zoom);
+    },
     cardAccounts() { return this.accounts.filter((a) => a.isActive && a.subtype === 'credit_card'); },
     /** Credit cards card: open Banking on the first card (cards import statements and reconcile like a bank). */
     pickCard() {
