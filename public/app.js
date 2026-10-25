@@ -219,7 +219,23 @@ const blankEmployee = () => ({
   firstName: '', lastName: '', ssn: '', workState: 'TX', payFrequency: 'biweekly', payType: 'hourly', payRate: '',
   w4: { formYear: 2020, allowances: 0, filingStatus: 'single', step2: false, dependentsCredit: '', extraWithholding: '', exempt: false, exemptYear: Number(today().slice(0, 4)) },
   ca: { filingStatus: 'single', allowances: 1, exempt: false, exemptYear: Number(today().slice(0, 4)) }, co: { annualAllowance: '' }, dc: { filingStatus: 'single', allowances: 0 },
+  address: { line1: '', line2: '', city: '', state: '', zip: '' }, hireDate: '',
 });
+
+/** An employee from the server, as the Add employee form holds it (for edit). */
+const employeeForm = (e) => {
+  const b = blankEmployee();
+  const el = e.stateElections ?? {};
+  const money = (c) => (c == null || c === '' ? '' : String(c));
+  return {
+    ...b, id: e.id, ssnLast4: e.ssnLast4, elections: el,
+    firstName: e.firstName, lastName: e.lastName, workState: e.workState, payFrequency: e.payFrequency, payType: e.payType,
+    payRate: (e.payRateCents / 100).toFixed(2), hireDate: e.hireDate ?? '',
+    w4: { ...b.w4, ...e.w4, exempt: Boolean(e.w4?.exempt), dependentsCredit: money(e.w4?.dependentsCredit), extraWithholding: money(e.w4?.extraWithholding) },
+    ca: { ...b.ca, ...el.CA, exempt: Boolean(el.CA?.exempt) }, co: { ...b.co, ...el.CO }, dc: { ...b.dc, ...el.DC },
+    address: { ...b.address, ...e.address },
+  };
+};
 
 createApp({
   data() {
@@ -1151,9 +1167,26 @@ createApp({
       const exemptOnly = (x) => { const { exempt, exemptYear, ...rest } = x; return exempt ? { ...rest, exempt: true, exemptYear } : rest; };
       const stateElections = { CA: exemptOnly(e.ca), CO: e.co.annualAllowance ? e.co : {}, DC: e.dc };
       const w4 = exemptOnly({ ...e.w4, dependentsCredit: e.w4.dependentsCredit || '0', extraWithholding: e.w4.extraWithholding || '0' });
-      const body = { ssn: e.ssn || undefined, firstName: e.firstName, lastName: e.lastName, workState: e.workState, payFrequency: e.payFrequency, payType: e.payType, payRate: e.payRate, w4, stateElections: { [e.workState]: stateElections[e.workState] } };
-      const ok = await this.run(() => api('POST', `/companies/${this.companyId}/employees`, body), 'Employee saved.');
+      const body = { ssn: e.ssn || undefined, firstName: e.firstName, lastName: e.lastName, workState: e.workState, payFrequency: e.payFrequency, payType: e.payType, payRate: e.payRate, w4,
+        stateElections: { ...e.elections, [e.workState]: stateElections[e.workState] }, address: e.address, hireDate: e.hireDate || undefined };
+      const ok = await this.run(() => (e.id ? api('PUT', `/companies/${this.companyId}/employees/${e.id}`, body) : api('POST', `/companies/${this.companyId}/employees`, body)),
+        e.id ? 'Employee changed. Paychecks already made keep the details they were figured with.' : 'Employee saved.');
       if (ok) { this.newEmp = blankEmployee(); this.showNewEmp = false; this.loadEmployees(); }
+    },
+    editEmployee(e) {
+      this.newEmp = employeeForm(e); this.showNewEmp = true;
+      this.$nextTick(() => document.querySelector('.emp-form')?.scrollIntoView({ block: 'start' }));
+    },
+    closeEmployeeForm() { this.newEmp = blankEmployee(); this.showNewEmp = false; },
+    async terminateEmployee(e) {
+      const date = prompt(`Last day of work for ${e.firstName} ${e.lastName} (YYYY-MM-DD). Run their final paycheck first: after this they drop out of payroll runs.`, today());
+      if (!date) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/employees/${e.id}/terminate`, { date: date.trim() }), `${e.firstName} marked as left.`)) this.loadEmployees();
+    },
+    async rehireEmployee(e) {
+      const date = prompt(`Date ${e.firstName} ${e.lastName} starts again (YYYY-MM-DD)`, today());
+      if (!date) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/employees/${e.id}/rehire`, { date: date.trim() }), `${e.firstName} is back on payroll.`)) this.loadEmployees();
     },
     startPaycheck(e) {
       this.pc = { employee: e, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: this.bankAccounts[0]?.id ?? '', result: null, key: crypto.randomUUID() };

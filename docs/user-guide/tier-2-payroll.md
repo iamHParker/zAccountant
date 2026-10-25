@@ -24,7 +24,22 @@ answers:
 - federal **W-4** (2020 or later, or an older form with allowances);
 - **California DE 4**, **Colorado** annual allowance, or **DC D-4**, depending on the work state.
 
+Add their **hire date** and **home address** too: the address goes on the W-2.
+
 To pay someone from their timesheets, choose the person who signs in under **Timesheets from** in the employee list (tier 3).
+
+**edit** (beside each employee) changes anything on that form: a raise, a new W-4, a married name, a move to another
+state, a new address. Leave the Social Security number blank to keep the one on file. The change applies to paychecks
+from then on. Each paycheck already made keeps the name, state, address, pay type and rate it was figured with, so old
+stubs reprint exactly as issued. Every change is in the audit trail (for the SSN, W-4 and state forms, only *that*
+they changed, never the numbers). The W-2 uses the employee's current name and address, as the IRS expects.
+
+**Moving to another state:** change **Works in** and fill in the new state's form. Paychecks before the move stay
+taxed for the old state, and the payroll taxes report sends each state its own share.
+
+**left the company** asks for their last day of work. Run their final paycheck first: after this they drop out of
+payroll runs and timesheets. Their paychecks and W-2 stay. **rehire** asks for the day they start again; the
+year-to-date totals carry on.
 
 ## 3. Running payroll
 

@@ -1928,7 +1928,7 @@
       <div class="row wrap"><h1>Payroll</h1>
         <template v-if="can('payroll')">
           <button class="primary" @click="startRun">Run payroll</button>
-          <button @click="showNewEmp = !showNewEmp">{{ showNewEmp ? 'Close' : 'Add employee' }}</button>
+          <button @click="showNewEmp ? closeEmployeeForm() : (showNewEmp = true)">{{ showNewEmp ? 'Close' : 'Add employee' }}</button>
         </template>
       </div>
 
@@ -1985,7 +1985,8 @@
       <div class="card stub-card print-me" v-if="stub">
         <div class="row"><h2>Pay stub</h2><span><button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button><button @click="stub = null">Close</button></span></div>
         <div class="grid2">
-          <div><strong>{{ stub.employer.name }}</strong><br>{{ stub.employee.name }}<span v-if="stub.employee.ssnLast4"> · SSN •••-••-{{ stub.employee.ssnLast4 }}</span></div>
+          <div><strong>{{ stub.employer.name }}</strong><br>{{ stub.employee.name }}<span v-if="stub.employee.ssnLast4"> · SSN •••-••-{{ stub.employee.ssnLast4 }}</span>
+            <template v-if="stub.employee.address?.line1"><br>{{ stub.employee.address.line1 }}{{ stub.employee.address.line2 ? ', ' + stub.employee.address.line2 : '' }}<br>{{ stub.employee.address.city }} {{ stub.employee.address.state }} {{ stub.employee.address.zip }}</template></div>
           <div class="num">Pay date {{ stub.payDate }}<br><span v-if="stub.periodStart">Period {{ stub.periodStart }} to {{ stub.periodEnd }}</span></div>
         </div>
         <p class="bad" v-if="stub.isVoidRecord">This is a void record (negative amounts cancel the original paycheck).</p>
@@ -2008,7 +2009,10 @@
       </div>
 
       <h2>Employees</h2>
-      <form class="card" v-if="showNewEmp" @submit.prevent="createEmployee">
+      <form class="card emp-form" v-if="showNewEmp" @submit.prevent="createEmployee">
+        <h3 v-if="newEmp.id">Change {{ newEmp.firstName }} {{ newEmp.lastName }}</h3>
+        <p class="hint" v-if="newEmp.id">Changes apply to paychecks from now on. Paychecks already made keep the name, state and
+          pay they were figured with. Moving to another state? Fill in that state's form below.</p>
         <div class="grid2">
           <label>First name <input v-model.trim="newEmp.firstName" required></label>
           <label>Last name <input v-model.trim="newEmp.lastName" required></label>
@@ -2022,7 +2026,17 @@
             <select v-model="newEmp.payType"><option value="hourly">Hourly</option><option value="salary">Salary</option></select>
           </label>
           <label>{{ newEmp.payType === 'hourly' ? 'Hourly rate' : 'Salary per paycheck' }} <input v-model.trim="newEmp.payRate" inputmode="decimal" required></label>
-          <label>Social Security number (stored encrypted) <input v-model.trim="newEmp.ssn" inputmode="numeric" autocomplete="off" placeholder="123-45-6789"></label>
+          <label>Social Security number (stored encrypted) <input v-model.trim="newEmp.ssn" inputmode="numeric" autocomplete="off"
+            :placeholder="newEmp.ssnLast4 ? 'blank keeps •••-••-' + newEmp.ssnLast4 : '123-45-6789'"></label>
+          <label>Hire date <input type="date" v-model="newEmp.hireDate"></label>
+        </div>
+        <h3>Home address (for the W-2)</h3>
+        <div class="grid2">
+          <label>Street <input v-model.trim="newEmp.address.line1" maxlength="100" autocomplete="off"></label>
+          <label>Apt, suite <input v-model.trim="newEmp.address.line2" maxlength="100" autocomplete="off"></label>
+          <label>City <input v-model.trim="newEmp.address.city" maxlength="100" autocomplete="off"></label>
+          <label>State <input v-model.trim="newEmp.address.state" maxlength="2" autocomplete="off"></label>
+          <label>ZIP <input v-model.trim="newEmp.address.zip" maxlength="10" inputmode="numeric" autocomplete="off"></label>
         </div>
         <h3>Federal W-4</h3>
         <div class="grid2">
@@ -2062,16 +2076,20 @@
             <label>Allowances <input type="number" min="0" v-model.number="newEmp.dc.allowances"></label>
           </div>
         </template>
-        <button class="primary">Save employee</button>
+        <button class="primary">{{ newEmp.id ? 'Save changes' : 'Save employee' }}</button>
+        <button type="button" v-if="newEmp.id" @click="closeEmployeeForm">Cancel</button>
       </form>
 
       <table class="data">
         <thead><tr><th>Name</th><th>State</th><th>Pay</th><th v-if="can('payroll') && members.length">Timesheets from</th><th></th></tr></thead>
-        <tr v-for="e in employees"><td>{{ e.firstName }} {{ e.lastName }}<span class="muted" v-if="e.ssnLast4"> · SSN •••-••-{{ e.ssnLast4 }}</span></td><td>{{ e.workState }}</td>
+        <tr v-for="e in employees" :class="{ muted: !e.active }"><td>{{ e.firstName }} {{ e.lastName }}<span class="muted" v-if="e.ssnLast4"> · SSN •••-••-{{ e.ssnLast4 }}</span>
+          <span class="tag" v-if="!e.active">left{{ e.terminationDate ? ' ' + usDate(e.terminationDate) : '' }}</span></td><td>{{ e.workState }}</td>
           <td>{{ money(e.payRateCents) }}{{ e.payType === 'hourly' ? '/hr' : '/check' }} · {{ e.payFrequency }}</td>
           <td v-if="can('payroll') && members.length"><select :value="e.userId || ''" @change="linkEmployee(e, $event.target.value)" :aria-label="'Timesheets for ' + e.firstName">
             <option value="">(not linked)</option><option v-for="m in members" :value="m.id">{{ m.name }}</option></select></td>
-          <td><button v-if="can('payroll')" class="link" @click="startPaycheck(e)">Run paycheck</button></td></tr>
+          <td class="actions" v-if="can('payroll')"><template v-if="e.active"><button class="link" @click="startPaycheck(e)">Run paycheck</button>
+            <button class="link" @click="editEmployee(e)">edit</button> <button class="link" @click="terminateEmployee(e)">left the company</button></template>
+            <template v-else><button class="link" @click="editEmployee(e)">edit</button> <button class="link" @click="rehireEmployee(e)">rehire</button></template></td><td v-else></td></tr>
       </table>
 
       <template v-if="runs.length">

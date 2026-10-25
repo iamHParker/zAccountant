@@ -9,7 +9,13 @@ import { encryptField } from '../security/crypto.js';
 
 const EMP_COLS = `id, first_name AS "firstName", last_name AS "lastName", work_state AS "workState",
   pay_frequency AS "payFrequency", pay_type AS "payType", pay_rate_cents AS "payRateCents",
-  w4, state_elections AS "stateElections", active, ssn_last4 AS "ssnLast4", user_id AS "userId"`;
+  w4, state_elections AS "stateElections", active, ssn_last4 AS "ssnLast4", user_id AS "userId", address,
+  to_char(hire_date, 'YYYY-MM-DD') AS "hireDate", to_char(termination_date, 'YYYY-MM-DD') AS "terminationDate"`;
+
+/** The employee's name as it was on the paycheck (paychecks made before 2026-10 fall back to today's name). */
+const PC_NAME = (p, e, lastFirst = false) => lastFirst
+  ? `COALESCE(${p}.calculation->'employee'->>'lastName', ${e}.last_name) || ', ' || COALESCE(${p}.calculation->'employee'->>'firstName', ${e}.first_name)`
+  : `COALESCE(${p}.calculation->'employee'->>'firstName', ${e}.first_name) || ' ' || COALESCE(${p}.calculation->'employee'->>'lastName', ${e}.last_name)`;
 
 /** Validate a Social Security number (format and IRS/SSA never-issued ranges). Returns 9 digits or throws. */
 export function cleanSsn(ssn) {
@@ -22,32 +28,142 @@ export function cleanSsn(ssn) {
   return d;
 }
 
-export async function createEmployee(pool, companyId, e, { actor = null } = {}) {
+const isObj = (x) => x != null && typeof x === 'object' && !Array.isArray(x);
+
+/** Home address for the W-2: { line1, line2, city, state, zip }, all optional, US only. */
+function cleanAddress(a, errors) {
+  if (a == null) return {};
+  if (!isObj(a)) { errors.push('address must be an object'); return {}; }
+  const out = {};
+  for (const k of ['line1', 'line2', 'city', 'state', 'zip']) {
+    const v = a[k] == null ? '' : String(a[k]).trim();
+    if (v.length > 100) errors.push(`address ${k} is too long`);
+    if (v) out[k] = v;
+  }
+  if (out.state) out.state = out.state.toUpperCase();
+  if (out.state && !/^[A-Z]{2}$/.test(out.state)) errors.push('address state is two letters, e.g. TX');
+  if (out.zip && !/^\d{5}(-\d{4})?$/.test(out.zip)) errors.push('ZIP code is 5 digits (or ZIP+4)');
+  return out;
+}
+
+/**
+ * Check the employee fields that are present (all are required when creating). Returns the cleaned values,
+ * in database columns; throws with every problem listed.
+ */
+function checkEmployee(e, { partial = false } = {}) {
   const errors = [];
+  const has = (k) => !partial || e[k] !== undefined;
+  const out = {};
   const okName = (n) => typeof n === 'string' && n.trim().length > 0 && n.length <= 100;
-  if (!okName(e.firstName) || !okName(e.lastName)) errors.push('first and last name are required (up to 100 characters)');
-  if (e.w4 != null && (typeof e.w4 !== 'object' || Array.isArray(e.w4))) errors.push('w4 must be an object');
-  if (e.stateElections != null && (typeof e.stateElections !== 'object' || Array.isArray(e.stateElections))) errors.push('stateElections must be an object');
-  if (!SUPPORTED_STATES.includes(e.workState)) errors.push('work state must be TX, CO, CA or DC');
-  if (!['weekly', 'biweekly', 'semimonthly', 'monthly'].includes(e.payFrequency)) errors.push('invalid pay frequency');
-  if (!['salary', 'hourly'].includes(e.payType)) errors.push('pay type must be salary or hourly');
-  let rate;
-  try { rate = toCents(e.payRate); } catch (err) { errors.push(`pay rate: ${err.message}`); }
-  if (rate != null && (rate <= 0 || rate > 100_000_000)) errors.push('pay rate must be between $0.01 and $1,000,000');
+  if (has('firstName') || has('lastName')) {
+    if ((has('firstName') && !okName(e.firstName)) || (has('lastName') && !okName(e.lastName))) errors.push('first and last name are required (up to 100 characters)');
+    if (has('firstName') && okName(e.firstName)) out.first_name = e.firstName.trim();
+    if (has('lastName') && okName(e.lastName)) out.last_name = e.lastName.trim();
+  }
+  if (e.w4 != null && !isObj(e.w4)) errors.push('w4 must be an object');
+  else if (e.w4 != null || !partial) out.w4 = JSON.stringify(e.w4 ?? {});
+  if (e.stateElections != null && !isObj(e.stateElections)) errors.push('stateElections must be an object');
+  else if (e.stateElections != null || !partial) out.state_elections = JSON.stringify(e.stateElections ?? {});
+  if (has('workState')) { if (!SUPPORTED_STATES.includes(e.workState)) errors.push('work state must be TX, CO, CA or DC'); else out.work_state = e.workState; }
+  if (has('payFrequency')) { if (!PAY_FREQUENCIES.includes(e.payFrequency)) errors.push('invalid pay frequency'); else out.pay_frequency = e.payFrequency; }
+  if (has('payType')) { if (!['salary', 'hourly'].includes(e.payType)) errors.push('pay type must be salary or hourly'); else out.pay_type = e.payType; }
+  if (has('payRate')) {
+    let rate;
+    try { rate = toCents(e.payRate); } catch (err) { errors.push(`pay rate: ${err.message}`); }
+    if (rate != null && (rate <= 0 || rate > 100_000_000)) errors.push('pay rate must be between $0.01 and $1,000,000');
+    else if (rate != null) out.pay_rate_cents = rate;
+  }
+  if (e.address !== undefined) out.address = JSON.stringify(cleanAddress(e.address, errors));
+  if (e.hireDate) { if (!isIsoDate(e.hireDate)) errors.push('hire date must be a date'); else out.hire_date = e.hireDate; }
   if (errors.length) throw new LedgerError('Employee is not valid', errors);
+  return out;
+}
+
+const PAY_FREQUENCIES = ['weekly', 'biweekly', 'semimonthly', 'monthly'];
+
+export async function createEmployee(pool, companyId, e, { actor = null } = {}) {
+  const v = checkEmployee(e);
   // SSN is encrypted with a key held outside the database; only the last 4 digits are stored readable.
   const ssn = e.ssn ? cleanSsn(e.ssn) : null;
   return withTransaction(pool, async (c) => {
     await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
     const { rows: [emp] } = await c.query(
-      `INSERT INTO employees (company_id, first_name, last_name, work_state, pay_frequency, pay_type, pay_rate_cents, w4, state_elections, ssn_enc, ssn_last4)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING ${EMP_COLS}`,
-      [companyId, e.firstName.trim(), e.lastName.trim(), e.workState, e.payFrequency, e.payType, rate,
-        JSON.stringify(e.w4 ?? {}), JSON.stringify(e.stateElections ?? {}),
-        ssn ? encryptField(ssn, `company:${companyId}`) : null, ssn ? ssn.slice(5) : null],
+      `INSERT INTO employees (company_id, first_name, last_name, work_state, pay_frequency, pay_type, pay_rate_cents, w4, state_elections, ssn_enc, ssn_last4, address, hire_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING ${EMP_COLS}`,
+      [companyId, v.first_name, v.last_name, v.work_state, v.pay_frequency, v.pay_type, v.pay_rate_cents, v.w4, v.state_elections,
+        ssn ? encryptField(ssn, `company:${companyId}`) : null, ssn ? ssn.slice(5) : null, v.address ?? '{}', v.hire_date ?? null],
     );
     await appendAudit(c, companyId, { action: 'create', entity: 'employee', entityId: emp.id, actor, payload: { name: `${emp.firstName} ${emp.lastName}`, workState: emp.workState } });
     return emp;
+  });
+}
+
+const JSON_COLS = new Set(['w4', 'state_elections', 'address']);
+// The database stores JSON with its keys reordered, so compare with sorted keys.
+const stableJson = (x) => (isObj(x) ? `{${Object.keys(x).sort().map((k) => `${JSON.stringify(k)}:${stableJson(x[k])}`).join(',')}}` : JSON.stringify(x));
+
+// What the audit trail shows for each changed field (W-4, state forms and SSN: only that they changed).
+const AUDIT_SHOWN = { first_name: 'firstName', last_name: 'lastName', work_state: 'workState', pay_frequency: 'payFrequency',
+  pay_type: 'payType', pay_rate_cents: 'payRateCents', hire_date: 'hireDate' };
+
+/**
+ * Change an employee's details (CPA edit sweep, batch 3). Applies to paychecks from now on: each paycheck already
+ * made keeps its own copy of the name, state, pay type and rate it was figured with, so stubs and reports don't move.
+ * A new SSN replaces the old one (blank keeps it). Audited field by field.
+ */
+export async function updateEmployee(pool, companyId, employeeId, e, { actor = null } = {}) {
+  if (typeof employeeId !== 'string' || !/^[0-9a-f-]{36}$/i.test(employeeId)) throw new LedgerError('Employee not found');
+  const v = checkEmployee(e ?? {}, { partial: true });
+  const ssn = e?.ssn ? cleanSsn(e.ssn) : null;
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    const { rows: [old] } = await c.query('SELECT * FROM employees WHERE company_id = $1 AND id = $2', [companyId, employeeId]);
+    if (!old) throw new LedgerError('Employee not found');
+    if (ssn) { v.ssn_enc = encryptField(ssn, `company:${companyId}`); v.ssn_last4 = ssn.slice(5); }
+    const same = (k) => {
+      const was = old[k] instanceof Date ? old[k].toISOString().slice(0, 10) : old[k];
+      return JSON_COLS.has(k) ? stableJson(was) === stableJson(JSON.parse(v[k])) : String(was) === String(v[k]);
+    };
+    const changed = Object.keys(v).filter((k) => k !== 'ssn_last4' && !same(k));
+    if (!changed.length) return getEmployee(c, companyId, employeeId);
+    const cols = [...changed, ...(changed.includes('ssn_enc') ? ['ssn_last4'] : [])];
+    await c.query(`UPDATE employees SET ${cols.map((k, i) => `${k} = $${i + 3}`).join(', ')} WHERE company_id = $1 AND id = $2`,
+      [companyId, employeeId, ...cols.map((k) => v[k])]);
+    const payload = {};
+    for (const k of changed) {
+      if (AUDIT_SHOWN[k]) payload[AUDIT_SHOWN[k]] = { from: old[k] instanceof Date ? old[k].toISOString().slice(0, 10) : old[k], to: v[k] };
+      else payload[{ ssn_enc: 'ssn', state_elections: 'stateElections' }[k] ?? k] = 'changed';
+    }
+    await appendAudit(c, companyId, { action: 'update', entity: 'employee', entityId: employeeId, actor, payload });
+    return getEmployee(c, companyId, employeeId);
+  });
+}
+
+/**
+ * Terminate (`active: false`, with the last day worked) or rehire (`active: true`, with the new start date).
+ * A terminated employee drops out of payroll runs and timesheets, so run the final paycheck first. Their paychecks,
+ * W-2 and history stay; rehiring continues the same year-to-date totals.
+ */
+export async function setEmployeeStatus(pool, companyId, employeeId, { active, date, reason, actor = null } = {}) {
+  if (typeof employeeId !== 'string' || !/^[0-9a-f-]{36}$/i.test(employeeId)) throw new LedgerError('Employee not found');
+  if (!isIsoDate(date)) throw new LedgerError(active ? 'Enter the date they start again' : 'Enter their last day of work');
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    const { rows: [old] } = await c.query(
+      `SELECT active, to_char(hire_date, 'YYYY-MM-DD') AS hire, to_char(termination_date, 'YYYY-MM-DD') AS term
+         FROM employees WHERE company_id = $1 AND id = $2`, [companyId, employeeId]);
+    if (!old) throw new LedgerError('Employee not found');
+    if (Boolean(active) === old.active) throw new LedgerError(active ? 'This employee is already active' : 'This employee has already left');
+    if (active) {
+      if (old.term && date <= old.term) throw new LedgerError(`The new start date must be after their last day (${old.term})`);
+      await c.query('UPDATE employees SET active = true, hire_date = $3, termination_date = NULL WHERE company_id = $1 AND id = $2', [companyId, employeeId, date]);
+    } else {
+      if (old.hire && date < old.hire) throw new LedgerError(`The last day can't be before they started (${old.hire})`);
+      await c.query('UPDATE employees SET active = false, termination_date = $3 WHERE company_id = $1 AND id = $2', [companyId, employeeId, date]);
+    }
+    await appendAudit(c, companyId, { action: active ? 'rehire' : 'terminate', entity: 'employee', entityId: employeeId, actor,
+      payload: { date, ...(reason ? { reason: String(reason).slice(0, 200) } : {}) } });
+    return getEmployee(c, companyId, employeeId);
   });
 }
 
@@ -139,6 +255,10 @@ async function compute(db, companyId, employeeId, input) {
   result.doubleTime = doubleTime;
   result.regularHours = emp.payType === 'hourly' ? hundredthsOfHours(input.hours, 'hours') / 100 : null;
   result.payRateCents = emp.payRateCents;
+  // The paycheck keeps its own copy of who and where, so editing the employee later never changes a past stub.
+  result.employee = { firstName: emp.firstName, lastName: emp.lastName, ssnLast4: emp.ssnLast4, workState: emp.workState,
+    payType: emp.payType, payFrequency: emp.payFrequency, address: emp.address ?? {} };
+  result.employer = { name: company.name, state: company.home_state };
   return { company, emp, result, lastPayDate };
 }
 
@@ -224,7 +344,7 @@ export async function voidPaycheck(pool, companyId, paycheckId, { date, reason, 
     const calc = pc.calculation;
     const neg = (x) => -x;
     const voidCalc = {
-      voidOf: pc.id, reason: reason.trim(), grossCents: neg(calc.grossCents), netPayCents: neg(calc.netPayCents),
+      voidOf: pc.id, reason: reason.trim(), state: calc.state, employee: calc.employee, employer: calc.employer, grossCents: neg(calc.grossCents), netPayCents: neg(calc.netPayCents),
       wages: { incomeTaxCents: neg(calc.wages.incomeTaxCents), ficaCents: neg(calc.wages.ficaCents) },
       deductions: (calc.deductions ?? []).map((d) => ({ ...d, amountCents: neg(d.amountCents) })),
       employeeTaxes: calc.employeeTaxes.map((t) => ({ ...t, amountCents: neg(t.amountCents), taxableCents: neg(t.taxableCents) })),
@@ -246,7 +366,7 @@ export async function listPaychecks(db, companyId, { year } = {}) {
   const { rows } = await db.query(
     `SELECT p.id, p.pay_date AS "payDate", p.gross_cents AS "grossCents", p.net_pay_cents AS "netPayCents",
             p.tables_verified AS "tablesVerified", p.voids_paycheck_id AS "voidsPaycheckId",
-            EXISTS (SELECT 1 FROM paychecks v WHERE v.voids_paycheck_id = p.id) AS voided, e.first_name || ' ' || e.last_name AS employee, p.calculation
+            EXISTS (SELECT 1 FROM paychecks v WHERE v.voids_paycheck_id = p.id) AS voided, ${PC_NAME('p', 'e')} AS employee, p.calculation
        FROM paychecks p JOIN employees e ON e.id = p.employee_id
       WHERE p.company_id = $1 AND ($2::int IS NULL OR p.tax_year = $2)
       ORDER BY p.pay_date DESC, p.created_at DESC`, [companyId, year ?? null]);
@@ -356,7 +476,7 @@ export async function getRun(db, companyId, runId) {
   const { rows: [r] } = await db.query('SELECT * FROM payroll_runs WHERE company_id = $1 AND id = $2', [companyId, runId]);
   if (!r) throw new LedgerError('Payroll run not found');
   const { rows: pcs } = await db.query(
-    `SELECT p.id, e.first_name || ' ' || e.last_name AS employee, p.gross_cents AS "grossCents", p.net_pay_cents AS "netPayCents",
+    `SELECT p.id, ${PC_NAME('p', 'e')} AS employee, p.gross_cents AS "grossCents", p.net_pay_cents AS "netPayCents",
             EXISTS (SELECT 1 FROM paychecks v WHERE v.voids_paycheck_id = p.id) AS voided
        FROM paychecks p JOIN employees e ON e.id = p.employee_id WHERE p.company_id = $1 AND p.run_id = $2 ORDER BY e.last_name, e.first_name`, [companyId, r.id]);
   return { ...runOut(r), paychecks: pcs };
@@ -419,8 +539,11 @@ export async function getPayStub(db, companyId, paycheckId) {
   }
   const { rows: [v] } = await db.query('SELECT pay_date FROM paychecks WHERE company_id = $1 AND voids_paycheck_id = $2', [companyId, pc.id]);
   return {
-    paycheckId: pc.id, employer: { name: company.name, state: company.home_state },
-    employee: { name: `${emp.firstName} ${emp.lastName}`, ssnLast4: emp.ssnLast4, workState: emp.workState, payType: emp.payType, payFrequency: emp.payFrequency },
+    paycheckId: pc.id, employer: calc.employer ?? { name: company.name, state: company.home_state },
+    employee: calc.employee
+      ? { name: `${calc.employee.firstName} ${calc.employee.lastName}`, ssnLast4: calc.employee.ssnLast4, workState: calc.employee.workState,
+        payType: calc.employee.payType, payFrequency: calc.employee.payFrequency, address: calc.employee.address ?? {} }
+      : { name: `${emp.firstName} ${emp.lastName}`, ssnLast4: emp.ssnLast4, workState: calc.state ?? emp.workState, payType: emp.payType, payFrequency: emp.payFrequency },
     payDate: pc.pay_date, periodStart: pc.period_start, periodEnd: pc.period_end, taxYear: pc.tax_year,
     isVoidRecord: Boolean(pc.voids_paycheck_id), voidedOn: v?.pay_date ?? null,
     earnings, grossCents: calc.grossCents, ytdGrossCents: ytdGross,
@@ -448,7 +571,7 @@ export async function getPayrollRegister(db, companyId, { from, to }) {
   const { rows } = await db.query(
     `SELECT p.id, to_char(p.pay_date, 'YYYY-MM-DD') AS "payDate", to_char(p.period_start, 'YYYY-MM-DD') AS "periodStart",
             to_char(p.period_end, 'YYYY-MM-DD') AS "periodEnd", p.calculation, o.calculation AS "originalCalc",
-            to_char(o.pay_date, 'YYYY-MM-DD') AS "voidsPayDate", e.last_name || ', ' || e.first_name AS employee,
+            to_char(o.pay_date, 'YYYY-MM-DD') AS "voidsPayDate", ${PC_NAME('p', 'e', true)} AS employee,
             (SELECT to_char(v.pay_date, 'YYYY-MM-DD') FROM paychecks v WHERE v.company_id = p.company_id AND v.voids_paycheck_id = p.id) AS "voidedOn"
        FROM paychecks p JOIN employees e ON e.id = p.employee_id LEFT JOIN paychecks o ON o.id = p.voids_paycheck_id
       WHERE p.company_id = $1 AND p.pay_date BETWEEN $2 AND $3
@@ -536,7 +659,8 @@ const DUE_HINT = (agency, form) => {
 export async function getPayrollLiabilities(db, companyId, { from, to }) {
   if (!isIsoDate(from) || !isIsoDate(to) || to < from) throw new LedgerError('Choose a date range (from on or before to)');
   const { rows } = await db.query(
-    `SELECT p.calculation, e.work_state FROM paychecks p JOIN employees e ON e.id = p.employee_id
+    `SELECT p.calculation, COALESCE(p.calculation->>'state', o.calculation->>'state', e.work_state) AS work_state
+       FROM paychecks p JOIN employees e ON e.id = p.employee_id LEFT JOIN paychecks o ON o.id = p.voids_paycheck_id
       WHERE p.company_id = $1 AND p.pay_date BETWEEN $2 AND $3`, [companyId, from, to]);
   const byCode = new Map();
   let gross = 0;

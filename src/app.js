@@ -711,6 +711,12 @@ export function createApp(pool, { log } = {}) {
   // Payroll
   api.get('/companies/:companyId/employees', route(['view_books', 'payroll'], ({ db, companyId }) => payroll.listEmployees(db, companyId)));
   api.post('/companies/:companyId/employees', route('payroll', ({ db, req, companyId, actor }) => payroll.createEmployee(db, companyId, req.body ?? {}, { actor }), 201));
+  api.put('/companies/:companyId/employees/:employeeId', route('payroll', ({ db, req, companyId, actor }) =>
+    payroll.updateEmployee(db, companyId, req.params.employeeId, req.body ?? {}, { actor })));
+  api.post('/companies/:companyId/employees/:employeeId/terminate', route('payroll', ({ db, req, companyId, actor }) =>
+    payroll.setEmployeeStatus(db, companyId, req.params.employeeId, { active: false, date: req.body?.date, reason: req.body?.reason, actor })));
+  api.post('/companies/:companyId/employees/:employeeId/rehire', route('payroll', ({ db, req, companyId, actor }) =>
+    payroll.setEmployeeStatus(db, companyId, req.params.employeeId, { active: true, date: req.body?.date, actor })));
   api.post('/companies/:companyId/employees/:employeeId/paychecks/preview', route('payroll', ({ db, req, companyId }) =>
     payroll.previewPaycheck(db, companyId, req.params.employeeId, req.body ?? {})));
   api.post('/companies/:companyId/employees/:employeeId/paychecks', route('payroll', ({ db, req, companyId, actor }) =>
