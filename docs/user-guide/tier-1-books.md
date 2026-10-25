@@ -38,6 +38,12 @@ customers owe you and you owe vendors, with any past-due part. Hover over (or ta
 reconcile it, just like a bank account. **Pay the credit card** fills in *Record a transaction* as a *Transfer* from your
 bank to the card; type the amount and Save. (With more than one card, pick the right one in the list.)
 
+### Zoom (bottom of the screen)
+
+The bar along the bottom has a zoom slider, like Word's: drag it, or press **−** / **+** to make everything bigger or
+smaller in steps of 10% (50% to 200%). Press the percentage to go back to 100%. The setting is kept on this computer (or
+phone) for next time; printing always uses normal size.
+
 ## 3. Recording transactions
 
 - **Quick way (Home → Record a transaction):** choose *Money in*, *Money out* or *Transfer*. Enter the date, a

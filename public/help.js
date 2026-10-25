@@ -22,6 +22,13 @@ so the books always balance. You don't need to know debits and credits for every
 "✓ Your books are in balance" is checked every time the page loads, and the full books check runs every night.</p>`,
   },
   {
+    id: 'zoom', tab: 'home', title: 'Zoom: bigger or smaller text',
+    words: 'zoom bigger smaller text size font enlarge magnify slider status bar',
+    html: `
+<p>Use the zoom slider in the bar along the bottom of the screen, like Word's: drag it, or press <strong>−</strong> / <strong>+</strong>
+(50% to 200%). Press the percentage to go back to 100%. This computer remembers your choice; printing always uses normal size.</p>`,
+  },
+  {
     id: 'home-cards', tab: 'home', title: 'Home cards and Statistics',
     words: 'home cards credit card pay shortcuts arrange move add remove drag statistics chart graph month income expenses cash dashboard',
     html: `

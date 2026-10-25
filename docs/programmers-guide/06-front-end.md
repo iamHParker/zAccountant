@@ -36,6 +36,10 @@ that shows it redraws by itself. You never write "find this element and change i
   `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The top nav shows
   it after Settings as `Build …`, and beta reports record the same string.
 
+Zoom: the status bar's slider sets the CSS variable `--zoom` on `<html>` (CSSOM, allowed by the CSP), and
+`.top, main { zoom: var(--zoom) }` scales the header and page, never the status bar. The choice is kept in
+`localStorage` (`zacc.zoom`); print resets it to 1. Sizes in `styles.css` are px, so `zoom` (not `font-size`) is what scales them.
+
 ## Security rules the browser must follow
 
 The page's Content-Security-Policy allows only scripts and styles from this site, and pictures from this site or
