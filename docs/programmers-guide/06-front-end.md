@@ -40,6 +40,12 @@ Zoom: the status bar's slider sets the CSS variable `--zoom` on `<html>` (CSSOM,
 `.top, main { zoom: var(--zoom) }` scales the header and page, never the status bar. The choice is kept in
 `localStorage` (`zacc.zoom`); print resets it to 1. Sizes in `styles.css` are px, so `zoom` (not `font-size`) is what scales them.
 
+The status bar also has ⤢ (Fullscreen API on `<html>`, hidden where the browser lacks it) and ⋮ Options, built from
+`STATUS_OPTIONS` in `public/app.js`: sections of items `{ id, label, choices, ready, showIf }`, values in `prefs`
+(`localStorage` `zacc.prefs`, defaults `PREF_DEFAULTS`). To add a setting, add an item there; `ready: false` shows a
+"coming" tag until the code that applies it exists. Theme override is such a placeholder: making it work means moving
+the dark colours from `@media (prefers-color-scheme: dark)` to a `[data-theme=dark]` rule as well.
+
 ## Security rules the browser must follow
 
 The page's Content-Security-Policy allows only scripts and styles from this site, and pictures from this site or

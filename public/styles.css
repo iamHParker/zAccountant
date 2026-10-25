@@ -23,7 +23,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; }
 /* Zoom from the status bar (--zoom set by app.js; 1 = 100%): enlarges the header and page, never the status bar itself. */
 .top, main { zoom: var(--zoom, 1); }
 body:has(.status-bar) { padding-bottom: 44px; }
-.status-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+.status-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 12px;
   height: 36px; padding: 0 12px; background: var(--card); border-top: 1px solid var(--line); font-size: 13px; }
 .status-left { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zoom { display: flex; align-items: center; gap: 4px; }
@@ -33,6 +33,17 @@ body:has(.status-bar) { padding-bottom: 44px; }
 .zoom .zoom-pct { min-width: 52px; font-variant-numeric: tabular-nums; }
 .zoom button:hover:not(:disabled) { background: var(--bg); }
 @media (max-width: 520px) { .zoom input[type=range] { width: 90px; } }
+.status-bar > .zoom { margin-left: auto; }
+.status-tools { display: flex; align-items: center; gap: 2px; border-left: 1px solid var(--line); padding-left: 6px; }
+.status-icon { display: inline-flex; align-items: center; justify-content: center; margin: 0; padding: 0; width: 30px; height: 28px; border: 0; background: none; }
+.status-icon:hover { background: var(--bg); }
+.status-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.status-icon svg circle { fill: currentColor; stroke: none; }
+.status-menu-shade { position: fixed; inset: 0; z-index: 3; }
+.status-menu { position: fixed; right: 8px; bottom: 44px; z-index: 4; width: min(320px, calc(100vw - 16px)); margin: 0; box-shadow: 0 6px 24px rgba(0, 0, 0, .25); }
+.status-menu h3 { margin-top: 0; }
+.status-menu h4 { margin: 8px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.status-option { display: grid; gap: 2px; margin: 6px 0; }
 h1 { font-size: 22px; margin: 8px 0 12px; } h2 { font-size: 18px; margin: 0 0 8px; } h3 { font-size: 15px; margin: 12px 0 6px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 12px 0; }
 .narrow { max-width: 520px; }
