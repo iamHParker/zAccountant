@@ -234,13 +234,16 @@ over 12 (2×), and the 7th day in a row.</p>
   },
   {
     id: 'accounts', tab: 'accounts', title: 'Chart of accounts',
-    words: 'accounts chart add account register bank credit card equipment',
+    words: 'accounts chart add account rename register bank checking savings second credit card equipment',
     html: `
 <p>The chart of accounts is the list of "buckets" your money is sorted into: bank accounts, what customers owe you, equipment,
 loans, owner's equity, income and expenses. A standard list is created with your company.</p>
 <p><strong>Add account</strong> for a new bank account, credit card, vehicle, or an expense you want tracked separately.
 Choose the type carefully; it decides where the account shows on the reports.</p>
-<p>Click an account to see its <strong>register</strong>: every transaction with a running balance.</p>`,
+<p>Click an account to see its <strong>register</strong>: every transaction with a running balance. <strong>Rename</strong> there
+changes only the name (for example 1000 Checking → Chase Checking 4321); past transactions follow it.</p>
+<p>Two checking or savings accounts? Rename 1000 Checking and 1010 Savings to your bank names, then <strong>Add account</strong>
+for the others: number 1020, 1030…, type Asset, kind Bank or cash account.</p>`,
   },
   {
     id: 'import', tab: 'accounts', title: 'Importing your books from QuickBooks or Excel',

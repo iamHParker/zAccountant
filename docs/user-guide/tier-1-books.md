@@ -323,7 +323,11 @@ report ties out" when its own check passes. If you ever see ⚠, please send a �
 
 - **Chart of accounts:** the list of buckets. **Add account** for a new bank account, credit card, vehicle, or an
   expense you want tracked separately. The type decides where it appears on the reports. Click an account to see
-  its **register**: every transaction with a running balance.
+  its **register**: every transaction with a running balance. **Rename** (beside the account's name in the register)
+  changes only the name, e.g. *1000 Checking* → *Chase Checking 4321*; past transactions follow it.
+- **More than one checking or savings account:** the standard chart has 1000 Checking and 1010 Savings. Rename those to
+  your bank names, then **Add account** for each other one: number 1020, 1030… (any free number from 1010 to 1099),
+  type *Asset*, kind *Bank or cash account*. Each then appears in Banking, Record a transaction and the "paid from" lists.
 - **Importing from QuickBooks or Excel** (Accounts → Import), in this order:
   1. **Chart of accounts:** QuickBooks Reports → Account List → Export, or fill in our template.
   2. **Opening balances:** a trial balance as of the day before you start in zAccountant.

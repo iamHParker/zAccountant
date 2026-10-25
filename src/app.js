@@ -461,6 +461,8 @@ export function createApp(pool, { log } = {}) {
     const { code, name, type, subtype } = req.body ?? {};
     return ledger.createAccount(db, companyId, { code, name, type, subtype, actor });
   }, 201));
+  api.put('/companies/:companyId/accounts/:accountId/name', route('accounts', ({ db, req, companyId, actor }) =>
+    ledger.renameAccount(db, companyId, req.params.accountId, { name: req.body?.name, actor })));
   api.get('/companies/:companyId/accounts/:accountId/register', route('view_books', ({ db, req, companyId }) =>
     reports.getAccountRegister(db, companyId, req.params.accountId, { from: q(req.query.from), to: q(req.query.to) })));
 

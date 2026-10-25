@@ -1780,7 +1780,12 @@
           <tr v-for="a in accounts" @click="openRegister(a)" class="click" :class="{ sel: register && register.account.id === a.id }"><td>{{ a.code }}</td><td>{{ a.name }}</td><td class="muted">{{ typeLabel[a.type] }}</td></tr>
         </table>
         <div class="card" v-if="register">
-          <h2>{{ register.account.code }} · {{ register.account.name }}</h2>
+          <div class="row wrap" v-if="renaming === null"><h2>{{ register.account.code }} · {{ register.account.name }}</h2>
+            <button v-if="can('accounts')" type="button" class="small" @click="renaming = register.account.name">Rename</button></div>
+          <form v-else class="row wrap" @submit.prevent="renameAccount">
+            <label>New name for {{ register.account.code }} <input v-model.trim="renaming" maxlength="100" required></label>
+            <button class="primary">Save</button> <button type="button" @click="renaming = null">Cancel</button>
+          </form>
           <table class="data">
             <thead><tr><th>Date</th><th>#</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
             <tr v-for="l in register.lines"><td>{{ l.date }}</td><td>{{ l.number }}</td><td>{{ l.memo }}</td><td class="num">{{ l.debitCents ? money(l.debitCents) : '' }}</td><td class="num">{{ l.creditCents ? money(l.creditCents) : '' }}</td><td class="num">{{ money(l.balanceCents) }}</td></tr>

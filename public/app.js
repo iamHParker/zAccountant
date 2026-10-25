@@ -231,7 +231,7 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '',
-      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX,
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null,
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
       statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
       fb: { open: false, note: '', picture: null, pictureSource: null, busy: false, error: '' },
@@ -1089,7 +1089,16 @@ createApp({
       const a = await this.run(() => api('POST', `/companies/${this.companyId}/accounts`, this.newAcct), 'Account added.');
       if (a) { this.accounts = await api('GET', `/companies/${this.companyId}/accounts`); this.newAcct = { code: '', name: '', type: 'expense', subtype: 'operating' }; this.showNewAcct = false; }
     },
-    async openRegister(a) { this.register = await this.run(() => api('GET', `/companies/${this.companyId}/accounts/${a.id}/register`)); },
+    async openRegister(a) { this.register = await this.run(() => api('GET', `/companies/${this.companyId}/accounts/${a.id}/register`)); this.renaming = null; },
+    /** Rename the account open on the right (only the name; the number and kind stay). */
+    async renameAccount() {
+      const a = this.register?.account;
+      if (!a || !this.renaming?.trim()) return;
+      const r = await this.run(() => api('PUT', `/companies/${this.companyId}/accounts/${a.id}/name`, { name: this.renaming }), 'Account renamed.');
+      if (!r) return;
+      this.accounts = await api('GET', `/companies/${this.companyId}/accounts`);
+      a.name = r.name; this.renaming = null;
+    },
     async createEmployee() {
       const e = this.newEmp;
       // An exempt claim is kept with the year it covers (it lapses after February 15 of the next year).
