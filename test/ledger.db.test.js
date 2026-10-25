@@ -108,4 +108,17 @@ test('ledger against PostgreSQL', { skip: !hasDb && 'DATABASE_URL not set' }, as
     const bad = await verifyChain(pool, co.id);
     assert.equal(bad.ok, false);
   });
+
+  await t.test('renames an account; history keeps pointing at it and the audit records old and new', async () => {
+    const a = await ledger.renameAccount(pool, co.id, A['1000'], { name: '  Chase Checking 4321 ' });
+    assert.equal(a.name, 'Chase Checking 4321');
+    assert.equal(a.code, '1000');
+    const reg = await reports.getAccountRegister(pool, co.id, A['1000']);
+    assert.equal(reg.account.name, 'Chase Checking 4321');
+    assert.ok(reg.lines.length > 0);
+    const { rows: [au] } = await pool.query(`SELECT payload FROM audit_log WHERE company_id = $1 AND action = 'rename' ORDER BY id DESC LIMIT 1`, [co.id]);
+    assert.equal(au.payload.from, 'Checking');
+    await assert.rejects(ledger.renameAccount(pool, co.id, A['1000'], { name: ' ' }), /not valid/);
+    await assert.rejects(ledger.renameAccount(pool, co.id, '00000000-0000-0000-0000-000000000000', { name: 'X' }), /not found/);
+  });
 });

@@ -159,3 +159,9 @@ negative). Routes: `GET/PUT tax-categories`, `reports/tax-summary|tax-1099|tax-w
 
 ## Plans and the Admin dashboard (`planService.js`, `src/core/plans.js`)
 See chapter 3. Prices stay `null` until Homer sets them. Stripe comes in December 2026.
+
+## Renaming an account (`ledgerService.renameAccount`)
+`PUT /companies/:companyId/accounts/:accountId/name` (permission `accounts`) changes only `accounts.name` (the runtime
+role has `UPDATE (name)` on `accounts`, nothing else). Number, type, kind and cash-flow section never change once
+created, so reports can't shift underneath posted entries. Audited as `rename` with the old and new names.
+

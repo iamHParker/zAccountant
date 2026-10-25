@@ -144,6 +144,24 @@ export async function createAccount(pool, companyId, { code, name, type, subtype
   });
 }
 
+/**
+ * Rename an account (Homer, 2026-10-25: "1000 Checking" → "Chase Checking 4321"). Only the name changes: entries point
+ * at the account's id, so history and reports simply show the new name. The number, type and kind stay fixed.
+ */
+export async function renameAccount(pool, companyId, accountId, { name, actor = null }) {
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 100) throw new LedgerError('Account is not valid', ['name is required (up to 100 characters)']);
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows: [old] } = await c.query('SELECT id, code, name FROM accounts WHERE company_id = $1 AND id = $2', [companyId, accountId]);
+    if (!old) throw new LedgerError('Account not found');
+    const { rows: [a] } = await c.query(
+      `UPDATE accounts SET name = $3 WHERE company_id = $1 AND id = $2
+       RETURNING id, code, name, type, subtype, cash_flow AS "cashFlow"`, [companyId, accountId, name.trim()]);
+    await appendAudit(c, companyId, { action: 'rename', entity: 'account', entityId: a.id, actor, payload: { code: a.code, from: old.name, to: a.name } });
+    return a;
+  });
+}
+
 const addDays = (date, n) => {
   const d = new Date(date + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
