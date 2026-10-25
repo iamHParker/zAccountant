@@ -29,13 +29,22 @@ Homer does these steps in the Railway website; Claude sends them one at a time i
 7. **First sign-in.** Open the domain, create the owner account, set up two-step sign-in, save the recovery codes.
 8. **Backups.** Postgres service → Backups: turn on scheduled backups (daily). Run the restore drill
    (`docs/runbooks/operations.md`) once before the alpha. **Needs Railway Pro**: on Hobby the Backups tab can
-   only view/restore existing backups. The alternative is a nightly `pg_dump` job to outside storage.
+   only view/restore existing backups. The alternative, now built, is the nightly off-site backup to outside
+   storage (`docs/runbooks/operations.md` section 4: create the bucket, set the `BACKUP_*` variables).
 
 **Done 2026-10-24:** steps 1–7 at `zaccountant-production.up.railway.app` (Hobby plan). Step 8 waits on Homer's
 choice (Pro, or our own backup job); he chose to decide later, reminder set for Nov 16.
 
 9. **Developer dashboard.** App service → Variables: `DEVELOPER_EMAILS=<Homer's sign-in email>`. The app redeploys
    and **Admin** and **Developer** buttons appear next to ? Help. (`ADMIN_EMAILS` gives someone the Admin dashboard only.)
+10. **Updates reach the site on their own.** Every PR merged into `main` should start a new deploy (Settings →
+    Source: repo `iamHParker/zAccountant`, branch **main**, automatic deploys on). Check it took: the build at the
+    top of the app (next to Settings) reads `0.1.0+<first 7 characters of the newest main commit>`. Database
+    updates (new migrations) run by themselves at start-up.
+    If the build number is old (2026-10-25: the site was still on #34 after #35–#43 merged):
+    - Deployments shows a red **Failed** deploy → open it, copy the end of **Build Logs** or **Deploy Logs** to Claude.
+    - No new deploys at all → Settings → Source: reconnect the repo or pick branch `main`; then press **Deploy** on
+      the newest commit. Railway keeps the last good version running until a new one starts cleanly.
 
 Later: custom domain (e.g. app.zaccountant.com, then set `ALLOWED_HOSTS` to include it), `METRICS_TOKEN` for
 Grafana, an uptime monitor on `/healthz`.
