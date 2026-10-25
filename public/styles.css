@@ -193,3 +193,16 @@ fieldset.people legend { color: var(--muted); font-size: 13px; padding: 0 4px; }
 .paste-projects { margin-top: 14px; }
 .paste-projects summary { cursor: pointer; font-weight: 600; }
 .paste-projects textarea { width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+/* Trips: a list of trip cards and stacked cost rows, so the screen also works on a phone (iPhone Pro Max is 430 px wide). */
+.trip-card { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; text-align: left; padding: 12px 14px; margin: 8px 0;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.trip-card .row { justify-content: space-between; }
+.share-row { display: grid; grid-template-columns: 1fr 5.5em auto auto; gap: 8px; align-items: center; margin: 6px 0; }
+.share-row select, .share-row input { margin-top: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.chips button { margin: 0; border-radius: 999px; padding: 6px 12px; }
+.chips button.active { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+.cost-row { border-top: 1px solid var(--line); padding: 10px 0; }
+.cost-row .row { justify-content: space-between; }
+.trip-cost-form, .photo-view { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0 12px; background: var(--bg); }
+.trips input, .trips select { font-size: 16px; } /* 16 px keeps iPhone Safari from zooming in on a field */

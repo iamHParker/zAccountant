@@ -581,6 +581,29 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(twice.status, 400);
     assert.ok(twice.body.details.some((d) => /already billed/.test(d)));
 
+    // A trip shared by two projects, through the restricted database role: costs, a receipt photo, travel time, edit.
+    const garage = (await owner.c.call('GET', `${base}/jobs`)).body.find((j) => j.code === '2701');
+    const expense = accts.find((a) => a.type === 'expense').id;
+    const card = accts.find((a) => a.subtype === 'credit_card' || a.cashFlow === 'cash').id;
+    const trip = await owner.c.call('POST', `${base}/trips`, { name: 'Dallas', startDate: '2026-11-10',
+      jobs: [{ jobId: job.body.id, share: '75' }, { jobId: garage.id, share: '25' }] });
+    assert.equal(trip.status, 201, JSON.stringify(trip.body));
+    const withCost = await owner.c.call('POST', `${base}/trips/${trip.body.id}/costs`, { date: '2026-11-10', vendor: 'Avis', description: 'Rental car',
+      amount: '200.00', expenseAccountId: expense, paidFromAccountId: card }, { 'Idempotency-Key': 'trip-cost-1' });
+    assert.equal(withCost.status, 201, JSON.stringify(withCost.body));
+    const costId = withCost.body.costId;
+    const photo = await owner.c.call('POST', `${base}/trip-costs/${costId}/photos`, { picture: `data:image/png;base64,${Buffer.from('89504e470d0a1a0a', 'hex').toString('base64')}` });
+    assert.equal(photo.status, 201, JSON.stringify(photo.body));
+    assert.equal((await owner.c.call('POST', `${base}/trips/${trip.body.id}/travel-time`, { date: '2026-11-10', hours: '4' })).status, 201);
+    const tripPull = (await owner.c.call('GET', `${base}/unbilled?jobId=${garage.id}`)).body;
+    assert.deepEqual(tripPull.tripCosts.map((x) => [x.quantity, x.shareCents]), [['0.25', 5000]]);
+    assert.equal(tripPull.time[0].quantity, '1'); // 25% of 4 h
+    const edited = await owner.c.call('PUT', `${base}/trip-costs/${costId}`, { date: '2026-11-10', vendor: 'Avis', description: 'Rental car + tolls',
+      amount: '231.60', expenseAccountId: expense, paidFromAccountId: card });
+    assert.equal(edited.status, 200, JSON.stringify(edited.body));
+    assert.equal(edited.body.costs.find((x) => x.status === 'posted').photoCount, 1);
+    assert.equal((await looker.c.call('GET', `${base}/trips`)).status, 403);
+
     // HoursTracker import: the next week, two shifts; importing the same file again skips both.
     const csv = 'Job,Clocked In,Clocked Out,Duration,Hourly Rate,Earnings,Comment\n'
       + 'Smith Residence,11/09/2026 7:00 AM,11/09/2026 3:00 PM,8.00,30,240,trim\n'

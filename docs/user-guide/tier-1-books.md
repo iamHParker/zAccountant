@@ -145,6 +145,27 @@ what's overdue.
 by credit card is entered the same way: a bill from the airline, paid from the credit card account. A bill whose cost
 is already on an invoice can't be edited or voided until that invoice is.
 
+### Trips
+
+**Trips** (top menu) keeps what a trip cost and which projects it was for.
+
+1. **+ New trip**: a name (Dallas, Oct 4-6) and the dates. Under **Projects and their share of the trip**, pick each
+   project and type its share in percent: a major client might carry 80% and a smaller job 10%. **Split evenly** fills
+   in equal shares. The shares can add up to less than 100%; the rest isn't billed to anyone.
+2. **+ Add cost** for each expense: pick what it was (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other), the
+   date, who was paid, the amount, the expense account, and what you paid with (bank, credit card, or an owner account
+   when you paid personally). For **Mileage**, type the miles and the rate per mile (the IRS standard mileage rate for
+   the year, from irs.gov, or your own); the amount is worked out. **📷 Take photo** keeps the receipt with the cost.
+   Saving records the expense in your books.
+3. **+ Add travel time**: the hours spent travelling. It's billed by the same shares, at the rate you pick on the invoice.
+4. A cost that shows up later (tolls two weeks after the trip): open the trip and add it. It waits on each project's
+   list until it's billed. To correct a cost, press **edit**; the old one is voided and the corrected one takes its
+   place, with its photos. A cost already on an invoice can't be changed until that invoice is edited or voided.
+
+On each project's invoice, **⏱ Pull in unbilled time and costs** lists its share of every trip cost and travel hour.
+Each line bills the full cost × the share (quantity 0.8 for 80%), so the client can see both. To bill a different
+share on one invoice, type another quantity on that line.
+
 ### Projects
 
 **Sales → Projects** lists your projects (the same list as the jobs on the Time tab): number, name, customer and site

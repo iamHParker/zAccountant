@@ -27,6 +27,7 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `020_corrections.sql` | `replaced_by_id` on documents and payments (Edit = void + corrected copy); invoice number unique among non-replaced |
 | `021_payment_photos.sql` | photos of the check and remittance kept with a payment (RLS by company) |
 | `022_customer_people.sql` | customer "Part of" group and people (adjusters); invoice attention, send-to, claim/job number |
+| `024_trips.sql` | trips, their projects' shares (`trip_jobs.share_bp`), trip costs (own journal entry; kinds incl. mileage), receipt photos, travel time (`time_entries.trip_id`); billed once per project |
 | `023_billable_time_costs.sql` | project site address; project + "bill to client" on bill lines; invoice lines linked to the time or cost they bill (billed once, by trigger) |
 
 ## How migrations run
