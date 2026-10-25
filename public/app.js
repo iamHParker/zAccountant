@@ -439,7 +439,10 @@ createApp({
       await this.loadAdmin();
       if (e.id === this.companyId) this.loadCompany(); // your own company: switch tabs on or off now
     },
-    planPrice(cents) { return cents == null ? 'price not set' : cents === 0 ? 'free' : `${money(cents)}/month`; },
+    planPrice(p) {
+      const one = (c, per) => (c == null ? `${per} price not set` : c === 0 ? 'free' : `${money(c)}/${per}`);
+      return p.monthlyCents === 0 ? 'free' : `${one(p.monthlyCents, 'month')}, ${one(p.annualCents, 'year')}`;
+    },
     /** Developer dashboard (platform developers only; the server checks too). */
     openDeveloper() {
       if (this.tab === 'developer') { this.tab = this.dev.from; return; }

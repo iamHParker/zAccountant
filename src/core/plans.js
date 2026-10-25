@@ -5,6 +5,9 @@
 // Homer, 2026-10-24: beta testers pay nothing and get every feature; plans are switched by hand in the Admin
 // dashboard until Stripe goes in (December, before the Jan 1 launch). Prices are Homer's to set, so they
 // stay null ("not set") until he does.
+// Homer, 2026-10-25: subscriptions (they pay for the storage the books and files take), monthly or a reduced
+// annual price; a Family and individuals plan and a Company plan; Tax and Timesheets as added services.
+// ℹ️ Payroll comes with the Company plan (his list named no payroll add-on).
 
 /** The features a plan or add-on can switch on. Everything not listed here is part of every plan. */
 export const FEATURES = {
@@ -14,13 +17,15 @@ export const FEATURES = {
 };
 
 export const PLANS = {
-  beta: { name: 'Beta tester', features: Object.keys(FEATURES), monthlyCents: 0, note: 'Free, everything on, while testing' },
-  basic: { name: 'Basic', features: [], monthlyCents: null, note: 'Books, invoices, bills, banking, reports' },
+  beta: { name: 'Beta tester', features: Object.keys(FEATURES), monthlyCents: 0, annualCents: 0, note: 'Free, everything on, while testing' },
+  individual: { name: 'Family and individuals', features: [], monthlyCents: null, annualCents: null,
+    note: 'Household and personal books: accounts, bank imports, bills, reports' },
+  company: { name: 'Company', features: ['payroll'], monthlyCents: null, annualCents: null,
+    note: 'Books, invoices, bills, banking, reports and payroll' },
 };
 export const ADD_ONS = {
-  payroll: { name: 'Payroll', features: ['payroll'], monthlyCents: null },
-  timesheets: { name: 'Timesheets', features: ['timesheets'], monthlyCents: null },
-  tax: { name: 'Tax-ready', features: ['tax'], monthlyCents: null },
+  tax: { name: 'Tax-ready', features: ['tax'], monthlyCents: null, annualCents: null },
+  timesheets: { name: 'Timesheets', features: ['timesheets'], monthlyCents: null, annualCents: null },
 };
 
 /** A company with no plan row yet is on this one (every company made during the beta). */

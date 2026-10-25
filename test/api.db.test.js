@@ -733,7 +733,7 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const coInfo = (await owner.c.call('GET', `/api/companies/${co.id}`)).body;
     assert.deepEqual([coInfo.plan, coInfo.features], ['beta', ['payroll', 'tax', 'timesheets']], 'every company starts on Beta tester with everything');
     assert.equal((await owner.c.call('GET', '/api/admin/companies')).status, 403);
-    assert.equal((await owner.c.call('PUT', `/api/admin/companies/${co.id}/plan`, { plan: 'basic', reason: 'x' })).status, 403);
+    assert.equal((await owner.c.call('PUT', `/api/admin/companies/${co.id}/plan`, { plan: 'individual', reason: 'x' })).status, 403);
 
     const adm = await newUser('admin@example.com');
     assert.equal((await adm.c.call('GET', '/api/developer/reports')).status, 403, 'an admin is not a developer');
@@ -745,9 +745,9 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
 
     const put = (body) => adm.c.call('PUT', `/api/admin/companies/${co.id}/plan`, body);
     assert.equal((await put({ plan: 'gold', reason: 'x' })).status, 400);
-    assert.equal((await put({ plan: 'basic', addOns: ['bank'], reason: 'x' })).status, 400);
-    assert.equal((await put({ plan: 'basic' })).status, 400, 'a reason is required');
-    const set = await put({ plan: 'basic', addOns: ['timesheets'], reason: 'Paid by check for November' });
+    assert.equal((await put({ plan: 'individual', addOns: ['bank'], reason: 'x' })).status, 400);
+    assert.equal((await put({ plan: 'individual' })).status, 400, 'a reason is required');
+    const set = await put({ plan: 'individual', addOns: ['timesheets'], reason: 'Paid by check for November' });
     assert.equal(set.status, 200, JSON.stringify(set.body));
     assert.deepEqual(set.body.features, ['timesheets']);
 
@@ -768,7 +768,7 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
 
     // Logged in the change log and in the company's own (verifiable) audit trail.
     const changes = (await adm.c.call('GET', '/api/admin/plan-changes')).body;
-    assert.deepEqual([changes[0].companyName, changes[0].from, changes[0].to, changes[0].by], ['API Co', 'Beta tester (default)', 'Basic + timesheets', 'admin@example.com']);
+    assert.deepEqual([changes[0].companyName, changes[0].from, changes[0].to, changes[0].by], ['API Co', 'Beta tester (default)', 'Family and individuals + timesheets', 'admin@example.com']);
     assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/audit/verify`)).body.ok, true);
 
     assert.equal((await put({ plan: 'beta', reason: 'Back to testing' })).status, 200);
@@ -780,10 +780,11 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(page.status, 200);
     assert.match(await page.text(), /no frills|no-frills/);
     assert.match(await (await fetch(`${base}/app`)).text(), /id="app"/, 'the app moved to /app');
-    assert.match(await (await fetch(`${base}/prices`)).text(), /id="price-list"/, 'prices have their own page');
+    assert.match(await (await fetch(`${base}/prices`)).text(), /id="plan-list"/, 'prices have their own page');
     const pub = await (await fetch(`${base}/api/public/plans`)).json();
-    assert.deepEqual(pub.plans.map((p) => p.key), ['beta', 'basic']);
-    assert.equal(pub.plans.find((p) => p.key === 'basic').monthlyCents, null, 'no price invented');
+    assert.deepEqual(pub.plans.map((p) => p.key), ['beta', 'individual', 'company']);
+    assert.deepEqual(pub.addOns.map((p) => p.key), ['tax', 'timesheets']);
+    assert.deepEqual([pub.plans[2].monthlyCents, pub.plans[2].annualCents], [null, null], 'no price invented');
 
     const acc = await owner.c.call('GET', `/api/companies/${co.id}/backup/accounts`);
     assert.equal(acc.status, 200);

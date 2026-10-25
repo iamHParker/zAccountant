@@ -37,8 +37,9 @@ fresh two-step code.
 
 ## Layer 3: plans (`src/core/plans.js`)
 
-A company's plan switches features on: Beta tester (everything, free), Basic (books only), with Payroll and
-Timesheets add-ons. `featureForPath` maps URL paths to features. `route()` answers **402** when the plan lacks the
+A company's plan switches features on: Beta tester (everything, free), Family and individuals (books only),
+Company (books and payroll), with Tax-ready and Timesheets add-ons. Each plan and add-on has `monthlyCents` and
+a reduced `annualCents` (Homer, 2026-10-25: subscriptions that pay for storage). `featureForPath` maps URL paths to features. `route()` answers **402** when the plan lacks the
 feature. A company with no plan row is on the Beta tester plan. Plans are changed only in the Admin dashboard, and
 each change is logged with a reason in `plan_changes` and the company's audit chain.
 

@@ -198,7 +198,7 @@ export function createApp(pool, { log } = {}) {
   // The front page lists the plans and their prices from the same catalog the Admin dashboard uses, so a price
   // set there shows here too. Public: names and prices only.
   app.get('/api/public/plans', (req, res) => {
-    const list = (o) => Object.entries(o).map(([key, p]) => ({ key, name: p.name, monthlyCents: p.monthlyCents, note: p.note ?? null }));
+    const list = (o) => Object.entries(o).map(([key, p]) => ({ key, name: p.name, monthlyCents: p.monthlyCents, annualCents: p.annualCents, note: p.note ?? null }));
     res.json({ plans: list(PLANS), addOns: list(ADD_ONS) });
   });
 

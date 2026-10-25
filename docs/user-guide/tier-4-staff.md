@@ -9,8 +9,9 @@ dashboard only. Nobody can give themselves access from inside the app.
 The **Admin** button at the top opens a list of every company: owners, number of members and employees, last
 activity, and plan. It never shows an amount from anyone's books.
 
-- **Plans:** *Beta tester* (everything, free) and *Basic* (books, invoices, bills, banking, reports). The add-ons
-  are *Payroll* and *Timesheets*. Prices show "price not set" until they are decided.
+- **Plans:** *Beta tester* (everything, free), *Family and individuals* (books, bank imports, bills, reports) and
+  *Company* (books, invoices, bills, banking, reports and payroll). The added services are *Tax-ready* and
+  *Timesheets*. Each has a monthly and a reduced yearly price; both show "price not set" until they are decided.
 - **change** a company's plan: choose the plan and add-ons, and give a reason. The reason goes in the change log.
   The company's screens and the server switch the features on or off at once.
 - **Plan changes** lists every change: who made it, when, from what, to what, and why.

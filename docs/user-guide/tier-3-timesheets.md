@@ -27,7 +27,7 @@ In the HoursTracker iPhone app: Reports → choose the dates → Share/Export �
 from HoursTracker**, choose whose time it is and pick the file. **Check file** shows what will come in. Entries
 arrive as drafts. Importing the same file again skips what's already in.
 
-## 5. Paying time through payroll (with the Payroll add-on)
+## 5. Paying time through payroll (Company plan)
 
 1. Link each employee to the person who signs in: on the Payroll tab's employee list, choose them in the **Timesheets from** column.
 2. On **Run payroll**, press **Fill hours from approved timesheets**. Hours come in already split into regular,

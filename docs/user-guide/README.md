@@ -10,13 +10,14 @@ tiers your company has. Inside the app, the **? Help** button opens the short gu
 | Tier | Chapter | Who has it |
 |---|---|---|
 | 0 | [Everyone: signing in, your company, finding your way, when something goes wrong](tier-0-everyone.md) | every person |
-| 1 | [Books (Basic plan): transactions, invoices, bills, banking, reports, settings](tier-1-books.md) | every company |
-| 2 | [Payroll add-on: employees, paychecks, payroll taxes](tier-2-payroll.md) | companies with Payroll |
+| 1 | [Books (every plan): transactions, invoices, bills, banking, reports, settings](tier-1-books.md) | every company |
+| 2 | [Payroll: employees, paychecks, payroll taxes](tier-2-payroll.md) | the Company plan |
 | 3 | [Timesheets add-on: time entry, approval, HoursTracker](tier-3-timesheets.md) | companies with Timesheets |
 | 4 | [zAccountant staff: the Admin and Developer dashboards](tier-4-staff.md) | zAccountant's own team |
 
 **During the beta, every company is on the Beta tester plan, which includes every tier for free.** After launch, a
-company chooses Basic and adds Payroll or Timesheets as needed.
+company subscribes, monthly or yearly at a reduced price, to *Family and individuals* or *Company* (which includes
+payroll), and adds Tax-ready or Timesheets as needed. Prices are on the Prices page (`/prices`).
 
 ## What your role lets you do
 
