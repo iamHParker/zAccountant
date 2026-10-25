@@ -86,6 +86,18 @@ In the print window, choose "Save as PDF" to email it.
 **Receive payment**: choose the customer, the date, the bank account it went into and the method. Then enter how
 much goes to each open invoice (**Pay all in full** fills them in). One payment can cover several invoices.
 
+### Photos of the check
+
+When a customer pays by check, you can keep a photo of the check and of the printed remittance (the slip that names
+the invoice) with the payment. On an iPhone, open zAccountant in Safari: in **Receive payment**, press **📷 Take
+photo** and the camera opens. **Choose photo** picks one you already took. Add up to 6 photos, then **Save payment**.
+
+- To see them later, or add one you forgot, open the **Payments** tab and press **photos** (or **add photo**) on the
+  payment's row. Press a photo to open it full size.
+- A photo is a record only. It doesn't deposit the check; take the check to the bank as usual.
+- A check photo shows the customer's bank account numbers. Only people in your company can see it.
+- If you edit the payment, its photos stay with the corrected payment.
+
 ### Mistakes and reports
 
 - To fix a mistake on an invoice, open it and press **Edit**. The form opens filled in; change what's wrong and press

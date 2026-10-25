@@ -56,7 +56,9 @@ const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', descripti
 const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false });
-const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', open: [], amounts: {}, key: newKey() });
+const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', open: [], amounts: {}, photos: [], keptPhotos: 0, photoBusy: false, key: newKey() });
+// Check photos: shrunk in the browser to 2000 pixels on the longer side (enough to read a check), JPEG.
+const PHOTO_SIDE = 2000;
 
 let onSignInNeeded = () => {};
 
@@ -202,7 +204,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null,
-        showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay() },
+        showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
@@ -964,7 +966,7 @@ createApp({
       if (ar.panel === 'payments') ar.payments = (await this.run(() => api('GET', `${base}/${S.payPath}`))) ?? [];
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
     },
-    arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.loadAr(); },
+    arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.ar.photoView = null; this.loadAr(); },
     newContact() {
       const open = this.ar.showContact && !this.ar.contact.id;
       this.ar.contact = blankContact(); this.ar.showContact = !open;
@@ -1108,7 +1110,7 @@ createApp({
     // Edit a payment: the form, filled in. The invoices it paid are listed with their balance before this payment.
     async editPay(p) {
       this.ar.pay = { ...blankPay(), editId: p.id, contactId: p.contactId, date: p.date, accountId: p.accountId, method: p.method || 'check',
-        reference: p.reference ?? '', memo: p.memo ?? '' };
+        reference: p.reference ?? '', memo: p.memo ?? '', keptPhotos: p.photoCount ?? 0 };
       this.ar.showPay = true; this.ar.showDoc = false; this.ar.detail = null;
       await this.loadPayDocs();
       const pay = this.ar.pay;
@@ -1132,7 +1134,42 @@ createApp({
         ? await this.run(() => api('PUT', `${this.arBase()}/payments/${p.editId}`, body, { 'Idempotency-Key': p.key }), `Payment corrected: ${money(this.payTotal)}.`)
         : await this.run(() => api('POST', `${this.arBase()}/${this.S.payPath}`, body, { 'Idempotency-Key': p.key }), `Payment of ${money(this.payTotal)} recorded.`);
       if (!r) return;
+      // Then the photos, one at a time (each is up to a few hundred KB). The payment is already saved either way.
+      let failed = 0;
+      for (const picture of p.photos) {
+        if (!(await this.run(() => api('POST', `${this.arBase()}/payments/${r.id}/photos`, { picture })))) failed++;
+      }
+      if (failed) this.flash(`The payment is saved, but ${failed} photo${failed === 1 ? '' : 's'} could not be. Add ${failed === 1 ? 'it' : 'them'} from the Payments tab.`, 'bad');
       this.ar.showPay = false; this.ar.pay = blankPay(); this.loadAr();
+    },
+    /** Photos picked or taken for the payment being entered: shrunk now, sent after the payment is saved. */
+    async addPayPhotos(e) {
+      const files = [...(e.target.files ?? [])]; e.target.value = '';
+      const pay = this.ar.pay; pay.photoBusy = true;
+      try { for (const f of files) if (pay.photos.length + pay.keptPhotos < 6) pay.photos.push(await pictureFromFile(f, { maxSide: PHOTO_SIDE })); }
+      catch (err) { this.flash(err.message, 'bad'); } finally { pay.photoBusy = false; }
+      if (pay.photos.length + pay.keptPhotos >= 6) this.flash('A payment can have at most 6 photos.');
+    },
+    photoUrl(p, ph) { return `/api${this.arBase()}/payments/${p.id}/photos/${ph.id}`; },
+    async openPhotos(p) {
+      const photos = (await this.run(() => api('GET', `${this.arBase()}/payments/${p.id}/photos`))) ?? [];
+      this.ar.photoView = { payment: p, photos, busy: false };
+    },
+    async uploadPhotos(e) {
+      const files = [...(e.target.files ?? [])]; e.target.value = '';
+      const v = this.ar.photoView; v.busy = true;
+      try {
+        for (const f of files) {
+          const picture = await pictureFromFile(f, { maxSide: PHOTO_SIDE });
+          if (!(await this.run(() => api('POST', `${this.arBase()}/payments/${v.payment.id}/photos`, { picture }), 'Photo saved.'))) break;
+        }
+      } catch (err) { this.flash(err.message, 'bad'); } finally { v.busy = false; }
+      await this.openPhotos(v.payment); this.loadAr();
+    },
+    async removePhoto(ph) {
+      if (!confirm('Remove this photo?')) return;
+      const v = this.ar.photoView;
+      if (await this.run(() => api('DELETE', `${this.arBase()}/payments/${v.payment.id}/photos/${ph.id}`), 'Photo removed.')) { await this.openPhotos(v.payment); this.loadAr(); }
     },
     async voidPay(p) {
       if (!confirm(`Void this ${money(p.amountCents)} payment (for example, a bounced check)? The ${this.S.docs.toLowerCase()} it paid become open again.`)) return;

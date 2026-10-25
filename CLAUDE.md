@@ -53,6 +53,7 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 - Double-entry ledger enforced by the database (deferred balance trigger), append-only history, period lock,
   HMAC audit chain. AR/AP control accounts accept only document postings. Edit of an invoice/bill/payment = void +
   corrected copy in one transaction (`replaced_by_id`, migration 020); a saved record is never updated in place.
+- Payment photos (check + remittance, iPhone camera via `capture`; migration 021): never log or audit the picture.
 - Row-level security via `withScope`; the runtime DB role gets column-level grants (`src/db/grant.js`) — add a
   grant for every new table/column the app writes.
 - Every API route names a permission (`src/core/permissions.js`); the UI hides what a role can't use, but the

@@ -17,6 +17,7 @@ import * as auth from './services/authService.js';
 import * as bank from './services/bankService.js';
 import * as imports from './services/importService.js';
 import * as arap from './services/arapService.js';
+import * as photos from './services/paymentPhotoService.js';
 import * as roles from './services/accessService.js';
 import * as time from './services/timesheetService.js';
 import { AuthError } from './services/authService.js';
@@ -123,6 +124,7 @@ export function createApp(pool, { log } = {}) {
   app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
   app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
   app.use(/^\/api\/companies\/[^/]+\/logo$/, express.json({ limit: '2mb' })); // the logo, as base64 (1 MB at most)
+  app.use(/^\/api\/companies\/[^/]+\/payments\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a check photo, as base64 (3 MB at most)
   app.use('/api/feedback', express.json({ limit: '6mb' })); // a picture of the screen, as base64
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
@@ -503,6 +505,23 @@ export function createApp(pool, { log } = {}) {
   }));
   api.post('/companies/:companyId/payments/:paymentId/void', route('post', ({ db, req, companyId, actor }) =>
     arap.voidPayment(db, companyId, req.params.paymentId, { date: req.body?.date, actor })));
+  // Photos of the check and remittance, kept with the payment.
+  api.get('/companies/:companyId/payments/:paymentId/photos', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {
+    await seeSide(db, can, 'payments', req.params.paymentId);
+    return photos.listPaymentPhotos(db, companyId, req.params.paymentId);
+  }));
+  api.get('/companies/:companyId/payments/:paymentId/photos/:photoId', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {
+    await seeSide(db, can, 'payments', req.params.paymentId);
+    return { [FILE]: await photos.getPaymentPhoto(db, companyId, req.params.paymentId, req.params.photoId) };
+  }));
+  api.post('/companies/:companyId/payments/:paymentId/photos', route(['invoices', 'bills'], async ({ db, req, companyId, can, actor }) => {
+    await needSide(db, can, 'payments', req.params.paymentId);
+    return photos.addPaymentPhoto(db, companyId, req.params.paymentId, { picture: req.body?.picture, actor });
+  }, 201));
+  api.delete('/companies/:companyId/payments/:paymentId/photos/:photoId', route(['invoices', 'bills'], async ({ db, req, companyId, can, actor }) => {
+    await needSide(db, can, 'payments', req.params.paymentId);
+    return photos.deletePaymentPhoto(db, companyId, req.params.paymentId, req.params.photoId, { actor });
+  }));
   api.put('/companies/:companyId/payments/:paymentId', route('post', async ({ db, req, companyId, can, actor }) => {
     await needSide(db, can, 'payments', req.params.paymentId);
     const { contactId, date, accountId, method, reference, memo, applications } = req.body ?? {};
