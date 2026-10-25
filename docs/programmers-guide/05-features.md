@@ -26,6 +26,19 @@ and every journal line (Entry, Date, Memo, Account, Debit, Credit, Source). Impo
 (accounts first, then journal) rebuilds the same trial balance; `api.db.test.js` proves it. Documents (invoice
 lines, customers, employees, timesheets) and line memos are not in it. Alpha users are told to keep their own.
 
+**The book file (`.zacc`, `bookFileService.js`, `GET …/book-file`, permission `admin`):** a .zip (`src/core/zip.js`
+writes it; `unzip` in `xlsx.js` reads it) with `README.txt`, `manifest.json` (format `zacc`, version 1, company, time,
+each file's bytes, rows and SHA-256), `import/` (the two CSVs above), `tables/<table>.csv` for **every table with a
+`company_id` column** (found from `information_schema`, so new tables are included automatically; `SKIP_TABLES`
+and `SKIP_COLUMNS` keep out road keys, feedback, plans, `ssn_enc` and other secrets) and `pictures/` (bytea columns,
+named in their rows). Text starting with = + - @ gets a leading ' (CSV formula guard), as the manifest notes.
+Re-importing a whole .zacc is not built yet; the `import/` CSVs rebuild the books today.
+
+**QuickBooks (`GET …/export/quickbooks-desktop` .iif, `…/quickbooks-online` .csv, permission `view_books`):** every
+journal line; account names are "code name" (31 characters, ':' replaced, since QuickBooks reads it as a sub-account);
+IIF account types from type/subtype (`IIF_TYPE`); the customer or vendor name is filled from the invoice, bill or
+payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
+
 ## Sales and bills (`arapService.js`, `invoiceSetupService.js`)
 - Customers and vendors are `contacts` (`kind`). Invoices and bills are `documents` with `document_lines`.
 - Saving a document posts one journal entry: invoice = Dr Accounts Receivable, Cr income per line, Cr Sales Tax

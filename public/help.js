@@ -262,7 +262,10 @@ account and enter the confirmation number. Your books then show the tax paid. A 
     id: 'close', tab: 'settings', title: 'Closing the books and the audit trail',
     words: 'close lock period reopen audit trail verify books check year end',
     html: `
-<p><strong>Back up your books</strong> (alpha testing: keep your own copy). Download the chart of accounts and all transactions as CSV files. To rebuild, import them into a new company: the chart first, then the transactions. Invoice details, customers, employees and timesheets are not included.</p>
+<p><strong>Back up your books</strong> (alpha testing: keep your own copy). <em>Download the book file</em> (owner) gives one .zacc file with everything,
+including invoice details, customers, employees (no Social Security numbers), timesheets, trips and pictures; it's an ordinary .zip inside.
+The chart of accounts and all transactions also come as two spreadsheets: import them into a new company (the chart first) to rebuild the books.
+<em>For QuickBooks Desktop (.iif)</em> and <em>For QuickBooks Online (.csv)</em> carry every transaction as a journal entry.</p>
 <p><strong>Close the books</strong> after a month or year is final (usually after the bank is reconciled and your accountant is done).
 Nobody can add or change transactions dated on or before that day. Only the owner can reopen, with a two-step sign-in code and a reason, and that is logged.</p>
 <p><strong>Audit trail:</strong> every change is written to a tamper-evident log. <em>Verify audit trail</em> checks every record,

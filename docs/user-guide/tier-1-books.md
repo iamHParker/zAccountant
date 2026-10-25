@@ -250,11 +250,19 @@ report ties out" when its own check passes. If you ever see ⚠, please send a �
   approves timesheets but doesn't record transactions.
 - **Departments:** group people (Accounting, Engineering, Field). A department's approver approves its timesheets.
 - **Invoice letterhead and logo**, **Invoice rates and items:** see section 4.
-- **Back up your books:** while zAccountant is in alpha testing, keep your own copy. **Download chart of accounts**
-  and **Download all transactions** give two CSV files that open in Excel. To rebuild the books, make a new
-  company and import them (Accounts → Import): the chart of accounts first, then the transactions. Every report
-  comes back the same. Invoice and bill details, customers, employees and timesheets are not in these files, so keep
-  your saved invoices and pay stubs too. Anyone who can see the books can download them.
+- **Back up your books:** while zAccountant is in alpha testing, keep your own copy.
+  - **Download the book file** (owner only) gives one `.zacc` file with everything: transactions, invoices and bills
+    line by line, customers, vendors, employees (without Social Security numbers), timesheets, trips, receipt and
+    check pictures, and the audit trail. Each part carries a fingerprint (SHA-256) in `manifest.json`, so a damaged
+    copy shows. It is an ordinary .zip: rename it to `.zip` to look inside. Keep one copy at hand and one elsewhere.
+  - **Download chart of accounts** and **Download all transactions** give the two spreadsheets that rebuild the books:
+    make a new company and import them (Accounts → Import), the chart first, then the transactions. Every report
+    comes back the same. (They are also inside the book file, in its `import` folder.) Anyone who can see the books
+    can download them.
+  - **For QuickBooks Desktop (.iif)** and **For QuickBooks Online (.csv)**: for moving to QuickBooks, or for an
+    accountant who works in it. Desktop: File → Utilities → Import → IIF Files (accounts come along). Online: import
+    the chart of accounts first (Settings → Import data → Accounts), then Journal entries. Every transaction arrives
+    as a journal entry, so the balances match; invoices and bills arrive as totals, not line by line.
 - **Close the books:** after a month or year is final (usually after the bank is reconciled and your accountant is
   done), close through its last day. Nothing dated on or before that day can be added or changed. Only the owner
   can reopen, with a two-step code and a reason, and that is logged.
