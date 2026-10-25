@@ -476,8 +476,8 @@ export function createApp(pool, { log } = {}) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
       arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
-      const { contactId, number, date, dueDate, memo, project, taxRate, lines } = req.body ?? {};
-      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, idempotencyKey: idemKey(req), actor });
+      const { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
+      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
     }, 201));
   }
   api.get('/companies/:companyId/documents/:documentId', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {
@@ -489,8 +489,8 @@ export function createApp(pool, { log } = {}) {
   // Edit = void + corrected copy in one step, so it needs the same permission as Void.
   api.put('/companies/:companyId/documents/:documentId', route('post', async ({ db, req, companyId, can, actor }) => {
     await needSide(db, can, 'documents', req.params.documentId);
-    const { contactId, number, date, dueDate, memo, project, taxRate, lines } = req.body ?? {};
-    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, taxRate, lines, idempotencyKey: idemKey(req), actor });
+    const { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
+    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
   }));
   for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));

@@ -38,10 +38,12 @@ automatically each night, or press <em>Post due entries now</em>.</p>
   },
   {
     id: 'sales', tab: 'sales', title: 'Invoices and getting paid',
-    words: 'invoice customer receive payment accounts receivable aging overdue void edit correct mistake photo check camera iphone',
+    words: 'invoice customer receive payment accounts receivable aging overdue void edit correct mistake photo check camera iphone adjuster attention claim division email',
     html: `
 <ol>
-  <li>Add a customer (name, email, payment terms such as 30 days). To change one later, open the Customers tab and press <strong>edit</strong>.</li>
+  <li>Add a customer (name, email, payment terms such as 30 days). To change one later, open the Customers tab and press <strong>edit</strong>.
+      For a customer with divisions, add each division (DWH - SATX, DWH - AUS) with the same <strong>Part of</strong> name; list
+      their claims adjusters under <strong>People</strong>, then pick one in <strong>Attention</strong> on the invoice.</li>
   <li>Make a <strong>new invoice</strong>: lines with quantity, price and income account; tick taxable lines and enter the
       sales-tax rate. Saving the invoice records the income and what the customer owes you (Accounts Receivable).</li>
   <li>When the customer pays, press <strong>Receive payment</strong>, pick the bank account, and apply the money to one or

@@ -71,7 +71,11 @@ test('AR/AP: invoice → payment → reports tie', { skip: !hasDb && 'DATABASE_U
     assert.equal(inv2.dueDate, '2026-04-20'); // Bob's terms are now 10 days
     const own = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: bob.id, number: 'A-7', date: '2026-04-11', lines: [{ accountId: A['4100'], amount: '1' }] });
     assert.equal(own.number, 'A-7');
-    await assert.rejects(arap.createDocument(pool, co.id, { kind: 'invoice', contactId: bob.id, number: 'a-7', date: '2026-04-11', lines: [{ accountId: A['4100'], amount: '1' }] }), /already used/);
+    // A number already used gets the next letter (Homer uses a project number as the invoice number): A-7 → a-7A.
+    const again = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: bob.id, number: 'a-7', date: '2026-04-11', lines: [{ accountId: A['4100'], amount: '1' }] });
+    assert.equal(again.number, 'a-7A');
+    assert.equal(again.numberWasTaken, 'a-7');
+    await arap.voidDocument(pool, co.id, again.id);
     await arap.voidDocument(pool, co.id, own.id);
   });
 
@@ -171,7 +175,7 @@ test('AR/AP: invoice → payment → reports tie', { skip: !hasDb && 'DATABASE_U
     const open = await arap.listDocuments(pool, co.id, { kind: 'invoice', status: 'open', today: '2026-12-31' });
     assert.deepEqual(open.map((x) => x.number).sort(), ['1001', '1002']);
     assert.ok(open.every((x) => x.status === 'overdue'));
-    assert.equal((await arap.listDocuments(pool, co.id, { kind: 'invoice', status: 'void' })).length, 2);
+    assert.equal((await arap.listDocuments(pool, co.id, { kind: 'invoice', status: 'void' })).length, 3); // includes a-7A
     const chain = await verifyChain(pool, co.id);
     assert.equal(chain.brokenAt, null);
     assert.deepEqual(chain.ledgerMismatches, []);

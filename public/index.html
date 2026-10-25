@@ -550,6 +550,19 @@
           <label>Address <input v-model="ar.contact.address" placeholder="Street, City, State ZIP"></label>
           <label>Payment terms (days) <input type="number" min="0" max="365" v-model.number="ar.contact.termsDays"></label>
           <label class="check" v-if="S.kind === 'bill'"><input type="checkbox" v-model="ar.contact.is1099"> Gets a 1099-NEC (an individual or partnership you pay for services)</label>
+          <label>Part of (optional) <input v-model="ar.contact.groupName" maxlength="120" list="contact-groups" placeholder="e.g. DWH, for DWH - SATX and DWH - AUS"></label>
+          <datalist id="contact-groups"><option v-for="g in contactGroups" :value="g"></option></datalist>
+          <p class="muted small">Divisions with the same “Part of” name are also totaled together on the aging report.</p>
+          <fieldset class="people">
+            <legend>People {{ S.kind === 'invoice' ? '(claims adjusters and other contacts)' : '' }}</legend>
+            <div class="person" v-for="(p, i) in ar.contact.people">
+              <input v-model="p.name" maxlength="120" placeholder="Name" aria-label="Name">
+              <input v-model="p.email" type="email" placeholder="Email" aria-label="Email">
+              <input v-model="p.phone" maxlength="40" placeholder="Phone" aria-label="Phone">
+              <button type="button" class="link" @click="ar.contact.people.splice(i, 1)">remove</button>
+            </div>
+            <button type="button" class="small" @click="addPerson">+ Add person</button>
+          </fieldset>
           <button class="primary">{{ ar.contact.id ? 'Save changes' : 'Save ' + S.who }}</button> <button type="button" @click="ar.showContact = false">Cancel</button>
         </form>
       </div>
@@ -566,7 +579,16 @@
             <label>Date <input type="date" v-model="ar.doc.date" required></label>
             <label>Due date <input type="date" v-model="ar.doc.dueDate" placeholder="from terms"></label>
           </div>
-          <p class="muted small">Leave the due date empty to use the {{ S.who }}'s payment terms.</p>
+          <p class="muted small">Leave the due date empty to use the {{ S.who }}'s payment terms.<template v-if="S.kind === 'invoice'">
+            A number already used gets the next letter: typing 2601 again saves 2601A, then 2601B.</template></p>
+          <div class="grid4" v-if="S.kind === 'invoice'">
+            <label>Attention (optional) <input v-model="ar.doc.attention" maxlength="120" list="doc-people" @change="pickAttention" placeholder="claims adjuster"></label>
+            <datalist id="doc-people"><option v-for="p in docPeople()" :value="p.name"></option></datalist>
+            <label>Send to (email) <input v-model="ar.doc.sendTo" type="email" maxlength="200" placeholder="adjuster's email"></label>
+            <label>Claim / job number (optional) <input v-model="ar.doc.clientRef" maxlength="60" placeholder="their number"></label>
+          </div>
+          <label class="check" v-if="S.kind === 'invoice' && docPersonIsNew() && ar.doc.contactId"><input type="checkbox" v-model="ar.doc.savePerson">
+            Save {{ ar.doc.attention.trim() }} to {{ ar.contacts.find(c => c.id === ar.doc.contactId)?.name }} for next time</label>
           <label v-if="S.kind === 'invoice'">Project (optional: name and site address, printed on the invoice)
             <textarea v-model="ar.doc.project" rows="3" maxlength="300" placeholder="Project name&#10;Street&#10;City, State ZIP"></textarea></label>
           <template v-if="S.kind === 'invoice'">
@@ -671,6 +693,8 @@
           <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small no-print">· {{ ar.detail.replacedById ? 'Replaced by a corrected copy' : statusLabel(ar.detail.status) }}</span></h2>
           <span>
             <button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button>
+            <button v-if="S.kind === 'invoice' && ar.detail.status !== 'void'" @click="openEmail(ar.detail)"
+              :title="'Opens your email program' + (ar.detail.sendTo ? ' addressed to ' + ar.detail.sendTo : '') + '. Attach the PDF yourself.'">✉ Email</button>
             <button v-if="can(S.perm) && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="editDoc(ar.detail)">Edit</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="voidDoc(ar.detail)">Void</button>
@@ -684,6 +708,7 @@
             <div class="pre-line" v-if="company.invoice_address">{{ company.invoice_address }}</div></div>
           <table class="invoice-box">
             <tr><th>Invoice #</th><td>{{ ar.detail.number }}</td></tr>
+            <tr v-if="ar.detail.clientRef"><th>Claim / Job #</th><td>{{ ar.detail.clientRef }}</td></tr>
             <tr><th>Date</th><td>{{ usDate(ar.detail.date) }}</td></tr>
             <tr><th>Due</th><td>{{ usDate(ar.detail.dueDate) }}</td></tr>
             <tr v-if="ar.detail.contact.termsDays != null"><th>Terms</th><td>{{ ar.detail.contact.termsDays ? ar.detail.contact.termsDays + ' days' : 'Due on receipt' }}</td></tr>
@@ -691,7 +716,8 @@
         </div>
         <div class="grid2 invoice-parties">
           <div class="boxed"><span class="muted small">BILL TO</span><br><strong>{{ ar.detail.contact.name }}</strong>
-            <div class="pre-line" v-if="ar.detail.contact.address">{{ ar.detail.contact.address }}</div><div v-if="ar.detail.contact.email">{{ ar.detail.contact.email }}</div></div>
+            <div v-if="ar.detail.attention">Attn: {{ ar.detail.attention }}</div>
+            <div class="pre-line" v-if="ar.detail.contact.address">{{ ar.detail.contact.address }}</div><div v-if="ar.detail.sendTo || ar.detail.contact.email">{{ ar.detail.sendTo || ar.detail.contact.email }}</div></div>
           <div>
             <div v-if="ar.detail.project"><span class="muted small">PROJECT</span><div class="pre-line">{{ ar.detail.project }}</div></div>
             <div v-if="company.invoice_note" class="pre-line small invoice-note">{{ company.invoice_note }}</div>
@@ -768,7 +794,7 @@
           <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Terms</th><th v-if="S.kind === 'bill'">1099</th><th class="num">Open</th><th class="num">Overdue</th><th></th></tr></thead>
           <tbody>
             <tr v-for="c in ar.contacts" :class="{ muted: !c.isActive }">
-              <td>{{ c.name }}</td><td>{{ c.email }}</td><td>{{ c.phone }}</td><td>{{ c.termsDays }} days</td><td v-if="S.kind === 'bill'">{{ c.is1099 ? 'yes' : '' }}</td>
+              <td>{{ c.name }}<span v-if="c.groupName" class="muted small"> · part of {{ c.groupName }}</span><span v-if="c.people?.length" class="muted small"> · {{ c.people.length }} {{ c.people.length === 1 ? 'person' : 'people' }}</span></td><td>{{ c.email }}</td><td>{{ c.phone }}</td><td>{{ c.termsDays }} days</td><td v-if="S.kind === 'bill'">{{ c.is1099 ? 'yes' : '' }}</td>
               <td class="num">{{ money(c.openCents) }}</td><td class="num" :class="{ bad: c.overdueCents > 0 }">{{ money(c.overdueCents) }}</td>
               <td class="actions"><template v-if="can(S.perm)">
                 <button class="link" @click="editContact(c)">edit</button>
@@ -835,6 +861,13 @@
               <tr class="total"><td>Total</td><td class="num" v-for="b in ar.aging.buckets">{{ money(ar.aging.totals[b.id]) }}</td><td class="num">{{ money(ar.aging.totals.totalCents) }}</td></tr>
             </tbody>
           </table>
+          <template v-if="ar.aging.groups?.length">
+            <h3>Totals by group (“Part of”)</h3>
+            <table class="data">
+              <thead><tr><th>Group</th><th class="num" v-for="b in ar.aging.buckets">{{ b.label }}</th><th class="num">Total</th></tr></thead>
+              <tbody><tr v-for="g in ar.aging.groups"><td>{{ g.name }} <span class="muted small">({{ g.count }})</span></td><td class="num" v-for="b in ar.aging.buckets">{{ g[b.id] ? money(g[b.id]) : '' }}</td><td class="num">{{ money(g.totalCents) }}</td></tr></tbody>
+            </table>
+          </template>
           <p v-if="ar.aging.otherEntriesCents" class="muted">Plus {{ money(ar.aging.otherEntriesCents) }} in {{ S.control }} from entries that aren't {{ S.docs.toLowerCase() }} (for example opening balances you imported).</p>
           <p :class="ar.aging.ties ? 'ok' : 'bad'">{{ ar.aging.ties
             ? `✓ Ties to ${S.control} in the books (${money(ar.aging.glBalanceCents)}).`

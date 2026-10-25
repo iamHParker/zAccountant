@@ -37,8 +37,10 @@ test('edit: invoices, bills and payments are corrected by void + replace', { ski
     assert.equal(again.number, '1001');
     const next = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: acme.id, date: '2026-03-05', lines: [{ accountId: A['4100'], amount: '10' }] });
     assert.equal(next.number, '1002');
-    // A plain new invoice still can't take a number in use.
-    await assert.rejects(arap.createDocument(pool, co.id, { kind: 'invoice', contactId: acme.id, number: '1001', date: '2026-03-05', lines: [{ accountId: A['4100'], amount: '1' }] }), /already used/);
+    // A plain new invoice can't take a number in use: typing 1001 again gives 1001A.
+    const lettered = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: acme.id, number: '1001', date: '2026-03-05', lines: [{ accountId: A['4100'], amount: '1' }] });
+    assert.equal(lettered.number, '1001A');
+    await arap.voidDocument(pool, co.id, lettered.id);
     // A voided copy can't be edited again; a bad edit changes nothing.
     await assert.rejects(arap.replaceDocument(pool, co.id, inv.id, { contactId: smith.id, date: '2026-03-01', lines: [{ accountId: A['4100'], amount: '5' }] }), /already void/);
     await assert.rejects(arap.replaceDocument(pool, co.id, again.id, { contactId: smith.id, date: '2026-03-01', lines: [] }), /not valid/);

@@ -25,7 +25,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (status, completed_by, completed_at) ON reconciliations TO ${role};
     GRANT DELETE ON reconciliations, reconciliation_lines TO ${role};
     GRANT UPDATE (status, undone_by, undone_at) ON import_batches TO ${role};
-    GRANT UPDATE (name, email, phone, address, terms_days, is_1099, is_active) ON contacts TO ${role};
+    GRANT UPDATE (name, email, phone, address, terms_days, is_1099, is_active, group_name, people) ON contacts TO ${role};
     GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at, replaced_by_id) ON documents, payments TO ${role};
     GRANT DELETE ON sessions TO ${role};
     GRANT UPDATE (role, custom_role_id, department_id) ON memberships TO ${role};
