@@ -90,8 +90,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   fresh authenticator code. Settings card + sign-in button.
 - Road page `/road` (migration 026, `src/services/roadService.js`, `public/road.*`): phone key (Bearer, hash only,
   90 days) → inbox `road_items`; Trips → From the road accepts into the books. Offline via IndexedDB + service worker.
-- Queued (Homer 2026-10-25): **.zacc book file** (zip of CSVs + manifest/SHA-256, optional password; also the nightly
-  backup) plus an "Export for QuickBooks"; MileIQ import (needs a sample CSV).
+- Book file `.zacc` (`src/services/bookFileService.js`): zip of every company table + manifest SHA-256s; QuickBooks
+  .iif / Online CSV exports. Whole-file re-import not built yet. Queued: MileIQ import (needs a sample CSV).
 - New-company setup wizard (migration 017): `entity_type`, `books_start_date`, `setup_done`; `GET/PUT …/setup`;
   the `setup` tab; Home's "Finish setting up" list. Entity type feeds Tax-ready (`src/core/entityTypes.js`).
 - Tax-ready level 1 (plan feature `tax`, migration 018): `src/core/taxLines.js` (categories → form lines, 1099 threshold

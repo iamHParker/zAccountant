@@ -7,7 +7,8 @@ import { inflateRawSync } from 'node:zlib';
 
 export class XlsxError extends Error {}
 
-function unzip(buf) {
+/** Read a .zip: returns name → text (or, with { raw: true }, a Buffer), or null when the name isn't there. */
+export function unzip(buf) {
   // Find the "end of central directory" record (signature 0x06054b50) near the end of the file.
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65_557); i--) {
@@ -29,13 +30,13 @@ function unzip(buf) {
     files.set(name, { method, compSize, local });
     p += 46 + nameLen + extraLen + commentLen;
   }
-  return (name) => {
+  return (name, { raw = false } = {}) => {
     const f = files.get(name);
     if (!f) return null;
     const start = f.local + 30 + buf.readUInt16LE(f.local + 26) + buf.readUInt16LE(f.local + 28);
     const data = buf.subarray(start, start + f.compSize);
-    if (f.method === 0) return data.toString('utf8');
-    if (f.method === 8) return inflateRawSync(data, { maxOutputLength: 50_000_000 }).toString('utf8');
+    const out = f.method === 0 ? data : f.method === 8 ? inflateRawSync(data, { maxOutputLength: 50_000_000 }) : null;
+    if (out) return raw ? Buffer.from(out) : out.toString('utf8');
     throw new XlsxError('Unsupported compression in .xlsx file');
   };
 }

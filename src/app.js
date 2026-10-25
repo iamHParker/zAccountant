@@ -23,6 +23,7 @@ import * as time from './services/timesheetService.js';
 import * as projects from './services/projectService.js';
 import * as trips from './services/tripService.js';
 import * as roadSvc from './services/roadService.js';
+import * as bookFiles from './services/bookFileService.js';
 import { AuthError } from './services/authService.js';
 import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
 import * as tax from './services/taxService.js';
@@ -643,6 +644,16 @@ export function createApp(pool, { log } = {}) {
   });
   api.get('/companies/:companyId/backup/accounts', backupFile('Chart of accounts', backup.chartRows));
   api.get('/companies/:companyId/backup/journal', backupFile('All transactions', backup.journalRows));
+  // The whole company as one .zacc file (src/services/bookFileService.js): owner-level, since it holds payroll and everything else.
+  api.get('/companies/:companyId/book-file', route('admin', async ({ db, companyId, actor }) => {
+    const f = await bookFiles.bookFile(db, companyId, { actor, appVersion: appVersion() });
+    return { [FILE]: { name: f.name, type: 'application/zip', body: f.body } };
+  }));
+  const qbName = async (db, companyId, ext) => `${(await ledger.getCompany(db, companyId)).name.replace(/[^\w .,()&-]+/g, '').trim().slice(0, 80)} for QuickBooks ${centralToday()}.${ext}`;
+  api.get('/companies/:companyId/export/quickbooks-desktop', route('view_books', async ({ db, companyId }) =>
+    ({ [FILE]: { name: await qbName(db, companyId, 'iif'), type: 'text/plain; charset=utf-8', body: await bookFiles.quickbooksIif(db, companyId) } })));
+  api.get('/companies/:companyId/export/quickbooks-online', route('view_books', async ({ db, companyId }) =>
+    ({ [FILE]: { name: await qbName(db, companyId, 'csv'), type: 'text/csv; charset=utf-8', body: await bookFiles.quickbooksOnlineCsv(db, companyId) } })));
 
   api.get('/companies/:companyId/reports/trial-balance', report('view_books', 'Trial Balance',
     ({ db, req, companyId }) => reports.getTrialBalance(db, companyId, { asOf: q(req.query.asOf) ?? today() }), statement('trial-balance')));
