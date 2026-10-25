@@ -16,6 +16,24 @@ into another, so the books always balance. You don't need to know debits and cre
 The tiles show cash in the bank, and income, expenses and profit for this fiscal year. "✓ Your books are in balance"
 is checked every time the page loads. A full check of the books also runs every night.
 
+### Home cards and Statistics
+
+Beside *Record a transaction* are shortcut cards for the jobs you do most (New invoice, Customer paid, Enter a bill,
+Banking, New trip, Profit & Loss…). Press one to go straight there. **Arrange cards** lets you make the page yours:
+
+- **Add a card** from the list of the ones not showing (Pay a bill, Import from MileIQ, Timesheet, Payroll, Balance
+  Sheet, Journal entry, Back up your books…).
+- **Move** a card by dragging it, or with its arrows: ‹ › (or ↑ ↓ under *Record a transaction*) change its place, and
+  **→ column / ← column** moves it between the two columns.
+- **✕** removes a card (add it back any time). **Back to the standard cards** starts over.
+
+Your arrangement is yours alone and follows you from computer to phone. Cards for things your role can't do don't show.
+
+The **Statistics** card (under *Record a transaction* to start with) shows this month's money in and out. Press it for
+the last 12 months of income and expenses, cash in the bank at each month's end, this year's largest expenses, and what
+customers owe you and you owe vendors, with any past-due part. Hover over (or tap) a month to see its numbers, or open
+**Show the numbers** for the table.
+
 ## 3. Recording transactions
 
 - **Quick way (Home → Record a transaction):** choose *Money in*, *Money out* or *Transfer*. Enter the date, a

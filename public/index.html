@@ -415,27 +415,149 @@
       <p class="ok" v-if="dash && dash.booksBalanced">✓ Your books are in balance.</p>
       <p class="bad" v-if="dash && !dash.booksBalanced">⚠ Your books are out of balance. Please contact support.</p>
 
-      <div class="card narrow" v-if="can('post')">
-        <h2>Record a transaction</h2>
-        <div class="seg">
-          <button v-for="k in ['in','out','transfer']" :class="{ active: quick.kind === k }" @click="quick.kind = k" type="button">
-            {{ { in: 'Money in', out: 'Money out', transfer: 'Transfer' }[k] }}
-          </button>
+      <template v-if="home.view === 'cards'">
+      <div class="row wrap home-tools">
+        <button type="button" class="small" @click="home.editing = !home.editing">{{ home.editing ? 'Done arranging' : 'Arrange cards' }}</button>
+        <template v-if="home.editing">
+          <label class="small inline">Add a card
+            <select v-model="home.adding"><option value="">Choose…</option><option v-for="c in homeUnused()" :value="c.id">{{ c.icon }} {{ c.title }}</option></select></label>
+          <button type="button" class="small" @click="addHomeCard" :disabled="!home.adding">Add</button>
+          <button type="button" class="small link" @click="resetHome">Back to the standard cards</button>
+          <span class="small muted">Drag a card, or use its arrows. ✕ removes it (you can add it back).</span>
+        </template>
+      </div>
+      <div class="home-grid">
+        <div class="home-col" @dragover.prevent @drop.prevent="homeDrop($event, 'left')">
+          <div class="card record-card" v-if="can('post')">
+            <h2>Record a transaction</h2>
+            <div class="seg">
+              <button v-for="k in ['in','out','transfer']" :class="{ active: quick.kind === k }" @click="quick.kind = k" type="button">
+                {{ { in: 'Money in', out: 'Money out', transfer: 'Transfer' }[k] }}
+              </button>
+            </div>
+            <form @submit.prevent="recordQuick">
+              <label>Date <input type="date" v-model="quick.date" required></label>
+              <label>Description <input v-model.trim="quick.memo" placeholder="e.g. Office rent for March" required></label>
+              <label>Amount <input v-model.trim="quick.amount" inputmode="decimal" placeholder="0.00" required></label>
+              <label>{{ quick.kind === 'in' ? 'Deposited to' : quick.kind === 'out' ? 'Paid from' : 'From' }}
+                <select v-model="quick.bank" required><option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
+              </label>
+              <label>{{ quick.kind === 'in' ? 'What was it for? (income or source)' : quick.kind === 'out' ? 'What was it for? (expense)' : 'To' }}
+                <select v-model="quick.other" required>
+                  <option v-for="a in quickChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option>
+                </select>
+              </label>
+              <button class="primary">Save</button>
+            </form>
+          </div>
+          <div v-for="c in homeCards('left')" :key="c.id" class="home-card" :class="{ editing: home.editing, stats: c.id === 'stats' }"
+            :draggable="home.editing" @dragstart="homeDragStart($event, 'left', c.id)" @dragover.prevent @drop.prevent.stop="homeDrop($event, 'left', c.id)">
+            <button type="button" class="home-card-body" @click="pressHomeCard(c)" :disabled="home.editing">
+              <span class="home-card-icon" aria-hidden="true">{{ c.icon }}</span>
+              <span><strong>{{ c.title }}</strong><span class="small muted home-card-hint">{{ c.hint }}</span></span>
+              <template v-if="c.id === 'stats' && home.stats">
+                <span class="mini-bars" aria-hidden="true">
+                  <span v-for="m in home.stats.months.slice(-6)" class="mini-pair">
+                    <i class="bar income" :style="{ height: barPct(m.incomeCents, home.stats.months.slice(-6).flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                    <i class="bar expenses" :style="{ height: barPct(m.expensesCents, home.stats.months.slice(-6).flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                  </span>
+                </span>
+                <span class="small">This month: in {{ money(home.stats.months.at(-1).incomeCents) }} · out {{ money(home.stats.months.at(-1).expensesCents) }}</span>
+              </template>
+            </button>
+            <div class="home-card-tools" v-if="home.editing">
+              <button type="button" class="small" @click="moveHomeCard('left', c.id, -1)" title="Move up" aria-label="Move up">↑</button>
+              <button type="button" class="small" @click="moveHomeCard('left', c.id, 1)" title="Move down" aria-label="Move down">↓</button>
+              <button type="button" class="small" @click="moveHomeCard('left', c.id, 'other')" :title="'Move to the right column'">→ column</button>
+              <button type="button" class="small" @click="removeHomeCard('left', c.id)" title="Remove this card" aria-label="Remove">✕</button>
+            </div>
+          </div>
+          <p class="home-drop small muted" v-if="home.editing && !homeCards('left').length">Drop cards here</p>
         </div>
-        <form @submit.prevent="recordQuick">
-          <label>Date <input type="date" v-model="quick.date" required></label>
-          <label>Description <input v-model.trim="quick.memo" placeholder="e.g. Office rent for March" required></label>
-          <label>Amount <input v-model.trim="quick.amount" inputmode="decimal" placeholder="0.00" required></label>
-          <label>{{ quick.kind === 'in' ? 'Deposited to' : quick.kind === 'out' ? 'Paid from' : 'From' }}
-            <select v-model="quick.bank" required><option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
-          </label>
-          <label>{{ quick.kind === 'in' ? 'What was it for? (income or source)' : quick.kind === 'out' ? 'What was it for? (expense)' : 'To' }}
-            <select v-model="quick.other" required>
-              <option v-for="a in quickChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option>
-            </select>
-          </label>
-          <button class="primary">Save</button>
-        </form>
+        <div class="home-col home-shortcuts" @dragover.prevent @drop.prevent="homeDrop($event, 'right')">
+          <div v-for="c in homeCards('right')" :key="c.id" class="home-card" :class="{ editing: home.editing, stats: c.id === 'stats' }"
+            :draggable="home.editing" @dragstart="homeDragStart($event, 'right', c.id)" @dragover.prevent @drop.prevent.stop="homeDrop($event, 'right', c.id)">
+            <button type="button" class="home-card-body" @click="pressHomeCard(c)" :disabled="home.editing">
+              <span class="home-card-icon" aria-hidden="true">{{ c.icon }}</span>
+              <span><strong>{{ c.title }}</strong><span class="small muted home-card-hint">{{ c.hint }}</span></span>
+              <template v-if="c.id === 'stats' && home.stats">
+                <span class="mini-bars" aria-hidden="true">
+                  <span v-for="m in home.stats.months.slice(-6)" class="mini-pair">
+                    <i class="bar income" :style="{ height: barPct(m.incomeCents, home.stats.months.slice(-6).flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                    <i class="bar expenses" :style="{ height: barPct(m.expensesCents, home.stats.months.slice(-6).flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                  </span>
+                </span>
+                <span class="small">This month: in {{ money(home.stats.months.at(-1).incomeCents) }} · out {{ money(home.stats.months.at(-1).expensesCents) }}</span>
+              </template>
+            </button>
+            <div class="home-card-tools" v-if="home.editing">
+              <button type="button" class="small" @click="moveHomeCard('right', c.id, -1)" title="Move earlier" aria-label="Move earlier">‹</button>
+              <button type="button" class="small" @click="moveHomeCard('right', c.id, 1)" title="Move later" aria-label="Move later">›</button>
+              <button type="button" class="small" @click="moveHomeCard('right', c.id, 'other')" :title="'Move to the left column'">← column</button>
+              <button type="button" class="small" @click="removeHomeCard('right', c.id)" title="Remove this card" aria-label="Remove">✕</button>
+            </div>
+          </div>
+          <p class="home-drop small muted" v-if="home.editing && !homeCards('right').length">Drop cards here</p>
+        </div>
+      </div>
+      </template>
+
+      <!-- STATISTICS (the Statistics card opens this) -->
+      <div v-if="home.view === 'stats'" class="stats">
+        <div class="row wrap"><h2>Statistics</h2><button type="button" @click="home.view = 'cards'">← Home</button><button type="button" class="small" @click="loadStats">Refresh</button></div>
+        <template v-if="home.stats">
+          <div class="tiles">
+            <div class="tile"><div class="label">Customers owe you</div><div class="value">{{ money(home.stats.receivable.totalCents) }}</div>
+              <div class="small" :class="home.stats.receivable.overdueCents ? 'bad' : 'muted'">{{ home.stats.receivable.overdueCents ? '⚠ ' + money(home.stats.receivable.overdueCents) + ' past due' : 'nothing past due' }}</div></div>
+            <div class="tile"><div class="label">You owe vendors</div><div class="value">{{ money(home.stats.payable.totalCents) }}</div>
+              <div class="small" :class="home.stats.payable.overdueCents ? 'bad' : 'muted'">{{ home.stats.payable.overdueCents ? '⚠ ' + money(home.stats.payable.overdueCents) + ' past due' : 'nothing past due' }}</div></div>
+            <div class="tile"><div class="label">Cash in the bank</div><div class="value">{{ money(home.stats.months.at(-1).cashEndCents) }}</div>
+              <div class="small muted">as of {{ usDate(home.stats.asOf) }}</div></div>
+          </div>
+
+          <div class="card">
+            <h3>Income and expenses, last 12 months</h3>
+            <div class="legend"><span><i class="key income"></i>Income</span><span><i class="key expenses"></i>Expenses</span></div>
+            <div class="chart bars-12" role="img" :aria-label="'Income and expenses by month, ' + monthLabel(home.stats.months[0].month, true) + ' to ' + monthLabel(home.stats.months.at(-1).month, true) + '. The table below has the numbers.'">
+              <div v-for="m in home.stats.months" class="chart-col" tabindex="0"
+                :title="monthLabel(m.month, true) + '\nIncome ' + money(m.incomeCents) + '\nExpenses ' + money(m.expensesCents) + '\nProfit ' + money(m.profitCents)">
+                <div class="chart-plot">
+                  <i class="bar income" :style="{ height: barPct(m.incomeCents, home.stats.months.flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                  <i class="bar expenses" :style="{ height: barPct(m.expensesCents, home.stats.months.flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                </div>
+                <span class="chart-x">{{ monthLabel(m.month) }}</span>
+              </div>
+            </div>
+            <details><summary class="small">Show the numbers</summary>
+              <table class="data">
+                <thead><tr><th>Month</th><th class="num">Income</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">Cash at month end</th></tr></thead>
+                <tr v-for="m in home.stats.months"><td>{{ monthLabel(m.month, true) }}</td><td class="num">{{ money(m.incomeCents) }}</td><td class="num">{{ money(m.expensesCents) }}</td>
+                  <td class="num" :class="{ neg: m.profitCents < 0 }">{{ money(m.profitCents) }}</td><td class="num">{{ money(m.cashEndCents) }}</td></tr>
+              </table>
+            </details>
+          </div>
+
+          <div class="card">
+            <h3>Cash in the bank at each month's end</h3>
+            <div class="chart bars-12" role="img" aria-label="Cash in the bank at each month's end. The numbers are in the table above (Show the numbers).">
+              <div v-for="m in home.stats.months" class="chart-col" tabindex="0" :title="monthLabel(m.month, true) + ': ' + money(m.cashEndCents)">
+                <div class="chart-plot"><i class="bar income" :class="{ below: m.cashEndCents < 0 }" :style="{ height: barPct(m.cashEndCents, home.stats.months.map(x => x.cashEndCents)) + '%' }"></i></div>
+                <span class="chart-x">{{ monthLabel(m.month) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" v-if="home.stats.topExpenses.length">
+            <h3>Largest expenses since {{ usDate(home.stats.fiscalYearStart) }}</h3>
+            <div class="hbars">
+              <div v-for="t in home.stats.topExpenses" class="hbar-row" :title="t.code + ' ' + t.name + ': ' + money(t.cents)">
+                <span class="hbar-label">{{ t.name }}</span>
+                <span class="hbar-track"><i class="bar expenses" :style="{ width: barPct(t.cents, home.stats.topExpenses.map(x => x.cents)) + '%' }"></i></span>
+                <span class="num">{{ money(t.cents) }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </section>
 
@@ -2054,7 +2176,7 @@
           <label class="end"><button class="primary" :disabled="passkeys.busy">Add this device</button></label>
         </form>
       </div>
-      <div class="card" v-if="can('view_books')">
+      <div class="card backup-card" v-if="can('view_books')">
         <h2>Back up your books</h2>
         <p class="hint">zAccountant is in alpha testing, so keep your own copy: download it every month (or after a busy week)
           and keep it somewhere safe.</p>

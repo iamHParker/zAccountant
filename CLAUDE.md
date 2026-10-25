@@ -94,6 +94,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   .iif / Online CSV exports. Whole-file re-import not built yet.
 - MileIQ import (migration 028, `src/core/mileiq.js`, `src/services/mileIqService.js`): monthly CSV → one mileage trip
   cost per trip per day, amount = MileIQ's per-drive rounding (ties to its report); `mileage_drives` stops re-imports.
+- Home cards (migration 029, `HOME_CARDS` in `public/app.js`, `homeLayoutService.js`): per-person shortcut cards,
+  add/remove/move; Statistics card → `GET …/reports/statistics` (12 months, cash, top expenses, AR/AP).
 - New-company setup wizard (migration 017): `entity_type`, `books_start_date`, `setup_done`; `GET/PUT …/setup`;
   the `setup` tab; Home's "Finish setting up" list. Entity type feeds Tax-ready (`src/core/entityTypes.js`).
 - Tax-ready level 1 (plan feature `tax`, migration 018): `src/core/taxLines.js` (categories → form lines, 1099 threshold

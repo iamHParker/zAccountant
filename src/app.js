@@ -25,6 +25,7 @@ import * as trips from './services/tripService.js';
 import * as roadSvc from './services/roadService.js';
 import * as bookFiles from './services/bookFileService.js';
 import * as mileIq from './services/mileIqService.js';
+import * as homeLayout from './services/homeLayoutService.js';
 import { AuthError } from './services/authService.js';
 import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
 import * as tax from './services/taxService.js';
@@ -642,6 +643,10 @@ export function createApp(pool, { log } = {}) {
 
   // Reports
   api.get('/companies/:companyId/reports/dashboard', route('view_books', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  api.get('/companies/:companyId/reports/statistics', route('view_books', ({ db, req, companyId }) => reports.getStatistics(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  // Each person's own Home cards (any member: it's their page, not the company's books).
+  api.get('/companies/:companyId/home-layout', route('member', ({ db, req, companyId }) => homeLayout.getHomeLayout(db, companyId, req.user.id)));
+  api.put('/companies/:companyId/home-layout', route('member', ({ db, req, companyId }) => homeLayout.saveHomeLayout(db, companyId, req.user.id, req.body ?? {})));
   // Back up your books: the chart of accounts and every journal entry, in our import templates' layout.
   const backupFile = (title, rowsFor) => route('view_books', async ({ db, companyId }) => {
     const company = (await ledger.getCompany(db, companyId)).name;

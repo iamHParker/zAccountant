@@ -2,6 +2,7 @@
 import { trialBalance, incomeStatement, balanceSheet, cashFlowStatement, postClosingSums, comparisonPeriod, compareStatements } from '../core/reports.js';
 import { LedgerError, isIsoDate } from '../core/ledger.js';
 import { getCompany, listAccounts } from './ledgerService.js';
+import { getAging } from './arapService.js';
 
 const need = (d, label) => { if (!isIsoDate(d)) throw new LedgerError(`${label} must be YYYY-MM-DD`); return d; };
 
@@ -164,3 +165,60 @@ export async function getDashboard(db, companyId, { asOf }) {
     booksBalanced: bs.balanced,
   };
 }
+
+/** "2026-10" → "2026-09" (n = -1). */
+function addMonths(ym, n) {
+  const [y, m] = ym.split('-').map(Number);
+  const t = y * 12 + (m - 1) + n;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Home → Statistics (Homer, 2026-10-25): the last 12 months of income, expenses and profit, cash in the bank at each
+ * month's end, this fiscal year's largest expenses, and what customers owe and what is owed to vendors (with the
+ * overdue part). Months are calendar months ending with the one holding `asOf`; the last one runs to `asOf`.
+ */
+export async function getStatistics(db, companyId, { asOf }) {
+  need(asOf, 'asOf');
+  const company = await getCompany(db, companyId);
+  const last = asOf.slice(0, 7);
+  const first = addMonths(last, -11);
+  const fyStart = fiscalYearStart(asOf, company.fiscal_year_start_month);
+  const { rows } = await db.query(
+    `SELECT to_char(l.entry_date, 'YYYY-MM') AS ym, a.type,
+            sum(l.credit_cents - l.debit_cents)::bigint AS net
+       FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+      WHERE l.company_id = $1 AND l.entry_date >= $2::date AND l.entry_date <= $3 AND a.type IN ('revenue', 'expense')
+      GROUP BY 1, 2`, [companyId, `${first}-01`, asOf]);
+  const { rows: cash } = await db.query(
+    `SELECT to_char(l.entry_date, 'YYYY-MM') AS ym, sum(l.debit_cents - l.credit_cents)::bigint AS net
+       FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+      WHERE l.company_id = $1 AND l.entry_date <= $2 AND a.cash_flow = 'cash'
+      GROUP BY 1`, [companyId, asOf]);
+  const months = [];
+  let cashCents = cash.filter((c) => c.ym < first).reduce((t, c) => t + Number(c.net), 0);
+  for (let i = 0; i < 12; i++) {
+    const ym = addMonths(first, i);
+    const income = Number(rows.find((r) => r.ym === ym && r.type === 'revenue')?.net ?? 0);
+    const expenses = -Number(rows.find((r) => r.ym === ym && r.type === 'expense')?.net ?? 0);
+    cashCents += Number(cash.find((c) => c.ym === ym)?.net ?? 0);
+    months.push({ month: ym, incomeCents: income, expensesCents: expenses, profitCents: income - expenses, cashEndCents: cashCents });
+  }
+  const { rows: top } = await db.query(
+    `SELECT a.id AS "accountId", a.code, a.name, sum(l.debit_cents - l.credit_cents)::bigint AS cents
+       FROM journal_lines l JOIN accounts a ON a.id = l.account_id
+      WHERE l.company_id = $1 AND l.entry_date >= $2 AND l.entry_date <= $3 AND a.type = 'expense'
+      GROUP BY a.id, a.code, a.name HAVING sum(l.debit_cents - l.credit_cents) > 0
+      ORDER BY 4 DESC, a.code LIMIT 6`, [companyId, fyStart, asOf]);
+  const owed = async (kind) => {
+    const g = await getAging(db, companyId, { kind, asOf });
+    return { totalCents: g.totals.totalCents, overdueCents: g.totals.totalCents - g.totals.current,
+      count: g.rows.reduce((t, r) => t + r.documents.length, 0) };
+  };
+  return {
+    asOf, fiscalYearStart: fyStart, months,
+    topExpenses: top.map((t) => ({ ...t, cents: Number(t.cents) })),
+    receivable: await owed('invoice'), payable: await owed('bill'),
+  };
+}
+
