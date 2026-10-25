@@ -52,6 +52,10 @@ is checked every time the page loads. A full check of the books also runs every 
 **+ New customer**: name, email, address (it prints in the Bill To box), and payment terms in days (20 days means
 the invoice is due 20 days after its date).
 
+To change a customer's details, open the **Customers** tab and press **edit** on their row. The same form opens
+filled in; change what you need and press **Save changes**. Invoices already written keep their numbers and amounts,
+but they show the new name and address when you open or print them. Vendors work the same way under Bills → Vendors.
+
 ### Writing an invoice
 
 1. **+ New invoice**: choose the customer. Type an invoice number (your job number, such as 26-134), or leave it
