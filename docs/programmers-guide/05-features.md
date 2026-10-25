@@ -11,6 +11,15 @@ Companies, chart of accounts (types and subtypes decide where an account appears
 Chart of accounts, opening balances and journals from CSV, Excel or a QuickBooks IIF file. `preview` checks
 everything and saves nothing. An import is one batch, and the whole batch can be undone.
 
+## New-company setup wizard (`ledgerService.updateSetup` / `setupStatus`, migration 017)
+`companies.entity_type` (individual, sole_proprietor, single_member_llc, partnership, s_corp, c_corp; labels and tax
+forms in `src/core/entityTypes.js`), `books_start_date`, and `setup_done` (false for new companies; the migration set
+older ones true). `GET …/setup` returns counts-based steps (basics, books = any entry, bank = any entry on a
+bank/cash/card account, invoicing = letterhead or logo or a saved rate, people = more than one member). `PUT …/setup`
+(admin) changes the three fields. The wizard is the `setup` tab in `public/index.html`; imports reuse the Accounts
+importer with `setup.fromImport` showing a back link. Opening balances are simple entries against Owner's Capital
+(3000) dated the day before the books start, with an idempotency key per account.
+
 ## Back up your books (`backupService.js`)
 Settings → Back up your books downloads two CSVs in exactly our import templates' layout: the chart of accounts
 and every journal line (Entry, Date, Memo, Account, Debit, Credit, Source). Importing them into a new company

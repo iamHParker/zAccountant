@@ -77,6 +77,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   `project` block, letterhead (address, note with tax ID + TX firm number, closing line), logo in `company_logos`,
   pinned `default_sales_tax_rate`. Layout follows Homer's Excel invoice: Hours, Date, Task, Rate, T, Subtotal.
   Expense split across jobs: quantity `1/N` from the invoice's "Jobs sharing these expenses" box; typed quantities win.
+- New-company setup wizard (migration 017): `entity_type`, `books_start_date`, `setup_done`; `GET/PUT …/setup`;
+  the `setup` tab; Home's "Finish setting up" list. Entity type feeds Tax-ready (`src/core/entityTypes.js`).
 - Front page at `/` (`public/welcome.html`, plain HTML, prices from `GET /api/public/plans`); the app is at `/app`.
   Settings → Back up your books (`src/services/backupService.js`): re-importable CSVs of the chart and journal.
 - Guides: `docs/user-guide/` (chapters by tier: everyone, Basic, Payroll, Timesheets, staff) and

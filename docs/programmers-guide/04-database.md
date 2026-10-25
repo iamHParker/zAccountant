@@ -21,6 +21,7 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `014_feedback.sql` | beta feedback reports, platform role, platform counts |
 | `015_plans.sql` | company plans, plan change log, admin company list |
 | `016_invoice_items.sql` | saved invoice rates/items, line dates, project block, letterhead, logo, default sales tax rate |
+| `017_company_setup.sql` | company type of business, books start date, setup-wizard done flag |
 
 ## How migrations run
 
@@ -30,7 +31,7 @@ happens. On Railway this runs every time the server starts (`src/server.js`), as
 
 ## Writing a migration
 
-1. Make a new file with the next number, for example `017_split_costs.sql`. **Never edit a migration that has
+1. Make a new file with the next number, for example `018_split_costs.sql`. **Never edit a migration that has
    reached `main`.** Production has already run it, and edits would never run there.
 2. Start with a comment that says what the file adds and why, in plain words.
 3. Every company table gets:

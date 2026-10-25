@@ -47,6 +47,11 @@ const SIDES = {
   bills: { kind: 'bill', perm: 'bills', Doc: 'Bill', docs: 'Bills', who: 'vendor', Who: 'Vendor', Whos: 'Vendors', contacts: 'vendors', docPath: 'bills',
     payPath: 'payments-made', agingPath: 'ap-aging', payVerb: 'Pay bills', control: 'Accounts Payable', lineHint: 'Expense account' },
 };
+const ENTITY_TYPES = [
+  ['individual', 'Individual (personal books)'], ['sole_proprietor', 'Sole proprietor'], ['single_member_llc', 'Single-member LLC'],
+  ['partnership', 'Partnership or multi-member LLC'], ['s_corp', 'S corporation (or LLC taxed as one)'], ['c_corp', 'C corporation'],
+];
+const blankCompany = () => ({ name: '', homeState: 'TX', fiscalYearStartMonth: 1, entityType: '', booksStartDate: `${today().slice(0, 4)}-01-01` });
 const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
 const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
@@ -105,6 +110,7 @@ async function api(method, url, body, headers = {}) {
 const TAB_PERMS = {
   home: ['view_books'], journal: ['view_books'], sales: ['view_books', 'invoices'], bills: ['view_books', 'bills'], bank: ['view_books'],
   reports: ['view_books', 'payroll'], accounts: ['view_books'], payroll: ['view_books', 'payroll'], time: ['time_own', 'time_approve', 'time_all'],
+  setup: ['admin'],
 };
 
 // Tabs that need a feature of the company's plan (src/core/plans.js on the server).
@@ -152,7 +158,11 @@ createApp({
       roles: { permissions: [], presets: [], custom: [] }, departments: [], newDept: '',
       roleEdit: null,
       typeLabel: { asset: 'Asset', liability: 'Liability', equity: 'Equity', revenue: 'Income', expense: 'Expense' },
-      newCompany: { name: '', homeState: 'TX', fiscalYearStartMonth: 1 },
+      newCompany: blankCompany(),
+      // The new-company setup wizard (steps 1-5) and the "Finish setting up" list on Home.
+      setup: { step: 1, status: null, entityType: '', booksStartDate: '', books: 'fresh', fromImport: false,
+        newAcct: { name: '', kind: 'bank' }, balances: {}, busy: false },
+      entityTypes: ENTITY_TYPES,
       accounts: [], dash: null, entries: [], entriesTotal: 0, search: blankSearch(), recurring: [], showRecurring: false, booksCheck: null,
       quick: { kind: 'out', date: today(), memo: '', amount: '', bank: '', other: '', key: newKey() },
       showJE: false, je: { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] },
@@ -248,6 +258,7 @@ createApp({
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
       if (t === 'settings') { this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
+      if (t === 'setup') this.loadSetup();
       if (t === 'bank') this.loadBank();
       if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
       if (t === 'accounts') this.loadImports();
@@ -500,7 +511,77 @@ createApp({
       if (this.tab === 'new-company' || !this.canTab(this.tab)) this.tab = this.tabs.find((t) => this.canTab(t.id))?.id ?? 'settings';
       this.tab === 'home' ? this.loadDash() : this.$options.watch.tab.call(this, this.tab);
     },
-    async loadDash() { if (this.companyId) this.dash = await this.run(() => api('GET', `/companies/${this.companyId}/reports/dashboard?asOf=${today()}`)); },
+    async loadDash() {
+      if (!this.companyId) return;
+      this.dash = await this.run(() => api('GET', `/companies/${this.companyId}/reports/dashboard?asOf=${today()}`));
+      if (this.can('admin')) this.setup.status = await api('GET', `/companies/${this.companyId}/setup`).catch(() => null);
+    },
+    // ---------------------------------------------------------------- New-company setup wizard
+    async loadSetup() {
+      const s = this.setup;
+      s.status = await this.run(() => api('GET', `/companies/${this.companyId}/setup`));
+      s.entityType = s.status?.entityType ?? ''; s.booksStartDate = s.status?.booksStartDate ?? '';
+      s.balances = {};
+    },
+    setupGo(step) { this.setup.step = step; this.tab = 'setup'; },
+    async saveBasics() {
+      const s = this.setup;
+      if (await this.run(() => api('PUT', `/companies/${this.companyId}/setup`, { entityType: s.entityType, booksStartDate: s.booksStartDate }), 'Saved.')) { await this.loadSetup(); s.step = 2; }
+    },
+    /** Open the importer on the Accounts tab; it shows a "Back to setup" link. */
+    setupImport(kind) {
+      this.setup.fromImport = true; this.imp.kind = kind; this.imp.show = true; this.tab = 'accounts';
+      if (kind === 'opening' && !this.imp.asOf) this.imp.asOf = this.openingDate();
+    },
+    backToSetup() { this.setup.fromImport = false; this.setupGo(3); },
+    /** The next free account code in a block (bank 1010-1099, credit card 2100-2199). */
+    nextCode(from, to) {
+      const used = new Set(this.accounts.map((a) => a.code));
+      for (let n = from; n <= to; n += 10) if (!used.has(String(n))) return String(n);
+      for (let n = from; n <= to; n++) if (!used.has(String(n))) return String(n);
+      return null;
+    },
+    async addMoneyAccount() {
+      const n = this.setup.newAcct;
+      const card = n.kind === 'card';
+      const code = card ? this.nextCode(2100, 2199) : this.nextCode(1010, 1099);
+      const body = { code, name: n.name, type: card ? 'liability' : 'asset', subtype: card ? 'credit_card' : 'bank' };
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/accounts`, body), `${n.name} added.`)) {
+        this.setup.newAcct = { name: '', kind: n.kind };
+        this.accounts = await api('GET', `/companies/${this.companyId}/accounts`);
+      }
+    },
+    moneyAccounts() { return this.accounts.filter((a) => a.isActive && ['bank', 'cash', 'credit_card'].includes(a.subtype)); },
+    /** The day before the books start: opening balances are "as of" then. */
+    openingDate() {
+      const d = this.setup.booksStartDate || this.setup.status?.booksStartDate;
+      if (!d) return today();
+      const t = new Date(`${d}T12:00:00Z`); t.setUTCDate(t.getUTCDate() - 1); return t.toISOString().slice(0, 10);
+    },
+    /** Starting fresh: each balance becomes one entry against Owner's Capital (a card balance is money owed). */
+    async saveBalances() {
+      const s = this.setup;
+      const capital = this.accounts.find((a) => a.code === '3000') ?? this.accounts.find((a) => a.type === 'equity' && a.subtype === 'capital');
+      if (!capital) { this.flash("No Owner's Capital account to balance against.", 'bad'); return; }
+      const date = this.openingDate();
+      s.busy = true;
+      try {
+        for (const a of this.moneyAccounts()) {
+          const amount = String(s.balances[a.id] ?? '').trim();
+          if (!amount || cents(amount) === 0) continue;
+          const card = a.subtype === 'credit_card';
+          const body = { date, memo: `Opening balance, ${a.name}`, amount,
+            fromAccountId: card ? a.id : capital.id, toAccountId: card ? capital.id : a.id };
+          if (!(await this.run(() => api('POST', `/companies/${this.companyId}/entries/simple`, body, { 'Idempotency-Key': `opening-${a.id}` })))) return;
+        }
+        this.flash('Opening balances saved.'); s.balances = {}; await this.loadSetup(); s.step = 4;
+      } finally { s.busy = false; }
+    },
+    async finishSetup(done = true) {
+      if (await this.run(() => api('PUT', `/companies/${this.companyId}/setup`, { setupDone: done }), done ? 'Setup finished.' : undefined)) {
+        this.setup.status = { ...this.setup.status, setupDone: done }; this.tab = 'home';
+      }
+    },
     async loadEntries(more = false) {
       const p = new URLSearchParams();
       for (const [k, v] of Object.entries(this.search)) if (v) p.set(k, v);
@@ -688,8 +769,8 @@ createApp({
     async createCompany() {
       const c = await this.run(() => api('POST', '/companies', this.newCompany), 'Company created. Your books are ready.');
       if (!c) return;
-      this.companies.push(c); this.companyId = c.id; this.tab = 'home';
-      this.newCompany = { name: '', homeState: 'TX', fiscalYearStartMonth: 1 };
+      this.companies.push(c); this.tab = 'setup'; this.setup.step = 2; this.companyId = c.id;
+      this.newCompany = blankCompany();
     },
     async recordQuick() {
       const q = this.quick;

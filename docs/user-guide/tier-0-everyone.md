@@ -16,9 +16,20 @@ the account locks for a while, to stop guessing.
 
 ## 2. Your company
 
-**Starting your own:** after sign-in, enter the company name, its home state (TX, CO, CA or DC) and the month its
-fiscal year starts. A standard chart of accounts is created for you. A sole proprietor or an individual keeping
-their own books is set up as a company too.
+**Starting your own:** after sign-in, enter the company name, the type of business (individual, sole proprietor,
+single-member LLC, partnership, S or C corporation; it decides which tax return the books feed), its home state
+(TX, CO, CA or DC), the month its fiscal year starts, and the day your books start. A standard chart of accounts is
+created, and the **setup wizard** opens. Every step can be skipped:
+
+1. **Basics:** the type of business and start date (change them here later).
+2. **Your books:** start fresh, or import from QuickBooks, from our Excel/CSV templates, or from a zAccountant backup
+   (chart of accounts first, then the rest). **← back to setup** above the importer returns to the wizard.
+3. **Bank and cards:** add your accounts. Starting fresh, type each balance as of the day before the books start (for a
+   card, what you owe); each becomes an entry against Owner's Capital.
+4. **Invoicing** and 5. **People** open the matching Settings cards.
+
+Until you press **Finish**, Home shows a **Finish setting up** list with what's done (✓) and what's left.
+A sole proprietor or an individual keeping their own books is set up as a company too.
 
 **Joining someone else's company** (a bookkeeper, an employee, a beta tester): don't create a company. Send the
 owner the email you signed up with. They add you under **Settings → People with access** and choose your role.
