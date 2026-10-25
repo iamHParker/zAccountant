@@ -70,6 +70,8 @@
         <label>Password <input type="password" v-model="auth.password" autocomplete="current-password" required></label>
         <button class="primary">Sign in</button>
       </form>
+      <p v-if="passkeys.supported"><button class="passkey-btn" @click="signInPasskey">Sign in with Face ID or a passkey</button></p>
+      <p class="hint" v-if="passkeys.supported">Nothing to type, so nothing a camera can see. Add a passkey first in <strong>Settings → Sign in with Face ID</strong>.</p>
       <p class="hint">New to zAccountant? <button class="link" @click="auth.screen = 'signup'">Create an account</button></p>
       <p class="hint"><a href="/">← About zAccountant: services and prices</a></p>
     </section>
@@ -250,6 +252,19 @@
         <p class="hint">Downloads a complete copy of the database (every company's books) to this computer. Railway's Hobby plan has no automatic
           backups, so do this about once a week and keep the file somewhere private. To check one, run the restore drill on it (docs/runbooks/operations.md).</p>
         <a class="button" href="/api/developer/backup">Download backup</a>
+        <template v-if="dev.summary">
+          <h3>Nightly off-site backup</h3>
+          <p :class="{ bad: !['on', 'off'].includes(dev.summary.offsite) }">
+            {{ dev.summary.offsite === 'on' ? 'On: a locked copy goes to the storage bucket every night after the books check.'
+              : dev.summary.offsite === 'off' ? 'Off: the BACKUP_S3_… and BACKUP_ENCRYPTION_KEY variables are not set in Railway (docs/runbooks/operations.md).'
+              : dev.summary.offsite }}</p>
+          <table class="data" v-if="dev.summary.offsiteBackups.length">
+            <thead><tr><th>Night of</th><th>Result</th><th class="num">Size</th><th>File</th></tr></thead>
+            <tr v-for="b in dev.summary.offsiteBackups"><td>{{ usDate(b.asOf) }}</td>
+              <td :class="b.ok ? 'ok' : 'bad'">{{ b.ok ? 'sent' : b.ok === false ? 'failed: ' + b.error : 'running' }}</td>
+              <td class="num">{{ b.bytes ? (b.bytes / 1048576).toFixed(1) + ' MB' : '' }}</td><td class="small break">{{ b.objectKey }}</td></tr>
+          </table>
+        </template>
       </div>
 
       <div class="card" v-if="dev.summary">
@@ -400,27 +415,149 @@
       <p class="ok" v-if="dash && dash.booksBalanced">✓ Your books are in balance.</p>
       <p class="bad" v-if="dash && !dash.booksBalanced">⚠ Your books are out of balance. Please contact support.</p>
 
-      <div class="card narrow" v-if="can('post')">
-        <h2>Record a transaction</h2>
-        <div class="seg">
-          <button v-for="k in ['in','out','transfer']" :class="{ active: quick.kind === k }" @click="quick.kind = k" type="button">
-            {{ { in: 'Money in', out: 'Money out', transfer: 'Transfer' }[k] }}
-          </button>
+      <template v-if="home.view === 'cards'">
+      <div class="row wrap home-tools">
+        <button type="button" class="small" @click="home.editing = !home.editing">{{ home.editing ? 'Done arranging' : 'Arrange cards' }}</button>
+        <template v-if="home.editing">
+          <label class="small inline">Add a card
+            <select v-model="home.adding"><option value="">Choose…</option><option v-for="c in homeUnused()" :value="c.id">{{ c.icon }} {{ c.title }}</option></select></label>
+          <button type="button" class="small" @click="addHomeCard" :disabled="!home.adding">Add</button>
+          <button type="button" class="small link" @click="resetHome">Back to the standard cards</button>
+          <span class="small muted">Drag a card, or use its arrows. ✕ removes it (you can add it back).</span>
+        </template>
+      </div>
+      <div class="home-grid">
+        <div class="home-col" @dragover.prevent @drop.prevent="homeDrop($event, 'left')">
+          <div class="card record-card" v-if="can('post')">
+            <h2>Record a transaction</h2>
+            <div class="seg">
+              <button v-for="k in ['in','out','transfer']" :class="{ active: quick.kind === k }" @click="quick.kind = k" type="button">
+                {{ { in: 'Money in', out: 'Money out', transfer: 'Transfer' }[k] }}
+              </button>
+            </div>
+            <form @submit.prevent="recordQuick">
+              <label>Date <input type="date" v-model="quick.date" required></label>
+              <label>Description <input v-model.trim="quick.memo" placeholder="e.g. Office rent for March" required></label>
+              <label>Amount <input v-model.trim="quick.amount" inputmode="decimal" placeholder="0.00" required></label>
+              <label>{{ quick.kind === 'in' ? 'Deposited to' : quick.kind === 'out' ? 'Paid from' : 'From' }}
+                <select v-model="quick.bank" required><option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
+              </label>
+              <label>{{ quick.kind === 'in' ? 'What was it for? (income or source)' : quick.kind === 'out' ? 'What was it for? (expense)' : 'To' }}
+                <select v-model="quick.other" required>
+                  <option v-for="a in quickChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option>
+                </select>
+              </label>
+              <button class="primary">Save</button>
+            </form>
+          </div>
+          <div v-for="c in homeCards('left')" :key="c.id" class="home-card" :class="{ editing: home.editing, stats: c.id === 'stats' }"
+            :draggable="home.editing" @dragstart="homeDragStart($event, 'left', c.id)" @dragover.prevent @drop.prevent.stop="homeDrop($event, 'left', c.id)">
+            <button type="button" class="home-card-body" @click="pressHomeCard(c)" :disabled="home.editing">
+              <span class="home-card-icon" aria-hidden="true">{{ c.icon }}</span>
+              <span><strong>{{ c.title }}</strong><span class="small muted home-card-hint">{{ c.hint }}</span></span>
+              <template v-if="c.id === 'stats' && home.stats">
+                <span class="mini-bars" aria-hidden="true">
+                  <span v-for="m in home.stats.months.slice(-6)" class="mini-pair">
+                    <i class="bar income" :style="{ height: barPct(m.incomeCents, home.stats.months.slice(-6).flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                    <i class="bar expenses" :style="{ height: barPct(m.expensesCents, home.stats.months.slice(-6).flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                  </span>
+                </span>
+                <span class="small">This month: in {{ money(home.stats.months.at(-1).incomeCents) }} · out {{ money(home.stats.months.at(-1).expensesCents) }}</span>
+              </template>
+            </button>
+            <div class="home-card-tools" v-if="home.editing">
+              <button type="button" class="small" @click="moveHomeCard('left', c.id, -1)" title="Move up" aria-label="Move up">↑</button>
+              <button type="button" class="small" @click="moveHomeCard('left', c.id, 1)" title="Move down" aria-label="Move down">↓</button>
+              <button type="button" class="small" @click="moveHomeCard('left', c.id, 'other')" :title="'Move to the right column'">→ column</button>
+              <button type="button" class="small" @click="removeHomeCard('left', c.id)" title="Remove this card" aria-label="Remove">✕</button>
+            </div>
+          </div>
+          <p class="home-drop small muted" v-if="home.editing && !homeCards('left').length">Drop cards here</p>
         </div>
-        <form @submit.prevent="recordQuick">
-          <label>Date <input type="date" v-model="quick.date" required></label>
-          <label>Description <input v-model.trim="quick.memo" placeholder="e.g. Office rent for March" required></label>
-          <label>Amount <input v-model.trim="quick.amount" inputmode="decimal" placeholder="0.00" required></label>
-          <label>{{ quick.kind === 'in' ? 'Deposited to' : quick.kind === 'out' ? 'Paid from' : 'From' }}
-            <select v-model="quick.bank" required><option v-for="a in bankAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
-          </label>
-          <label>{{ quick.kind === 'in' ? 'What was it for? (income or source)' : quick.kind === 'out' ? 'What was it for? (expense)' : 'To' }}
-            <select v-model="quick.other" required>
-              <option v-for="a in quickChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option>
-            </select>
-          </label>
-          <button class="primary">Save</button>
-        </form>
+        <div class="home-col home-shortcuts" @dragover.prevent @drop.prevent="homeDrop($event, 'right')">
+          <div v-for="c in homeCards('right')" :key="c.id" class="home-card" :class="{ editing: home.editing, stats: c.id === 'stats' }"
+            :draggable="home.editing" @dragstart="homeDragStart($event, 'right', c.id)" @dragover.prevent @drop.prevent.stop="homeDrop($event, 'right', c.id)">
+            <button type="button" class="home-card-body" @click="pressHomeCard(c)" :disabled="home.editing">
+              <span class="home-card-icon" aria-hidden="true">{{ c.icon }}</span>
+              <span><strong>{{ c.title }}</strong><span class="small muted home-card-hint">{{ c.hint }}</span></span>
+              <template v-if="c.id === 'stats' && home.stats">
+                <span class="mini-bars" aria-hidden="true">
+                  <span v-for="m in home.stats.months.slice(-6)" class="mini-pair">
+                    <i class="bar income" :style="{ height: barPct(m.incomeCents, home.stats.months.slice(-6).flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                    <i class="bar expenses" :style="{ height: barPct(m.expensesCents, home.stats.months.slice(-6).flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                  </span>
+                </span>
+                <span class="small">This month: in {{ money(home.stats.months.at(-1).incomeCents) }} · out {{ money(home.stats.months.at(-1).expensesCents) }}</span>
+              </template>
+            </button>
+            <div class="home-card-tools" v-if="home.editing">
+              <button type="button" class="small" @click="moveHomeCard('right', c.id, -1)" title="Move earlier" aria-label="Move earlier">‹</button>
+              <button type="button" class="small" @click="moveHomeCard('right', c.id, 1)" title="Move later" aria-label="Move later">›</button>
+              <button type="button" class="small" @click="moveHomeCard('right', c.id, 'other')" :title="'Move to the left column'">← column</button>
+              <button type="button" class="small" @click="removeHomeCard('right', c.id)" title="Remove this card" aria-label="Remove">✕</button>
+            </div>
+          </div>
+          <p class="home-drop small muted" v-if="home.editing && !homeCards('right').length">Drop cards here</p>
+        </div>
+      </div>
+      </template>
+
+      <!-- STATISTICS (the Statistics card opens this) -->
+      <div v-if="home.view === 'stats'" class="stats">
+        <div class="row wrap"><h2>Statistics</h2><button type="button" @click="home.view = 'cards'">← Home</button><button type="button" class="small" @click="loadStats">Refresh</button></div>
+        <template v-if="home.stats">
+          <div class="tiles">
+            <div class="tile"><div class="label">Customers owe you</div><div class="value">{{ money(home.stats.receivable.totalCents) }}</div>
+              <div class="small" :class="home.stats.receivable.overdueCents ? 'bad' : 'muted'">{{ home.stats.receivable.overdueCents ? '⚠ ' + money(home.stats.receivable.overdueCents) + ' past due' : 'nothing past due' }}</div></div>
+            <div class="tile"><div class="label">You owe vendors</div><div class="value">{{ money(home.stats.payable.totalCents) }}</div>
+              <div class="small" :class="home.stats.payable.overdueCents ? 'bad' : 'muted'">{{ home.stats.payable.overdueCents ? '⚠ ' + money(home.stats.payable.overdueCents) + ' past due' : 'nothing past due' }}</div></div>
+            <div class="tile"><div class="label">Cash in the bank</div><div class="value">{{ money(home.stats.months.at(-1).cashEndCents) }}</div>
+              <div class="small muted">as of {{ usDate(home.stats.asOf) }}</div></div>
+          </div>
+
+          <div class="card">
+            <h3>Income and expenses, last 12 months</h3>
+            <div class="legend"><span><i class="key income"></i>Income</span><span><i class="key expenses"></i>Expenses</span></div>
+            <div class="chart bars-12" role="img" :aria-label="'Income and expenses by month, ' + monthLabel(home.stats.months[0].month, true) + ' to ' + monthLabel(home.stats.months.at(-1).month, true) + '. The table below has the numbers.'">
+              <div v-for="m in home.stats.months" class="chart-col" tabindex="0"
+                :title="monthLabel(m.month, true) + '\nIncome ' + money(m.incomeCents) + '\nExpenses ' + money(m.expensesCents) + '\nProfit ' + money(m.profitCents)">
+                <div class="chart-plot">
+                  <i class="bar income" :style="{ height: barPct(m.incomeCents, home.stats.months.flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                  <i class="bar expenses" :style="{ height: barPct(m.expensesCents, home.stats.months.flatMap(x => [x.incomeCents, x.expensesCents])) + '%' }"></i>
+                </div>
+                <span class="chart-x">{{ monthLabel(m.month) }}</span>
+              </div>
+            </div>
+            <details><summary class="small">Show the numbers</summary>
+              <table class="data">
+                <thead><tr><th>Month</th><th class="num">Income</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">Cash at month end</th></tr></thead>
+                <tr v-for="m in home.stats.months"><td>{{ monthLabel(m.month, true) }}</td><td class="num">{{ money(m.incomeCents) }}</td><td class="num">{{ money(m.expensesCents) }}</td>
+                  <td class="num" :class="{ neg: m.profitCents < 0 }">{{ money(m.profitCents) }}</td><td class="num">{{ money(m.cashEndCents) }}</td></tr>
+              </table>
+            </details>
+          </div>
+
+          <div class="card">
+            <h3>Cash in the bank at each month's end</h3>
+            <div class="chart bars-12" role="img" aria-label="Cash in the bank at each month's end. The numbers are in the table above (Show the numbers).">
+              <div v-for="m in home.stats.months" class="chart-col" tabindex="0" :title="monthLabel(m.month, true) + ': ' + money(m.cashEndCents)">
+                <div class="chart-plot"><i class="bar income" :class="{ below: m.cashEndCents < 0 }" :style="{ height: barPct(m.cashEndCents, home.stats.months.map(x => x.cashEndCents)) + '%' }"></i></div>
+                <span class="chart-x">{{ monthLabel(m.month) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" v-if="home.stats.topExpenses.length">
+            <h3>Largest expenses since {{ usDate(home.stats.fiscalYearStart) }}</h3>
+            <div class="hbars">
+              <div v-for="t in home.stats.topExpenses" class="hbar-row" :title="t.code + ' ' + t.name + ': ' + money(t.cents)">
+                <span class="hbar-label">{{ t.name }}</span>
+                <span class="hbar-track"><i class="bar expenses" :style="{ width: barPct(t.cents, home.stats.topExpenses.map(x => x.cents)) + '%' }"></i></span>
+                <span class="num">{{ money(t.cents) }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </section>
 
@@ -589,7 +726,55 @@
           </div>
           <label class="check" v-if="S.kind === 'invoice' && docPersonIsNew() && ar.doc.contactId"><input type="checkbox" v-model="ar.doc.savePerson">
             Save {{ ar.doc.attention.trim() }} to {{ ar.contacts.find(c => c.id === ar.doc.contactId)?.name }} for next time</label>
-          <label v-if="S.kind === 'invoice'">Project (optional: name and site address, printed on the invoice)
+          <div class="grid2" v-if="S.kind === 'invoice'">
+            <label>Project (optional) <select v-model="ar.doc.jobId" @change="pickDocProject"><option value="">None</option>
+              <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === ar.doc.jobId)" :value="j.id">{{ jobLabel(j) }}{{ j.customerName ? ' · ' + j.customerName : '' }}</option></select></label>
+            <div><button type="button" @click="openPull" :disabled="!ar.doc.jobId && !ar.doc.contactId">⏱ Pull in unbilled time and costs</button>
+              <p class="muted small">Billable hours from timesheets, and costs on bills marked “bill to client”, for {{ ar.doc.jobId ? 'this project' : 'all of this customer’s projects' }}.</p></div>
+          </div>
+          <div class="pull-box" v-if="S.kind === 'invoice' && ar.pull">
+            <div class="row wrap">
+              <h3>Unbilled time and costs</h3>
+              <label>From <input type="date" v-model="ar.pull.from" @change="loadPull"></label>
+              <label>To <input type="date" v-model="ar.pull.to" @change="loadPull"></label>
+            </div>
+            <p class="hint" v-if="ar.pull.loaded && !ar.pull.time.length && !ar.pull.costs.length && !ar.pull.tripCosts.length">Nothing unbilled{{ ar.pull.from || ar.pull.to ? ' in those dates' : '' }}.
+              Time counts when it's marked billable and has this project; a cost counts when its bill line names the project and “bill to client” is ticked.</p>
+            <template v-if="ar.pull.time.length">
+              <label>Rate for the hours <select v-model="ar.pull.serviceItemId" class="auto"><option value="">(type the rate on each line)</option>
+                <option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></select></label>
+              <table class="data">
+                <thead><tr><th></th><th>Date</th><th>Who</th><th>Project</th><th>Task / notes</th><th class="num">Hours</th><th>Status</th></tr></thead>
+                <tr v-for="x in ar.pull.time"><td><input type="checkbox" v-model="ar.pull.pick[pullKey('t', x)]" class="auto-w"></td><td>{{ usDate(x.date) }}</td><td>{{ x.userName }}</td>
+                  <td>{{ x.jobCode || x.jobName }}</td><td><template v-if="x.tripName">Travel, {{ x.tripName }} <span class="muted small">{{ x.share }}% of {{ x.fullHours }} h</span><template v-if="x.notes"> · </template></template>{{ x.notes }}</td>
+                  <td class="num">{{ x.hours }}</td><td class="small" :class="{ muted: x.status === 'approved' }">{{ x.status }}</td></tr>
+              </table>
+            </template>
+            <template v-if="ar.pull.costs.length">
+              <label>Item for the costs <select v-model="ar.pull.expenseItemId" class="auto"><option value="">(use the account below)</option>
+                <option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></select></label>
+              <table class="data">
+                <thead><tr><th></th><th>Date</th><th>Vendor</th><th>Project</th><th>Description</th><th class="num">Amount</th></tr></thead>
+                <tr v-for="x in ar.pull.costs"><td><input type="checkbox" v-model="ar.pull.pick['c' + x.id]" class="auto-w"></td><td>{{ usDate(x.date) }}</td><td>{{ x.vendorName }} · bill {{ x.billNumber }}</td>
+                  <td>{{ x.jobCode || x.jobName }}</td><td>{{ x.description }}</td><td class="num">{{ money(x.amountCents) }}</td></tr>
+              </table>
+            </template>
+            <template v-if="ar.pull.tripCosts.length">
+              <label v-if="!ar.pull.costs.length">Item for the costs <select v-model="ar.pull.expenseItemId" class="auto"><option value="">(use the account below)</option>
+                <option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></select></label>
+              <table class="data">
+                <thead><tr><th></th><th>Date</th><th>Trip</th><th>Project</th><th>Cost</th><th class="num">Share</th><th class="num">Billed</th></tr></thead>
+                <tr v-for="x in ar.pull.tripCosts"><td><input type="checkbox" v-model="ar.pull.pick[pullKey('p', x)]" class="auto-w"></td><td>{{ usDate(x.date) }}</td><td>{{ x.tripName }}</td>
+                  <td>{{ x.jobCode || x.jobName }}</td><td>{{ x.description }} <span class="muted small">{{ money(x.amountCents) }}</span></td><td class="num">{{ x.share }}%</td><td class="num">{{ money(x.shareCents) }}</td></tr>
+              </table>
+              <p class="muted small">Each line bills the full cost × the project's share (quantity 0.8 for 80%). Type a different quantity on the line to override it.</p>
+            </template>
+            <label v-if="(ar.pull.time.length && !ar.pull.serviceItemId) || ((ar.pull.costs.length || ar.pull.tripCosts.length) && !ar.pull.expenseItemId)">Income account for lines without a saved rate
+              <select v-model="ar.pull.accountId" class="auto"><option value="">Choose…</option><option v-for="a in incomeAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+            <div><button type="button" class="primary" v-if="ar.pull.time.length || ar.pull.costs.length || ar.pull.tripCosts.length" :disabled="!pullCount()" @click="addPulled">Add {{ pullCount() }} line{{ pullCount() === 1 ? '' : 's' }} to the invoice</button>
+              <button type="button" @click="ar.pull = null">Close</button></div>
+          </div>
+          <label v-if="S.kind === 'invoice'">Project block (optional: name and site address, printed on the invoice)
             <textarea v-model="ar.doc.project" rows="3" maxlength="300" placeholder="Project name&#10;Street&#10;City, State ZIP"></textarea></label>
           <template v-if="S.kind === 'invoice'">
           <label class="split-jobs">Jobs sharing these expenses
@@ -604,7 +789,8 @@
                   <optgroup label="By the hour"><option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
                   <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
                 <td class="w150"><input type="date" v-model="l.serviceDate"></td>
-                <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit"></td>
+                <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit">
+                  <span v-if="l.from" class="tag" :title="'Billed once: this line is linked to its ' + (l.timeEntryId ? 'time entry' : 'cost')">from {{ l.from }}</span></td>
                 <td class="w90"><input v-model="l.quantity" @input="l.qtyTyped = true" inputmode="decimal" class="num" title="Hours, a quantity, or a share like 1/3"></td>
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td><input type="checkbox" v-model="l.taxable" class="auto-w" title="Taxable"></td>
@@ -617,7 +803,8 @@
           <p class="muted small" v-if="!items.length">Tip: save your rates (Eng Std Rate, Drafting, Equipment rental…) in Settings → Invoice rates and items, then pick them here.</p>
           </template>
           <table class="data lines" v-else>
-            <thead><tr><th>{{ S.lineHint }}</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th v-if="S.kind === 'invoice'">Taxable</th><th class="num">Amount</th><th></th></tr></thead>
+            <thead><tr><th>{{ S.lineHint }}</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th v-if="S.kind === 'invoice'">Taxable</th><th class="num">Amount</th>
+              <th v-if="S.kind === 'bill'">Project</th><th v-if="S.kind === 'bill'" title="Pass this cost on to the project's client">Bill to client</th><th></th></tr></thead>
             <tbody>
               <tr v-for="(l, i) in ar.doc.lines">
                 <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
@@ -626,6 +813,9 @@
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td v-if="S.kind === 'invoice'"><input type="checkbox" v-model="l.taxable" class="auto-w"></td>
                 <td class="num">{{ money(lineCents(l.quantity, l.unitPrice)) }}</td>
+                <td v-if="S.kind === 'bill'"><select v-model="l.jobId" @change="l.billable = !!l.jobId"><option value="">None</option>
+                  <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === l.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></td>
+                <td v-if="S.kind === 'bill'"><input type="checkbox" v-model="l.billable" :disabled="!l.jobId" class="auto-w" title="Bill to client"></td>
                 <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
               </tr>
             </tbody>
@@ -746,7 +936,8 @@
         <table class="data">
           <thead><tr><th>Description</th><th v-if="S.kind === 'bill'">Account</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr></thead>
           <tbody>
-            <tr v-for="l in ar.detail.lines"><td>{{ l.description || l.accountName }}<span v-if="l.taxable" class="muted small"> (taxable)</span></td>
+            <tr v-for="l in ar.detail.lines"><td>{{ l.description || l.accountName }}<span v-if="l.taxable" class="muted small"> (taxable)</span>
+              <span v-if="l.jobName" class="muted small"> · {{ l.jobName }}{{ l.billable ? (l.billedOn ? ', billed on invoice ' + l.billedOn : ', to bill the client') : '' }}</span></td>
               <td v-if="S.kind === 'bill'">{{ l.accountCode }} · {{ l.accountName }}</td>
               <td class="num">{{ l.quantity }}</td><td class="num">{{ money(l.unitPriceCents) }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
             <tr v-if="ar.detail.taxCents"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Subtotal</td><td class="num">{{ money(ar.detail.subtotalCents) }}</td></tr>
@@ -766,6 +957,52 @@
         <button :class="{ active: ar.panel === 'contacts' }" @click="arPanel('contacts')">{{ S.Whos }}</button>
         <button :class="{ active: ar.panel === 'payments' }" @click="arPanel('payments')">Payments</button>
         <button :class="{ active: ar.panel === 'aging' }" @click="arPanel('aging')">Aging report</button>
+        <button :class="{ active: ar.panel === 'projects' }" @click="arPanel('projects')">Projects</button>
+      </div>
+
+      <div class="card" v-if="ar.panel === 'projects'">
+        <div class="row"><h2>Projects</h2>
+          <button v-if="can('invoices') || can('admin')" @click="ar.proj.show && !ar.proj.editId ? (ar.proj.show = false) : editProject(null)">+ New project</button></div>
+        <p class="muted small">The same list your timesheets use for jobs. Name each project on its invoice, and on a bill line for a cost you pass on to the client.</p>
+        <form v-if="ar.proj.show" @submit.prevent="saveProject" class="grid4">
+          <label>Number <input v-model.trim="ar.proj.form.code" maxlength="30" placeholder="2601"></label>
+          <label>Name <input v-model.trim="ar.proj.form.name" maxlength="80" required placeholder="2601 Smith Residence"></label>
+          <label v-if="S.kind === 'invoice'">Customer (optional) <select v-model="ar.proj.form.customerId"><option value="">None</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+          <label>Site address (optional) <textarea v-model="ar.proj.form.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
+          <div><button class="primary">{{ ar.proj.editId ? 'Save project' : 'Add project' }}</button> <button type="button" @click="ar.proj.show = false; ar.proj.editId = null">Cancel</button></div>
+        </form>
+        <p class="hint" v-if="!ar.jobs.length">No projects yet. Add one above, or paste your project folder names below.</p>
+        <table class="data" v-else>
+          <thead><tr><th>Number</th><th>Project</th><th>Customer</th><th>Site address</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="j in ar.jobs" :class="{ muted: !j.isActive }">
+              <td>{{ j.code }}</td><td>{{ j.name }}<span v-if="!j.isActive" class="muted small"> · closed</span></td><td>{{ j.customerName }}</td><td class="pre-line small">{{ j.address }}</td>
+              <td class="actions"><template v-if="can('invoices') || can('admin')">
+                <button class="link" @click="editProject(j)">edit</button>
+                <button class="link" @click="toggleProject(j)">{{ j.isActive ? 'close' : 'reopen' }}</button></template></td>
+            </tr>
+          </tbody>
+        </table>
+        <details v-if="can('invoices') || can('admin')" class="paste-projects">
+          <summary>Add projects from your folder names</summary>
+          <ol class="small">
+            <li>In File Explorer, open the folder that holds your project folders.</li>
+            <li>Select the project folders (Ctrl+A for all of them).</li>
+            <li>Hold Shift, right-click one of them, and choose <strong>Copy as path</strong>.</li>
+            <li>Paste here. The number at the start of each folder name becomes the project number.</li>
+          </ol>
+          <textarea v-model="ar.proj.paste" rows="6" @input="ar.proj.preview = null" placeholder='"C:\Projects\2601 Smith Residence"&#10;"C:\Projects\2602 Jones Roof"'></textarea>
+          <div class="row wrap">
+            <label v-if="S.kind === 'invoice'">Customer for all of them (optional) <select v-model="ar.proj.pasteCustomer" class="auto"><option value="">None</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+            <button type="button" :disabled="!ar.proj.paste.trim()" @click="pasteProjects(true)">Check the list</button>
+            <button type="button" class="primary" v-if="ar.proj.preview" :disabled="!ar.proj.preview.projects.some(p => p.isNew)" @click="pasteProjects(false)">
+              Add {{ ar.proj.preview.projects.filter(p => p.isNew).length }} new project{{ ar.proj.preview.projects.filter(p => p.isNew).length === 1 ? '' : 's' }}</button>
+          </div>
+          <table class="data" v-if="ar.proj.preview">
+            <thead><tr><th>Number</th><th>Project</th><th></th></tr></thead>
+            <tr v-for="p in ar.proj.preview.projects"><td>{{ p.code }}</td><td>{{ p.name }}</td><td :class="p.isNew ? 'ok' : 'muted'">{{ p.isNew ? 'new' : 'already on the list' }}</td></tr>
+          </table>
+        </details>
       </div>
 
       <div class="card" v-if="ar.panel === 'docs'">
@@ -874,6 +1111,272 @@
             : `${S.control} in the books is ${money(ar.aging.glBalanceCents)}; off by ${money(ar.aging.differenceCents)}. Please tell support.` }}</p>
         </template>
       </div>
+    </section>
+
+    <!-- TRIPS: what a trip cost and the projects it served, each with its share. Laid out for a phone too. -->
+    <section v-if="tab === 'trips'" class="trips">
+      <div class="row wrap"><h1>Trips</h1>
+        <button class="primary" v-if="can('bills') && !trip.form" @click="newTrip">+ New trip</button>
+        <button v-if="trip.cur || trip.form" @click="closeTripView">← All trips</button></div>
+      <p class="muted">Keep what a trip cost (airfare, rental car, lodging, tolls, mileage) and the travel time, and which projects it was for.
+        Each project's invoice bills its share: Sales → New invoice → ⏱ Pull in unbilled time and costs.</p>
+
+      <div class="card" v-if="trip.form">
+        <h2>{{ trip.editing ? 'Edit trip' : 'New trip' }}</h2>
+        <form @submit.prevent="saveTrip">
+          <label>Name <input v-model="trip.form.name" maxlength="120" required placeholder="Dallas, Oct 4-6"></label>
+          <div class="grid2">
+            <label>First day <input type="date" v-model="trip.form.startDate" required></label>
+            <label>Last day (optional) <input type="date" v-model="trip.form.endDate"></label>
+          </div>
+          <h3>Projects and their share of the trip</h3>
+          <div class="share-row" v-for="(j, i) in trip.form.jobs">
+            <select v-model="j.jobId" aria-label="Project"><option value="">Choose a project…</option>
+              <option v-for="p in ar.jobs.filter(p => p.isActive || p.id === j.jobId)" :value="p.id">{{ jobLabel(p) }}</option></select>
+            <input v-model="j.share" inputmode="decimal" class="num" placeholder="%" aria-label="Share in percent"><span>%</span>
+            <button type="button" class="link" @click="trip.form.jobs.splice(i, 1)" v-if="trip.form.jobs.length > 1">remove</button>
+          </div>
+          <div class="row wrap">
+            <button type="button" class="small" @click="trip.form.jobs.push({ jobId: '', share: '' })">+ Add project</button>
+            <button type="button" class="small" @click="evenShares" title="100% split evenly across the projects listed">Split evenly</button>
+            <span :class="tripShareTotal() > 100 ? 'bad' : 'muted'">Total {{ Number(tripShareTotal().toFixed(2)) }}%<template v-if="tripShareTotal() < 100 && tripShareTotal() > 0">
+              · {{ Number((100 - tripShareTotal()).toFixed(2)) }}% is not billed to anyone</template></span>
+          </div>
+          <p class="muted small">A project not on the list? Add it in Sales → Projects. You can change the shares later; what's already billed stays as billed.</p>
+          <label>Notes (optional) <textarea v-model="trip.form.notes" rows="2" maxlength="500"></textarea></label>
+          <button class="primary">{{ trip.editing ? 'Save trip' : 'Add trip' }}</button>
+          <button type="button" @click="trip.form = null; trip.editing = false">Cancel</button>
+        </form>
+      </div>
+
+      <template v-if="!trip.cur && !trip.form">
+        <!-- FROM THE ROAD: what the phone sent, waiting to be accepted into the books -->
+        <div class="card road-inbox" v-if="road.items.length">
+          <h2>From the road ({{ road.items.length }})</h2>
+          <p class="hint">Sent from your phone's Road page. Nothing is in the books until you accept it. Accept a new trip first, then its costs.</p>
+          <div class="grid2" v-if="road.items.some(i => i.kind === 'cost') && can('bills')">
+            <label>Costs go to (expense)
+              <select v-model="road.expenseId"><option value="">Choose…</option><option v-for="a in tripExpenseAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+            <label>Paid with
+              <select v-model="road.paidFromId"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+          </div>
+          <template v-for="g in roadGroups()">
+            <h3>{{ g.name }}</h3>
+            <div class="road-item" v-for="i in g.items">
+              <div class="row wrap">
+                <span><span class="muted small">{{ usDate(i.kind === 'trip' ? i.data.startDate : i.data.date) }}</span> {{ roadLabel(i) }}</span>
+                <strong class="num" v-if="i.kind === 'cost'">{{ money(i.data.amountCents) }}</strong>
+              </div>
+              <div class="photo-strip" v-if="i.photos.length">
+                <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
+              </div>
+              <label v-if="roadNeedsTrip(i)" class="small">Trip for this
+                <select v-model="road.tripFor[i.id]"><option value="">Choose a trip…</option><option v-for="t in trip.list" :value="t.id">{{ t.name }}</option></select></label>
+              <div class="row wrap" v-if="can('bills')">
+                <span class="muted small">from {{ i.keyName }}</span>
+                <span><button class="primary small" :disabled="road.busy" @click="acceptRoad(i)">Accept</button>
+                  <button class="small" @click="dismissRoad(i)">Dismiss</button></span>
+              </div>
+            </div>
+          </template>
+        </div>
+        <p class="hint" v-if="!trip.list.length">No trips yet.</p>
+        <button v-for="t in trip.list" class="trip-card" :class="{ muted: !t.isActive }" @click="openTrip(t.id)">
+          <span class="row"><strong>{{ t.name }}</strong><span class="num">{{ money(t.totalCents) }}</span></span>
+          <span class="muted small">{{ usDate(t.startDate) }}{{ t.endDate && t.endDate !== t.startDate ? ' – ' + usDate(t.endDate) : '' }} · {{ t.costCount }} cost{{ t.costCount === 1 ? '' : 's' }}{{ t.isActive ? '' : ' · closed' }}</span>
+          <span class="small" v-if="t.projectsText">{{ t.projectsText }}</span>
+        </button>
+      </template>
+
+      <details class="card road-keys" v-if="!trip.cur && !trip.form && can('bills')" :open="Boolean(road.made)">
+        <summary><strong>Your phone on the road</strong> <span class="muted small">· jot down costs, receipts and travel time without signing in</span></summary>
+        <p class="hint">The Road page on your phone can only add trips, costs with receipt photos, travel time and new project numbers,
+          and only into the "From the road" box here. It can't see your books. It works with no signal and sends when it can.
+          Make a key, scan the code with the phone's camera, then on the iPhone choose Share → <strong>Add to Home Screen</strong>.</p>
+        <table class="data" v-if="road.keys.length">
+          <thead><tr><th>Phone</th><th>Made</th><th>Works until</th><th>Last used</th><th></th></tr></thead>
+          <tr v-for="k in road.keys" :class="{ muted: k.expired }"><td>{{ k.name }}</td><td>{{ usDate(k.createdOn) }}</td><td>{{ k.expired ? 'expired' : usDate(k.expiresOn) }}</td>
+            <td>{{ k.lastUsedOn ? usDate(k.lastUsedOn) : 'never' }}</td><td class="actions"><button class="link" @click="revokeRoadKey(k)">turn off</button></td></tr>
+        </table>
+        <form class="row wrap" @submit.prevent="makeRoadKey">
+          <label>Phone's name <input v-model.trim="road.keyName" maxlength="60" required></label>
+          <button class="primary">Make a road key</button>
+        </form>
+        <div class="road-qr" v-if="road.made">
+          <img :src="road.made.qr" alt="QR code: open it with the phone's camera">
+          <div>
+            <p><strong>Scan this with your phone's camera.</strong> It is shown only once; works until {{ usDate(road.made.expiresOn) }}.</p>
+            <p class="small muted break">{{ road.made.url }}</p>
+            <button type="button" @click="copyRoadLink">Copy link</button> <button type="button" @click="road.made = null">Done</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- MILEIQ: the monthly drive report → mileage on trips -->
+      <details class="card mileiq" v-if="!trip.cur && !trip.form && can('bills')" :open="Boolean(mileiq.preview)">
+        <summary><strong>Import from MileIQ</strong> <span class="muted small">· your monthly drive report becomes mileage on your trips</span></summary>
+        <p class="hint">In MileIQ's monthly email choose <strong>Download as CSV</strong> (the PDF can't be read), then pick that file here.
+          Business drives come in as mileage, one cost per trip per day, at the rate in the file. A drive already imported is never brought in twice.</p>
+        <label class="photo-btn">Choose the MileIQ CSV file… <input type="file" accept=".csv,text/csv" @change="pickMileIq"></label>
+        <template v-if="mileiq.preview">
+          <p><strong>{{ mileiq.file.name }}</strong>: {{ mileiq.preview.counts.drives }} drives, {{ mileiq.preview.counts.miles }} mi,
+            {{ usDate(mileiq.preview.from) }} – {{ usDate(mileiq.preview.to) }}.
+            <span v-if="mileiq.preview.counts.imported">{{ mileiq.preview.counts.imported }} already imported.</span>
+            <span v-if="mileiq.preview.counts.business < mileiq.preview.counts.drives">{{ mileiq.preview.counts.drives - mileiq.preview.counts.business }} not business (not imported).</span></p>
+          <p v-if="mileiq.preview.counts.toImport">Ready to import: {{ mileiq.preview.counts.toImport }} business drives, {{ mileiq.preview.counts.businessMiles }} mi,
+            <strong>{{ money(mileiq.preview.counts.mileIqValueCents) }}</strong>&#32;
+            <span v-if="mileiq.preview.counts.tollsCents || mileiq.preview.counts.parkingCents"> + tolls and parking {{ money(mileiq.preview.counts.tollsCents + mileiq.preview.counts.parkingCents) }}</span>
+            <span class="muted small">(MileIQ's own figure: each drive rounded to the cent, then added up, so it matches their report)</span></p>
+          <p v-else class="hint">Everything in this file is already imported.</p>
+          <template v-if="mileiq.preview.counts.toImport">
+            <div class="grid2">
+              <label>Mileage goes to (expense)
+                <select v-model="mileiq.expenseId"><option value="">Choose…</option><option v-for="a in tripExpenseAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+              <label>Paid with <span class="muted small">(your own car: an owner account)</span>
+                <select v-model="mileiq.paidFromId"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+              <label>Rate per mile <input v-model.trim="mileiq.rate" inputmode="decimal" class="num"></label>
+              <label>Name for the new local-driving trip <input v-model="mileiq.newTripName" maxlength="120"></label>
+            </div>
+            <div class="row wrap">
+              <button type="button" class="small" @click="mileIqAll(true)">Tick all</button>
+              <button type="button" class="small" @click="mileIqAll(false)">Untick all</button>
+              <label class="small">Put the ticked drives on
+                <select v-model="mileiq.bulkTrip"><option value="">Choose a trip…</option><option value="new">New: {{ mileiq.newTripName }}</option>
+                  <option v-for="t in trip.list.filter(t => t.isActive)" :value="t.id">{{ t.name }}</option></select></label>
+              <button type="button" class="small" @click="mileIqBulk" :disabled="!mileiq.bulkTrip">Apply</button>
+            </div>
+            <div class="table-scroll">
+              <table class="data mileiq-drives">
+                <thead><tr><th></th><th>Time</th><th>From → To</th><th class="num">Miles</th><th>Purpose</th><th>Trip</th></tr></thead>
+                <template v-for="day in mileIqDays()">
+                  <tr class="day-row"><td colspan="6"><strong>{{ usDate(day.date) }}</strong></td></tr>
+                  <tr v-for="d in day.drives" :class="{ muted: !d.business || d.imported }">
+                    <td><input type="checkbox" v-if="d.business && !d.imported" v-model="mileiq.pick[d.key]" :aria-label="'Import the drive at ' + d.startTime"></td>
+                    <td>{{ d.startTime }}</td>
+                    <td><span :title="d.from">{{ mileIqPlace(d.from) }}</span> → <span :title="d.to">{{ mileIqPlace(d.to) }}</span>
+                      <span v-if="d.tollsCents || d.parkingCents" class="small muted"> · tolls/parking {{ money(d.tollsCents + d.parkingCents) }}</span></td>
+                    <td class="num">{{ d.miles }}</td>
+                    <td>{{ d.business ? d.purpose : d.category + (d.purpose && d.purpose !== d.category ? ' · ' + d.purpose : '') }}</td>
+                    <td>
+                      <span v-if="d.imported" class="small">already imported</span>
+                      <span v-else-if="!d.business" class="small">not business</span>
+                      <select v-else v-model="mileiq.tripFor[d.key]" :disabled="!mileiq.pick[d.key]" aria-label="Trip">
+                        <option value="new">New: {{ mileiq.newTripName }}</option>
+                        <option v-for="t in trip.list.filter(t => t.isActive || t.id === mileiq.tripFor[d.key])" :value="t.id">{{ t.name }}</option></select>
+                    </td>
+                  </tr>
+                </template>
+              </table>
+            </div>
+            <div class="row wrap">
+              <button class="primary" :disabled="mileiq.busy || !mileIqTicked().length" @click="importMileIq">Import {{ mileIqTicked().length }} drives ({{ mileIqTickedMiles() }} mi)</button>
+              <button type="button" @click="mileiq.preview = null; mileiq.file = null">Cancel</button>
+            </div>
+            <p class="hint">A new local-driving trip has no projects yet. Open it afterwards and add the projects the driving was for, with their shares, so their invoices can bill it.</p>
+          </template>
+        </template>
+      </details>
+
+      <template v-if="trip.cur && !trip.form">
+        <div class="card">
+          <div class="row wrap"><h2>{{ trip.cur.name }}</h2>
+            <span class="muted">{{ usDate(trip.cur.startDate) }}{{ trip.cur.endDate && trip.cur.endDate !== trip.cur.startDate ? ' – ' + usDate(trip.cur.endDate) : '' }}</span>
+            <template v-if="can('bills')"><button class="link" @click="editTrip">edit</button>
+              <button class="link" @click="toggleTripOpen">{{ trip.cur.isActive ? 'close trip' : 'reopen' }}</button></template></div>
+          <p v-if="trip.cur.notes" class="pre-line small">{{ trip.cur.notes }}</p>
+          <table class="data">
+            <thead><tr><th>Project</th><th class="num">Share</th><th class="num">of {{ money(trip.cur.totalCents) }}</th></tr></thead>
+            <tr v-for="j in trip.cur.jobs"><td>{{ jobLabel({ name: j.jobName, code: j.jobCode }) }}<span v-if="j.customerName" class="muted small"> · {{ j.customerName }}</span></td>
+              <td class="num">{{ j.share }}%</td><td class="num">{{ money(Math.floor((trip.cur.totalCents * j.shareBp * 2 + 10000) / 20000)) }}</td></tr>
+            <tr v-if="!trip.cur.jobs.length"><td colspan="3" class="hint">No projects yet: press edit to add them and their shares.</td></tr>
+            <tr v-else-if="Number(trip.cur.sharePercent) < 100" class="muted"><td>Not billed</td><td class="num">{{ Number((100 - Number(trip.cur.sharePercent)).toFixed(2)) }}%</td><td></td></tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="row wrap"><h2>Costs</h2><button class="primary" v-if="can('bills') && !trip.cost" @click="newTripCost">+ Add cost</button></div>
+          <form v-if="trip.cost" @submit.prevent="saveTripCost" class="trip-cost-form">
+            <h3>{{ trip.editCostId ? 'Correct this cost' : 'New cost' }}</h3>
+            <p class="muted small" v-if="trip.editCostId">Saving voids the old one and records the corrected one; its receipt photos move with it.</p>
+            <div class="chips">
+              <button type="button" v-for="(label, k) in { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' }"
+                :class="{ active: (trip.cost.kind || 'other') === k }" @click="trip.cost.kind = k">{{ label }}</button>
+            </div>
+            <div class="grid2">
+              <label>Date <input type="date" v-model="trip.cost.date" required></label>
+              <label>{{ trip.cost.kind === 'mileage' ? 'Vehicle (optional)' : 'Paid to (optional)' }} <input v-model="trip.cost.vendor" maxlength="120" :placeholder="trip.cost.kind === 'mileage' ? 'my truck' : 'Southwest, Avis, NTTA…'"></label>
+              <label>What it was <input v-model="trip.cost.description" maxlength="300" :placeholder="{ airfare: 'Airfare SAT-DAL', rental_car: 'Rental car', lodging: 'Hotel, 2 nights', tolls: 'Tolls', mileage: 'SAT to site and back' }[trip.cost.kind] || 'Description'"></label>
+              <template v-if="trip.cost.kind === 'mileage'">
+                <label>Miles <input v-model="trip.cost.miles" inputmode="decimal" class="num" placeholder="212.4" required></label>
+                <label>Rate per mile ($) <input v-model="trip.cost.mileRate" inputmode="decimal" class="num" placeholder="e.g. 0.70" required>
+                  <span class="muted small">The IRS standard mileage rate for the year (irs.gov), or your own.</span></label>
+                <p class="num">= {{ money(mileageCents(trip.cost)) }}</p>
+              </template>
+              <label v-else>Amount ($) <input v-model="trip.cost.amount" inputmode="decimal" class="num" placeholder="0.00" required></label>
+              <label>Expense account <select v-model="trip.cost.expenseAccountId" required><option value="">Choose…</option>
+                <option v-for="a in tripExpenseAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+              <label>Paid with <select v-model="trip.cost.paidFromAccountId" required><option value="">Choose…</option>
+                <option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}{{ a.type === 'equity' ? ' (paid personally)' : '' }}</option></select></label>
+            </div>
+            <div class="photo-pick">
+              <strong>Receipt photos</strong> <span class="muted small">(optional)</span>
+              <p class="muted small" v-if="trip.cost.keptPhotos">{{ trip.cost.keptPhotos }} photo{{ trip.cost.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected cost.</p>
+              <div class="row wrap">
+                <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addTripCostPhotos"></label>
+                <label class="button">Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addTripCostPhotos"></label>
+                <span class="muted small" v-if="trip.cost.photoBusy">Preparing photo…</span>
+              </div>
+              <div class="row wrap" v-if="trip.cost.photos.length">
+                <span class="thumb" v-for="(ph, i) in trip.cost.photos"><img :src="ph" alt="Receipt to save with this cost"><button type="button" class="link" @click="trip.cost.photos.splice(i, 1)">remove</button></span>
+              </div>
+            </div>
+            <button class="primary">{{ trip.editCostId ? 'Save correction' : 'Save cost' }}</button>
+            <button type="button" @click="trip.cost = null; trip.editCostId = null">Cancel</button>
+          </form>
+          <p class="hint" v-if="!trip.cur.costs.length && !trip.cost">No costs yet.</p>
+          <div v-for="x in trip.cur.costs" class="cost-row" :class="{ muted: x.status === 'void' }">
+            <div class="row"><strong>{{ x.description }}</strong><span class="num">{{ money(x.amountCents) }}</span></div>
+            <div class="small muted">{{ usDate(x.date) }}{{ x.vendor ? ' · ' + x.vendor : '' }}{{ x.kind === 'mileage' ? ' · ' + x.miles + ' mi × ' + x.mileRateCents + '¢' : '' }}
+              · {{ x.expenseAccountName }} · paid with {{ x.paidFromName }}<template v-if="x.status === 'void'"> · {{ x.replacedById ? 'corrected' : 'void' }}</template></div>
+            <div class="small" v-if="x.billed.length">Billed: {{ billedText(x) }}</div>
+            <div class="actions" v-if="x.status === 'posted'">
+              <button class="link" @click="openTripPhotos(x)">{{ x.photoCount ? '📷 ' + x.photoCount + ' photo' + (x.photoCount === 1 ? '' : 's') : '📷 add photo' }}</button>
+              <template v-if="can('post') && !x.billed.length"><button class="link" @click="editTripCost(x)">edit</button> <button class="link" @click="voidTripCost(x)">void</button></template>
+            </div>
+          </div>
+          <div class="photo-view" v-if="trip.photoView">
+            <div class="row"><h3>Receipts: {{ trip.photoView.cost.description }}</h3><button class="link" @click="trip.photoView = null">close</button></div>
+            <p class="hint" v-if="!trip.photoView.photos.length">No photos yet.</p>
+            <div class="row wrap">
+              <span class="thumb" v-for="ph in trip.photoView.photos">
+                <a :href="tripPhotoUrl(trip.photoView.cost, ph)" target="_blank" rel="noopener"><img :src="tripPhotoUrl(trip.photoView.cost, ph)" alt="Receipt photo"></a>
+                <button class="link" v-if="can('bills')" @click="removeTripPhoto(ph)">remove</button></span>
+            </div>
+            <div class="row wrap" v-if="can('bills')">
+              <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="uploadTripPhotos"></label>
+              <label class="button">Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="uploadTripPhotos"></label>
+              <span class="muted small" v-if="trip.photoView.busy">Saving photo…</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row wrap"><h2>Travel time</h2><button v-if="can('bills') && !trip.travel" @click="newTravel">+ Add travel time</button></div>
+          <form v-if="trip.travel" @submit.prevent="saveTravel" class="grid2">
+            <label>Date <input type="date" v-model="trip.travel.date" required></label>
+            <label>Hours <input v-model="trip.travel.hours" inputmode="decimal" class="num" placeholder="6 or 5:30" required></label>
+            <label>Notes (optional) <input v-model="trip.travel.notes" maxlength="500" placeholder="Drive SAT to Dallas"></label>
+            <div><button class="primary">Save</button> <button type="button" @click="trip.travel = null">Cancel</button></div>
+          </form>
+          <p class="hint" v-if="!trip.cur.time.length && !trip.travel">No travel time. It's billed by the same shares, at the hourly rate you pick on the invoice.</p>
+          <div v-for="x in trip.cur.time" class="cost-row">
+            <div class="row"><strong>{{ x.notes || 'Travel' }}</strong><span class="num">{{ x.hours }} h</span></div>
+            <div class="small muted">{{ usDate(x.date) }} · {{ x.userName }}{{ x.billable ? '' : ' · not billable' }}</div>
+            <div class="small" v-if="x.billed.length">Billed: {{ billedText(x) }}</div>
+            <div class="actions" v-else-if="can('bills')"><button class="link" @click="removeTravel(x)">delete</button></div>
+          </div>
+        </div>
+      </template>
     </section>
 
     <section v-if="tab === 'bank'">
@@ -1329,8 +1832,9 @@
             <td>{{ e.jobName }}</td><td>{{ e.start ? e.start + '–' + e.end : '' }}</td><td class="num">{{ e.hours }}</td>
             <td>{{ e.notes }}<span v-if="!e.billable" class="muted small"> (not billable)</span></td>
             <td><span :class="'status-' + e.status">{{ e.paidRunId ? 'paid' : e.status === 'rejected' ? 'sent back' : e.status }}</span>
-              <div v-if="e.reviewNote" class="muted small">“{{ e.reviewNote }}” – {{ e.reviewedBy }}</div></td>
-            <td class="actions"><template v-if="e.status !== 'approved'"><button class="link" @click="editTime(e)">change</button> <button class="link" @click="deleteTime(e)">delete</button></template></td>
+              <div v-if="e.reviewNote" class="muted small">“{{ e.reviewNote }}” – {{ e.reviewedBy }}</div>
+              <div v-if="e.billedOn" class="muted small">billed on invoice {{ e.billedOn }}</div></td>
+            <td class="actions"><template v-if="e.status !== 'approved' && !e.billedOn"><button class="link" @click="editTime(e)">change</button> <button class="link" @click="deleteTime(e)">delete</button></template></td>
           </tr>
           <tr class="total"><td colspan="3">Week total</td><td class="num">{{ hrs(time.entries.reduce((t, e) => t + e.minutes, 0)) }}</td><td colspan="3"></td></tr>
         </table>
@@ -1387,6 +1891,7 @@
 
       <div class="card" v-if="canManageTime() || can('admin')">
         <div class="row"><h2>Jobs</h2><button @click="time.showJobs = !time.showJobs">{{ time.showJobs ? 'Close' : 'Manage jobs' }}</button></div>
+        <p class="muted small">Jobs are your projects. Sales → Projects has the same list, with site addresses and a way to add many at once from your folder names.</p>
         <template v-if="time.showJobs">
           <table class="data" v-if="time.jobs.length">
             <thead><tr><th>Code</th><th>Job</th><th>Customer</th><th></th></tr></thead>
@@ -1655,15 +2160,44 @@
 
     <!-- SETTINGS -->
     <section v-if="tab === 'settings'">
-      <div class="card" v-if="can('view_books')">
+      <div class="card" v-if="passkeys.supported">
+        <h2>Sign in with Face ID, Touch ID or Windows Hello</h2>
+        <p class="hint">A passkey lets this phone or computer sign you in with your face, fingerprint or device PIN: no password
+          or code to type where a camera could see it. Add one on each device you use. Your password and authenticator code
+          still work as the backup.</p>
+        <table class="data" v-if="passkeys.list.length">
+          <thead><tr><th>Passkey</th><th>Added</th><th>Last used</th><th></th></tr></thead>
+          <tr v-for="k in passkeys.list"><td>{{ k.name }}</td><td>{{ usDate(k.createdAt) }}</td><td>{{ k.lastUsedAt ? usDate(k.lastUsedAt) : 'never' }}</td>
+            <td class="actions"><button class="link" @click="removePasskey(k)">remove</button></td></tr>
+        </table>
+        <form @submit.prevent="addPasskey" class="grid4">
+          <label>Name for this device <input v-model.trim="passkeys.name" maxlength="60" required></label>
+          <label>6-digit code from your authenticator app <input v-model.trim="passkeys.code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required></label>
+          <label class="end"><button class="primary" :disabled="passkeys.busy">Add this device</button></label>
+        </form>
+      </div>
+      <div class="card backup-card" v-if="can('view_books')">
         <h2>Back up your books</h2>
-        <p class="hint">zAccountant is in alpha testing, so keep your own copy. Download both files every month (or after
-          a busy week) and keep them somewhere safe. They open in Excel, and they can be imported into a new company
-          (Accounts → Import: the chart of accounts first, then the transactions) to rebuild the books and every report.</p>
+        <p class="hint">zAccountant is in alpha testing, so keep your own copy: download it every month (or after a busy week)
+          and keep it somewhere safe.</p>
+        <template v-if="can('admin')">
+          <h3>The whole book file (.zacc)</h3>
+          <p class="hint">One file with everything: every transaction, invoice, bill, customer, vendor, employee (no Social Security
+            numbers), timesheet, trip, receipt picture and the audit trail, with a fingerprint of each part so a damaged copy shows.
+            It is an ordinary .zip: rename it to .zip to look inside. Keep a copy on your computer or a USB drive and one somewhere else.</p>
+          <p><button class="primary" @click="downloadCsv(`/companies/${companyId}/book-file`)">Download the book file</button></p>
+        </template>
+        <h3>Just the books, as two spreadsheets</h3>
         <p><button @click="downloadCsv(`/companies/${companyId}/backup/accounts`)">Download chart of accounts</button>
           <button @click="downloadCsv(`/companies/${companyId}/backup/journal`)">Download all transactions</button></p>
-        <p class="muted small">Not included: invoice and bill details, customers and vendors, employees and timesheets.
-          Keep your printed or saved invoices and pay stubs too.</p>
+        <p class="muted small">These two hold the accounts and every transaction (enough to rebuild every report), not the
+          invoice details, customers, employees or timesheets. The book file above has everything.</p>
+        <h3>Moving to QuickBooks, or sending to an accountant who uses it</h3>
+        <p><button @click="downloadCsv(`/companies/${companyId}/export/quickbooks-desktop`)">For QuickBooks Desktop (.iif)</button>
+          <button @click="downloadCsv(`/companies/${companyId}/export/quickbooks-online`)">For QuickBooks Online (.csv)</button></p>
+        <p class="muted small">Desktop: File → Utilities → Import → IIF Files (it adds the accounts too). Online: first import the chart of
+          accounts (Settings → Import data → Accounts, using "Download chart of accounts"), then Settings → Import data → Journal entries.
+          Every transaction comes across as a journal entry, so the balances match; invoices and bills arrive as their totals, not line by line.</p>
       </div>
       <div class="card" v-if="members.length">
         <h2>People with access</h2>

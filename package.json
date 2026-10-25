@@ -18,6 +18,8 @@
     "db:grant": "node src/db/grant.js",
     "job:nightly": "node src/jobs/booksCheck.js",
     "drill:restore": "node src/jobs/restoreDrill.js",
+    "backup:offsite": "node src/jobs/offsiteBackup.js",
+    "backup:decrypt": "node src/jobs/offsiteBackup.js decrypt",
     "test:load": "node src/jobs/loadTest.js"
   },
   "license": "UNLICENSED",
@@ -25,6 +27,7 @@
     "express": "^5.3.0",
     "html-to-image": "1.11.13",
     "pg": "^8.23.1",
+    "qrcode-generator": "2.0.4",
     "vue": "^3.5.44"
   }
 }

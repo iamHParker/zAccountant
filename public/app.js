@@ -40,6 +40,28 @@ function taxCents(taxable, pct) {
   return Number((BigInt(taxable) * ppm * 2n + 1000000n) / 2000000n);
 }
 
+// Passkeys (Face ID, Touch ID, Windows Hello): the browser works in raw bytes; the server takes base64url text.
+const toBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const toB64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const canPasskey = () => typeof window !== 'undefined' && Boolean(window.PublicKeyCredential && navigator.credentials);
+/** A friendly name for this device, to start the passkey's name with. */
+function deviceName() {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android phone';
+  if (/Windows/.test(ua)) return 'Windows PC';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  return 'computer';
+}
+/** What the browser says when a passkey step doesn't finish, in plain words. */
+function passkeyProblem(e) {
+  if (e?.name === 'NotAllowedError') return 'The passkey step was cancelled or timed out. Try again when ready.';
+  if (e?.name === 'InvalidStateError') return 'This device already has a passkey for your account.';
+  if (e?.name === 'SecurityError') return 'Passkeys work only on the real zAccountant address (https).';
+  return 'This browser could not use a passkey here.';
+}
+
 // Sales (invoices to customers) and Bills (from vendors) share one screen; these are the differences.
 const SIDES = {
   sales: { kind: 'invoice', perm: 'invoices', Doc: 'Invoice', docs: 'Invoices', who: 'customer', Who: 'Customer', Whos: 'Customers', contacts: 'customers', docPath: 'invoices',
@@ -52,8 +74,20 @@ const ENTITY_TYPES = [
   ['partnership', 'Partnership or multi-member LLC'], ['s_corp', 'S corporation (or LLC taxed as one)'], ['c_corp', 'C corporation'],
 ];
 const blankCompany = () => ({ name: '', homeState: 'TX', fiscalYearStartMonth: 1, entityType: '', booksStartDate: `${today().slice(0, 4)}-01-01` });
-const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
-const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', attention: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
+// A bill line can name its project and be billed to that client; an invoice line can come from a time entry or such a cost.
+const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false,
+  jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '' });
+const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
+const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', jobs: [{ jobId: '', share: '' }] });
+const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
+  expenseAccountId: '', paidFromAccountId: '', photos: [], photoBusy: false, key: newKey() });
+// The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
+const lastMileRate = () => { try { return localStorage.getItem('zacc.mileRate') ?? ''; } catch { return ''; } };
+const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } catch { /* private window: not kept */ } };
+// The accounts last used for costs that came in from the Road page.
+const lastRoadAccounts = () => { try { return JSON.parse(localStorage.getItem('zacc.roadAccounts') ?? '{}') ?? {}; } catch { return {}; } };
+const keepRoadAccounts = (v) => { try { localStorage.setItem('zacc.roadAccounts', JSON.stringify(v)); } catch { /* not kept */ } };
+const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', jobId: '', attention: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, groupName: '', people: [] });
 const blankPerson = () => ({ name: '', email: '', phone: '' });
@@ -111,13 +145,35 @@ async function api(method, url, body, headers = {}) {
 // Which tabs need which permission (any of). The server is the real gatekeeper; this just hides
 // screens someone can't use.
 const TAB_PERMS = {
-  home: ['view_books'], journal: ['view_books'], sales: ['view_books', 'invoices'], bills: ['view_books', 'bills'], bank: ['view_books'],
+  home: ['view_books'], journal: ['view_books'], sales: ['view_books', 'invoices'], bills: ['view_books', 'bills'], trips: ['view_books', 'bills'], bank: ['view_books'],
   reports: ['view_books', 'payroll'], accounts: ['view_books'], payroll: ['view_books', 'payroll'], time: ['time_own', 'time_approve', 'time_all'],
   setup: ['admin'],
 };
 
 // Tabs that need a feature of the company's plan (src/core/plans.js on the server).
 const TAB_FEATURE = { payroll: 'payroll', time: 'timesheets' };
+
+// Home page cards (Homer, 2026-10-25): shortcuts to the common jobs, next to "Record a transaction", that each person
+// adds, removes and moves (kept per person per company: /home-layout). `perms`: any one of them shows the card;
+// `feature`: the plan must include it. `go` runs on a press. The server keeps only the ids; an unknown id is skipped.
+const HOME_CARDS = [
+  { id: 'stats', icon: '📊', title: 'Statistics', hint: 'Income, expenses and cash, month by month', perms: ['view_books'] },
+  { id: 'invoice', icon: '🧾', title: 'New invoice', hint: 'Bill a customer', perms: ['invoices'], go: { tab: 'sales', then: 'newDoc' } },
+  { id: 'paid', icon: '💵', title: 'Customer paid', hint: 'Record a payment received', perms: ['invoices'], go: { tab: 'sales', then: 'startPay' } },
+  { id: 'bill', icon: '📄', title: 'Enter a bill', hint: 'Something you owe a vendor', perms: ['bills'], go: { tab: 'bills', then: 'newDoc' } },
+  { id: 'paybill', icon: '💸', title: 'Pay a bill', hint: 'Record a bill payment', perms: ['bills'], go: { tab: 'bills', then: 'startPay' } },
+  { id: 'bank', icon: '🏦', title: 'Banking', hint: 'Review imported bank transactions', perms: ['view_books'], go: { tab: 'bank' } },
+  { id: 'trip', icon: '✈️', title: 'New trip', hint: 'Costs and travel time for a trip', perms: ['bills'], go: { tab: 'trips', then: 'newTrip' } },
+  { id: 'mileiq', icon: '🚗', title: 'Import from MileIQ', hint: "Your monthly drive report", perms: ['bills'], go: { tab: 'trips', then: 'openMileIq' } },
+  { id: 'time', icon: '⏱️', title: 'Timesheet', hint: 'Enter or approve hours', perms: ['time_own', 'time_approve', 'time_all'], feature: 'timesheets', go: { tab: 'time' } },
+  { id: 'payroll', icon: '💼', title: 'Payroll', hint: 'Run paychecks', perms: ['payroll'], feature: 'payroll', go: { tab: 'payroll' } },
+  { id: 'pnl', icon: '📈', title: 'Profit & Loss', hint: 'This year so far', perms: ['view_books'], go: { tab: 'reports', report: 'income-statement' } },
+  { id: 'balance', icon: '⚖️', title: 'Balance Sheet', hint: 'What you own and owe today', perms: ['view_books'], go: { tab: 'reports', report: 'balance-sheet' } },
+  { id: 'journal', icon: '📒', title: 'Transactions', hint: 'Search everything recorded', perms: ['view_books'], go: { tab: 'journal' } },
+  { id: 'entry', icon: '✍️', title: 'Journal entry', hint: 'Debits and credits by hand', perms: ['post'], go: { tab: 'journal', then: 'openJE' } },
+  { id: 'backup', icon: '💾', title: 'Back up your books', hint: 'Download the .zacc book file', perms: ['admin'], go: { tab: 'settings', then: 'scrollToBackup' } },
+];
+const DEFAULT_HOME = { left: ['stats'], right: ['invoice', 'paid', 'bill', 'bank', 'trip', 'pnl'] };
 
 /** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
 function weekStartOf(iso) {
@@ -145,11 +201,12 @@ createApp({
     return {
       companies: [], companyId: null, company: null, tab: 'home', message: null,
       auth: { screen: 'loading', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
+      passkeys: { list: [], name: '', code: '', busy: false, supported: canPasskey() },
       members: [], newMember: { email: '', role: 'bookkeeper', departmentId: '' },
       roleLabels: { owner: 'Owner', accountant: 'Accountant', bookkeeper: 'Bookkeeper', viewer: 'Viewer (read only)' },
       months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       tabs: [
-        { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'sales', label: 'Sales' }, { id: 'bills', label: 'Bills' }, { id: 'bank', label: 'Banking' },
+        { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'sales', label: 'Sales' }, { id: 'bills', label: 'Bills' }, { id: 'trips', label: 'Trips' }, { id: 'bank', label: 'Banking' },
         { id: 'reports', label: 'Reports' }, { id: 'time', label: 'Time' },
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
@@ -166,6 +223,7 @@ createApp({
       setup: { step: 1, status: null, entityType: '', booksStartDate: '', books: 'fresh', fromImport: false,
         newAcct: { name: '', kind: 'bank' }, balances: {}, busy: false },
       entityTypes: ENTITY_TYPES,
+      home: { layout: null, editing: false, view: 'cards', stats: null, adding: '' },
       accounts: [], dash: null, entries: [], entriesTotal: 0, search: blankSearch(), recurring: [], showRecurring: false, booksCheck: null,
       quick: { kind: 'out', date: today(), memo: '', amount: '', bank: '', other: '', key: newKey() },
       showJE: false, je: { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] },
@@ -205,7 +263,12 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null,
-        showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null },
+        showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        jobs: [], proj: { form: blankProject(), editId: null, show: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
+      // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
+      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
+      road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
+      mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
@@ -268,10 +331,11 @@ createApp({
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if ((t === 'payroll' || t === 'settings') && this.has('payroll') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
-      if (t === 'settings') { this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
+      if (t === 'settings') { if (this.passkeys.supported) this.loadPasskeys(); this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'setup') this.loadSetup();
       if (t === 'bank') this.loadBank();
+      if (t === 'trips') this.loadTrips();
       if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
       if (t === 'accounts') this.loadImports();
       if (t === 'time') this.loadTime(true);
@@ -335,6 +399,56 @@ createApp({
       const a = this.auth;
       const body = a.useRecovery ? { recoveryCode: a.code } : { code: a.code };
       if (await this.run(() => api('POST', '/auth/mfa/verify', body))) await this.enterApp();
+    },
+    /** Sign in with Face ID / Touch ID / Windows Hello: the device signs the server's challenge; no password typed. */
+    async signInPasskey() {
+      const o = await this.run(() => api('POST', '/auth/passkey/options', {}));
+      if (!o) return;
+      let cred;
+      try {
+        cred = await navigator.credentials.get({ publicKey: { challenge: toBytes(o.challenge), rpId: o.rpId, userVerification: 'required', timeout: o.timeout } });
+      } catch (e) { this.flash(passkeyProblem(e), 'bad'); return; }
+      const r = cred.response;
+      const credential = { id: cred.id, rawId: toB64url(cred.rawId), type: cred.type, response: {
+        clientDataJSON: toB64url(r.clientDataJSON), authenticatorData: toB64url(r.authenticatorData), signature: toB64url(r.signature),
+        userHandle: r.userHandle ? toB64url(r.userHandle) : null } };
+      const res = await this.run(() => api('POST', '/auth/passkey/login', { credential }));
+      if (!res) return;
+      this.auth.user = res.user; this.version = res.version ?? '';
+      await this.enterApp();
+    },
+    async loadPasskeys() {
+      this.passkeys.list = (await this.run(() => api('GET', '/auth/passkeys'))) ?? [];
+      if (!this.passkeys.name) this.passkeys.name = `${this.auth.user?.name?.split(' ')[0] ?? 'My'}'s ${deviceName()}`.slice(0, 60);
+    },
+    async addPasskey() {
+      const p = this.passkeys;
+      p.busy = true;
+      try {
+        const o = await this.run(() => api('POST', '/auth/passkeys/options', { mfaCode: p.code }));
+        if (!o) return;
+        p.code = '';
+        let cred;
+        try {
+          cred = await navigator.credentials.create({ publicKey: {
+            challenge: toBytes(o.challenge), rp: o.rp, user: { id: toBytes(o.user.id), name: o.user.name, displayName: o.user.displayName },
+            pubKeyCredParams: o.algorithms.map((alg) => ({ type: 'public-key', alg })), timeout: o.timeout, attestation: 'none',
+            authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
+            excludeCredentials: o.excludeCredentials.map((k) => ({ type: 'public-key', id: toBytes(k.id), transports: k.transports })),
+          } });
+        } catch (e) { this.flash(passkeyProblem(e), 'bad'); return; }
+        const r = cred.response;
+        const credential = { id: cred.id, rawId: toB64url(cred.rawId), type: cred.type, response: {
+          clientDataJSON: toB64url(r.clientDataJSON), attestationObject: toB64url(r.attestationObject),
+          transports: typeof r.getTransports === 'function' ? r.getTransports() : [] } };
+        if (await this.run(() => api('POST', '/auth/passkeys', { credential, name: p.name }), 'Passkey added. Next time, choose "Sign in with Face ID or a passkey".')) {
+          p.name = ''; await this.loadPasskeys();
+        }
+      } finally { p.busy = false; }
+    },
+    async removePasskey(k) {
+      if (!confirm(`Remove the passkey "${k.name}"? That device will need your password and code again.`)) return;
+      if (await this.run(() => api('DELETE', `/auth/passkeys/${k.id}`), 'Passkey removed.')) await this.loadPasskeys();
     },
     async signOut() {
       await api('POST', '/auth/logout', {}).catch(() => {});
@@ -529,7 +643,80 @@ createApp({
     async loadDash() {
       if (!this.companyId) return;
       this.dash = await this.run(() => api('GET', `/companies/${this.companyId}/reports/dashboard?asOf=${today()}`));
+      const saved = await api('GET', `/companies/${this.companyId}/home-layout`).catch(() => null);
+      this.home.layout = saved?.layout ?? structuredClone(DEFAULT_HOME);
+      this.home.view = 'cards';
+      if (this.homeCards('left').concat(this.homeCards('right')).some((c) => c.id === 'stats')) this.loadStats();
       if (this.can('admin')) this.setup.status = await api('GET', `/companies/${this.companyId}/setup`).catch(() => null);
+    },
+    // ---------------------------------------------------------------- Home cards and Statistics
+    homeCardOk(c) { return c && c.perms.some((p) => this.can(p)) && (!c.feature || this.has(c.feature)); },
+    /** The cards in one column (left: under Record a transaction; right: beside it) this person can use. */
+    homeCards(side) { return (this.home.layout?.[side] ?? []).map((id) => HOME_CARDS.find((c) => c.id === id)).filter((c) => this.homeCardOk(c)); },
+    homeUnused() {
+      const used = new Set([...(this.home.layout?.left ?? []), ...(this.home.layout?.right ?? [])]);
+      return HOME_CARDS.filter((c) => !used.has(c.id) && this.homeCardOk(c));
+    },
+    async saveHome() {
+      await this.run(() => api('PUT', `/companies/${this.companyId}/home-layout`, this.home.layout));
+    },
+    /** Move a card: dir -1 up/left in its list, +1 down/right; 'other' to the other column. */
+    moveHomeCard(side, id, dir) {
+      const L = this.home.layout;
+      const list = L[side];
+      const i = list.indexOf(id);
+      if (i < 0) return;
+      if (dir === 'other') { list.splice(i, 1); L[side === 'left' ? 'right' : 'left'].push(id); }
+      else {
+        const j = i + dir;
+        if (j < 0 || j >= list.length) return;
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      this.saveHome();
+    },
+    removeHomeCard(side, id) { this.home.layout[side] = this.home.layout[side].filter((x) => x !== id); this.saveHome(); },
+    addHomeCard() {
+      const id = this.home.adding;
+      if (!id) return;
+      this.home.layout.right.push(id); this.home.adding = '';
+      if (id === 'stats') this.loadStats();
+      this.saveHome();
+    },
+    resetHome() { this.home.layout = structuredClone(DEFAULT_HOME); this.loadStats(); this.saveHome(); },
+    // Drag and drop on a desk computer (the arrows do the same on a phone).
+    homeDragStart(ev, side, id) { ev.dataTransfer.setData('text/plain', JSON.stringify({ side, id })); ev.dataTransfer.effectAllowed = 'move'; },
+    homeDrop(ev, side, beforeId = null) {
+      let from;
+      try { from = JSON.parse(ev.dataTransfer.getData('text/plain')); } catch { return; }
+      const L = this.home.layout;
+      if (!from?.id || !L[from.side]?.includes(from.id) || from.id === beforeId) return;
+      L[from.side] = L[from.side].filter((x) => x !== from.id);
+      const at = beforeId ? L[side].indexOf(beforeId) : -1;
+      if (at < 0) L[side].push(from.id); else L[side].splice(at, 0, from.id);
+      this.saveHome();
+    },
+    async pressHomeCard(c) {
+      if (this.home.editing) return;
+      if (c.id === 'stats') { this.home.view = 'stats'; if (!this.home.stats) await this.loadStats(); return; }
+      const g = c.go;
+      if (g.report) { this.report.type = g.report; this.report.data = null; }
+      this.tab = g.tab;
+      await this.$nextTick();
+      if (g.then) await this[g.then]();
+    },
+    openJE() { this.showJE = true; },
+    openMileIq() { this.$nextTick(() => { const d = document.querySelector('details.mileiq'); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth' }); } }); },
+    scrollToBackup() { this.$nextTick(() => document.querySelector('.backup-card')?.scrollIntoView({ behavior: 'smooth' })); },
+    async loadStats() { this.home.stats = await this.run(() => api('GET', `/companies/${this.companyId}/reports/statistics?asOf=${today()}`)); },
+    /** "2026-10" → "Oct" (or "Oct 2026" with year). */
+    monthLabel(ym, year = false) {
+      const d = new Date(`${ym}-15T12:00:00`);
+      return d.toLocaleString('en-US', year ? { month: 'short', year: 'numeric' } : { month: 'short' });
+    },
+    /** Bar height in percent of the tallest value in the list (0 stays 0; anything above 0 shows at least a sliver). */
+    barPct(v, list) {
+      const max = Math.max(1, ...list.map((x) => Math.abs(x)));
+      return v ? Math.max(2, Math.round((Math.abs(v) / max) * 100)) : 0;
     },
     // ---------------------------------------------------------------- New-company setup wizard
     async loadSetup() {
@@ -965,11 +1152,354 @@ createApp({
     async loadAr() {
       const ar = this.ar; const S = this.S; const base = this.arBase();
       ar.contacts = (await this.run(() => api('GET', `${base}/${S.contacts}`))) ?? [];
+      ar.jobs = (await this.run(() => api('GET', `${base}/jobs?inactive=1`))) ?? [];
       if (ar.panel === 'docs') ar.docs = (await this.run(() => api('GET', `${base}/${S.docPath}?status=${ar.view}`))) ?? [];
       if (ar.panel === 'payments') ar.payments = (await this.run(() => api('GET', `${base}/${S.payPath}`))) ?? [];
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
     },
     arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.ar.photoView = null; this.loadAr(); },
+    // ---------------------------------------------------------------- Projects (the jobs time is entered against)
+    activeJobs() { return this.ar.jobs.filter((j) => j.isActive); },
+    jobLabel(j) { return j.code && !j.name.startsWith(j.code) ? `${j.code} · ${j.name}` : j.name; },
+    editProject(j) {
+      this.ar.proj.editId = j?.id ?? null; this.ar.proj.show = true;
+      this.ar.proj.form = j ? { name: j.name, code: j.code ?? '', customerId: j.customerId ?? '', address: j.address ?? '' } : blankProject();
+    },
+    async saveProject() {
+      const p = this.ar.proj; const f = { ...p.form, customerId: p.form.customerId || null };
+      const r = p.editId
+        ? await this.run(() => api('PATCH', `${this.arBase()}/jobs/${p.editId}`, { ...f, isActive: this.ar.jobs.find((j) => j.id === p.editId)?.isActive !== false }), 'Project saved.')
+        : await this.run(() => api('POST', `${this.arBase()}/jobs`, f), 'Project added.');
+      if (r) { p.editId = null; p.show = false; p.form = blankProject(); this.loadAr(); }
+    },
+    async toggleProject(j) {
+      if (await this.run(() => api('PATCH', `${this.arBase()}/jobs/${j.id}`, { name: j.name, code: j.code, customerId: j.customerId, isActive: !j.isActive }),
+        j.isActive ? 'Project closed.' : 'Project reopened.')) this.loadAr();
+    },
+    // Folder names pasted from File Explorer ("Copy as path") become projects: 2601 Smith Residence → number 2601.
+    async pasteProjects(preview) {
+      const p = this.ar.proj;
+      const r = await this.run(() => api('POST', `${this.arBase()}/jobs/import`, { text: p.paste, customerId: p.pasteCustomer || null, preview }));
+      if (!r) return;
+      if (preview) { p.preview = r; return; }
+      this.flash(r.added ? `Added ${r.added} project${r.added === 1 ? '' : 's'}.` : 'All of those projects were already on the list.');
+      p.paste = ''; p.preview = null; this.loadAr();
+    },
+    // The invoice's project: fills in the customer, the printed project block, and its number as the invoice number.
+    pickDocProject() {
+      const d = this.ar.doc; const j = this.ar.jobs.find((x) => x.id === d.jobId);
+      if (!j) return;
+      if (!d.contactId && j.customerId) d.contactId = j.customerId;
+      if (!d.project.trim()) d.project = [j.name, j.address].filter(Boolean).join('\n');
+      if (!d.number && !d.editId && j.code) d.number = j.code;
+    },
+    // ---------------------------------------------------------------- Trips
+    tripBase() { return `/companies/${this.companyId}`; },
+    async loadTrips() {
+      const tr = this.trip;
+      tr.list = (await this.run(() => api('GET', `${this.tripBase()}/trips`))) ?? [];
+      if (!this.ar.jobs.length) this.ar.jobs = (await this.run(() => api('GET', `${this.tripBase()}/jobs?inactive=1`))) ?? [];
+      if (tr.cur) await this.openTrip(tr.cur.id);
+      await this.loadRoad();
+    },
+    // ---- The Road page: keys for the phone, and the inbox of what it sent (src/services/roadService.js)
+    async loadRoad() {
+      const r = this.road;
+      r.items = (await this.run(() => api('GET', `${this.tripBase()}/road-items`))) ?? [];
+      if (this.can('bills')) r.keys = (await this.run(() => api('GET', `${this.tripBase()}/road-keys`))) ?? [];
+      const last = lastRoadAccounts();
+      if (!r.expenseId) r.expenseId = last.expenseId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
+      if (!r.paidFromId) r.paidFromId = last.paidFromId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? '';
+      if (!r.keyName) r.keyName = `${this.auth.user?.name?.split(' ')[0] ?? 'My'}'s phone`;
+    },
+    async makeRoadKey() {
+      const r = this.road;
+      const k = await this.run(() => api('POST', `${this.tripBase()}/road-keys`, { name: r.keyName }));
+      if (k) { r.made = { ...k, qr: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(k.qrSvg)}` }; r.keys = (await this.run(() => api('GET', `${this.tripBase()}/road-keys`))) ?? []; }
+    },
+    async copyRoadLink() {
+      try { await navigator.clipboard.writeText(this.road.made.url); this.flash('Link copied. Send it to your phone (Messages to yourself works) and open it there.'); }
+      catch { this.flash('The browser would not copy. Select the link and copy it yourself.', 'bad'); }
+    },
+    async revokeRoadKey(k) {
+      if (!confirm(`Turn off the road key "${k.name}"? That phone will no longer be able to send anything.`)) return;
+      if (await this.run(() => api('POST', `${this.tripBase()}/road-keys/${k.id}/revoke`), 'Road key turned off.')) this.loadRoad();
+    },
+    roadGroups() {
+      const groups = new Map();
+      for (const i of this.road.items) {
+        const name = i.trip?.name ?? 'Trip';
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(i);
+      }
+      return [...groups].map(([name, items]) => ({ name, items }));
+    },
+    roadLabel(i) {
+      if (i.kind === 'trip') {
+        const codes = [...(i.data.jobIds ?? []).map((id) => this.jobLabel(this.ar.jobs.find((j) => j.id === id) ?? { name: 'a project' })),
+          ...(i.data.newProjects ?? []).map((p) => `${p.name} (new)`)];
+        return `New trip${i.data.endDate ? ' to ' + this.usDate(i.data.endDate) : ''}${codes.length ? ' · ' + codes.join(', ') : ''}`;
+      }
+      if (i.kind === 'time') return `Travel time ${i.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
+      const what = i.data.kind === 'mileage' ? `${i.data.description} · ${i.data.miles} mi × $${i.data.mileRate}` : i.data.description;
+      return `${what}${i.data.vendor ? ' · ' + i.data.vendor : ''}`;
+    },
+    /** A cost or travel time whose trip isn't in the books yet (or was dismissed) needs a trip chosen here. */
+    roadNeedsTrip(i) { return i.kind !== 'trip' && !i.trip?.tripId && i.trip?.tripStatus !== 'pending'; },
+    roadPhotoUrl(i, id) { return `/api${this.tripBase()}/road-items/${i.id}/photos/${id}`; },
+    async acceptRoad(i) {
+      const r = this.road;
+      const body = {};
+      if (i.kind === 'cost') {
+        if (!r.expenseId || !r.paidFromId) { this.flash('Choose the expense account and what it was paid with (top of this box) first.', 'bad'); return; }
+        Object.assign(body, { expenseAccountId: r.expenseId, paidFromAccountId: r.paidFromId });
+        keepRoadAccounts({ expenseId: r.expenseId, paidFromId: r.paidFromId });
+      }
+      if (i.kind !== 'trip' && r.tripFor[i.id]) body.tripId = r.tripFor[i.id];
+      r.busy = true;
+      try {
+        const ok = await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/accept`, body),
+          i.kind === 'trip' ? 'Trip added, with its projects sharing it evenly. Open it to change the shares.' : 'Added to the trip.');
+        if (ok) await this.loadTrips();
+      } finally { r.busy = false; }
+    },
+    async dismissRoad(i) {
+      if (!confirm('Dismiss this? It will not go into the books.')) return;
+      if (await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/dismiss`), 'Dismissed.')) this.loadRoad();
+    },
+    // ---- MileIQ import: the monthly drive report → mileage on trips (src/services/mileIqService.js)
+    async pickMileIq(ev) {
+      const m = this.mileiq;
+      const f = ev.target.files[0];
+      ev.target.value = '';
+      if (!f) return;
+      const content = await f.text();
+      const p = await this.run(() => api('POST', `${this.tripBase()}/mileiq/preview`, { content }));
+      if (!p) return;
+      m.file = { name: f.name, content };
+      m.preview = p;
+      m.pick = {}; m.tripFor = {};
+      for (const d of p.drives) if (d.business && !d.imported) { m.pick[d.key] = true; m.tripFor[d.key] = d.tripId ?? 'new'; }
+      const month = new Date(`${p.from}T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      m.newTripName = `Local driving, ${month}`;
+      m.rate = p.rates.business ?? '';
+      const exp = this.tripExpenseAccounts(); const from = this.tripPaidFromAccounts();
+      if (!m.expenseId) m.expenseId = exp.find((a) => /vehicle|car|auto|mileage/i.test(a.name))?.id ?? exp.find((a) => /travel/i.test(a.name))?.id ?? '';
+      if (!m.paidFromId) m.paidFromId = from.find((a) => a.type === 'equity')?.id ?? '';
+    },
+    /** The file's drives, a day at a time. */
+    mileIqDays() {
+      const days = new Map();
+      for (const d of this.mileiq.preview?.drives ?? []) {
+        if (!days.has(d.date)) days.set(d.date, []);
+        days.get(d.date).push(d);
+      }
+      return [...days].map(([date, drives]) => ({ date, drives }));
+    },
+    mileIqPlace(p) { return String(p ?? '').split(',')[0].trim() || '?'; },
+    mileIqTicked() { return (this.mileiq.preview?.drives ?? []).filter((d) => this.mileiq.pick[d.key]); },
+    mileIqTickedMiles() {
+      const h = this.mileIqTicked().reduce((t, d) => { const [w, f = ''] = d.miles.split('.'); return t + Number(w) * 100 + Number(f.padEnd(2, '0')); }, 0);
+      return (h / 100).toFixed(1);
+    },
+    mileIqAll(on) { for (const d of this.mileiq.preview.drives) if (d.business && !d.imported) this.mileiq.pick[d.key] = on; },
+    mileIqBulk() {
+      const m = this.mileiq;
+      if (!m.bulkTrip) return;
+      for (const d of this.mileIqTicked()) m.tripFor[d.key] = m.bulkTrip;
+    },
+    async importMileIq() {
+      const m = this.mileiq;
+      const drives = this.mileIqTicked().map((d) => ({ key: d.key, tripId: m.tripFor[d.key] || '' }));
+      if (!drives.length) return this.flash('Tick the drives to import first.', 'bad');
+      if (!m.expenseId || !m.paidFromId) return this.flash('Choose the expense account and what paid for the driving first.', 'bad');
+      const rate = m.rate && m.rate !== m.preview.rates.business ? m.rate : undefined;
+      m.busy = true;
+      try {
+        const r = await this.run(() => api('POST', `${this.tripBase()}/mileiq/import`, { content: m.file.content, drives, newTripName: m.newTripName, rate,
+          expenseAccountId: m.expenseId, paidFromAccountId: m.paidFromId }));
+        if (r) {
+          this.flash(`Imported ${r.drives} drive${r.drives === 1 ? '' : 's'} (${r.miles} mi) as ${r.costs} cost${r.costs === 1 ? '' : 's'}, ${money(r.amountCents)} in all.`);
+          Object.assign(m, { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '' });
+          await this.loadTrips();
+        }
+      } finally { m.busy = false; }
+    },
+    async openTrip(id) {
+      const t = await this.run(() => api('GET', `${this.tripBase()}/trips/${id}`));
+      if (t) { this.trip.cur = t; this.trip.photoView = null; }
+    },
+    closeTripView() { Object.assign(this.trip, { cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null }); this.loadTrips(); },
+    newTrip() { Object.assign(this.trip, { cur: null, form: blankTrip(), editing: false }); },
+    editTrip() {
+      const t = this.trip.cur;
+      this.trip.form = { name: t.name, startDate: t.startDate, endDate: t.endDate ?? '', notes: t.notes ?? '',
+        jobs: t.jobs.length ? t.jobs.map((j) => ({ jobId: j.jobId, share: j.share })) : [{ jobId: '', share: '' }] };
+      this.trip.editing = true;
+    },
+    /** Shares typed so far, in percent (for the running total under the table). */
+    tripShareTotal() { return (this.trip.form?.jobs ?? []).reduce((s, j) => s + (Number(j.share) || 0), 0); },
+    /** Split the trip evenly across the projects listed (100 / N, the last one taking the rounding). */
+    evenShares() {
+      const rows = this.trip.form.jobs.filter((j) => j.jobId);
+      if (!rows.length) return;
+      const each = Math.floor(10000 / rows.length);
+      rows.forEach((j, i) => { const bp = i === rows.length - 1 ? 10000 - each * (rows.length - 1) : each; j.share = (bp / 100).toFixed(2).replace(/\.?0+$/, ''); });
+    },
+    async saveTrip() {
+      const tr = this.trip; const f = tr.form;
+      const body = { ...f, endDate: f.endDate || null, jobs: f.jobs.filter((j) => j.jobId || j.share) };
+      const r = tr.editing
+        ? await this.run(() => api('PATCH', `${this.tripBase()}/trips/${tr.cur.id}`, body), 'Trip saved.')
+        : await this.run(() => api('POST', `${this.tripBase()}/trips`, body), 'Trip added. Now add its costs.');
+      if (r) { tr.cur = r; tr.form = null; tr.editing = false; }
+    },
+    async toggleTripOpen() {
+      const t = this.trip.cur;
+      const r = await this.run(() => api('PATCH', `${this.tripBase()}/trips/${t.id}`, { isActive: !t.isActive }), t.isActive ? 'Trip closed.' : 'Trip reopened.');
+      if (r) this.trip.cur = r;
+    },
+    /** Miles × rate per mile → cents, half-up, exactly like the server (BigInt). */
+    mileageCents(c) {
+      const m = /^\s*(\d{1,6})(?:\.(\d{1,2}))?\s*$/.exec(c.miles ?? ''); const r = /^\s*\$?(\d{0,2})(?:\.(\d{1,4}))?\s*$/.exec(c.mileRate ?? '');
+      if (!m || !r || (!r[1] && !r[2])) return null;
+      const n = (BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'))) * (BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0')));
+      return Number((n * 2n + 10000n) / 20000n);
+    },
+    tripPaidFromAccounts() { return this.accounts.filter((a) => a.isActive && (a.cashFlow === 'cash' || a.subtype === 'credit_card' || (a.type === 'equity' && a.key !== 'retained_earnings'))); },
+    tripExpenseAccounts() { return this.accounts.filter((a) => a.isActive && a.type === 'expense'); },
+    newTripCost() {
+      const last = this.trip.cur.costs.filter((x) => x.status === 'posted').at(-1);
+      const c = blankTripCost(last?.date ?? this.trip.cur.startDate);
+      c.expenseAccountId = last?.expenseAccountId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
+      c.paidFromAccountId = last?.paidFromAccountId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? '';
+      c.mileRate = lastMileRate();
+      Object.assign(this.trip, { cost: c, editCostId: null, travel: null });
+    },
+    editTripCost(x) {
+      Object.assign(this.trip, { editCostId: x.id, travel: null, cost: { ...blankTripCost(x.date), kind: x.kind, vendor: x.vendor ?? '', description: x.description,
+        miles: x.miles ?? '', mileRate: x.mileRateCents != null ? String(Number(x.mileRateCents) / 100) : '',
+        amount: (x.amountCents / 100).toFixed(2), expenseAccountId: x.expenseAccountId, paidFromAccountId: x.paidFromAccountId, keptPhotos: x.photoCount } });
+    },
+    async addTripCostPhotos(e) {
+      const files = [...(e.target.files ?? [])]; e.target.value = '';
+      const c = this.trip.cost; c.photoBusy = true;
+      try { for (const f of files) if (c.photos.length + (c.keptPhotos ?? 0) < 6) c.photos.push(await pictureFromFile(f, { maxSide: PHOTO_SIDE })); }
+      catch (err) { this.flash(err.message, 'bad'); } finally { c.photoBusy = false; }
+    },
+    async saveTripCost() {
+      const tr = this.trip; const c = tr.cost;
+      const body = { date: c.date, kind: c.kind, vendor: c.vendor, description: c.description, amount: c.amount, miles: c.miles, mileRate: c.mileRate,
+        expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId };
+      if (c.kind === 'mileage') keepMileRate(c.mileRate);
+      const r = tr.editCostId
+        ? await this.run(() => api('PUT', `${this.tripBase()}/trip-costs/${tr.editCostId}`, body, { 'Idempotency-Key': c.key }), 'Cost corrected.')
+        : await this.run(() => api('POST', `${this.tripBase()}/trips/${tr.cur.id}/costs`, body, { 'Idempotency-Key': c.key }), 'Cost saved.');
+      if (!r) return;
+      // The receipt photos go up after the cost is saved (each is up to 3 MB).
+      const costId = r.costId ?? r.costs.filter((x) => x.status === 'posted').find((x) => x.description === body.description && x.date === body.date)?.id;
+      let failed = 0;
+      for (const picture of c.photos) if (!costId || !(await this.run(() => api('POST', `${this.tripBase()}/trip-costs/${costId}/photos`, { picture })))) failed++;
+      if (failed) this.flash(`The cost is saved, but ${failed} receipt photo${failed === 1 ? '' : 's'} could not be. Add ${failed === 1 ? 'it' : 'them'} from the cost's photos.`, 'bad');
+      tr.cost = null; tr.editCostId = null;
+      await this.openTrip(tr.cur.id);
+    },
+    async voidTripCost(x) {
+      if (!confirm(`Void ${x.description} (${money(x.amountCents)})? Its entry in your books is reversed; it stays on record, marked void.`)) return;
+      const r = await this.run(() => api('POST', `${this.tripBase()}/trip-costs/${x.id}/void`, {}), 'Cost voided.');
+      if (r) this.trip.cur = r;
+    },
+    async openTripPhotos(x) {
+      const photos = (await this.run(() => api('GET', `${this.tripBase()}/trip-costs/${x.id}/photos`))) ?? [];
+      this.trip.photoView = { cost: x, photos, busy: false };
+    },
+    tripPhotoUrl(x, ph) { return `/api${this.tripBase()}/trip-costs/${x.id}/photos/${ph.id}`; },
+    async uploadTripPhotos(e) {
+      const files = [...(e.target.files ?? [])]; e.target.value = '';
+      const v = this.trip.photoView; v.busy = true;
+      try {
+        for (const f of files) {
+          const picture = await pictureFromFile(f, { maxSide: PHOTO_SIDE });
+          if (!(await this.run(() => api('POST', `${this.tripBase()}/trip-costs/${v.cost.id}/photos`, { picture }), 'Photo saved.'))) break;
+        }
+      } catch (err) { this.flash(err.message, 'bad'); } finally { v.busy = false; }
+      await this.openTripPhotos(v.cost); await this.openTrip(this.trip.cur.id); this.trip.photoView = this.trip.photoView ?? v;
+    },
+    async removeTripPhoto(ph) {
+      if (!confirm('Remove this photo?')) return;
+      const v = this.trip.photoView;
+      if (await this.run(() => api('DELETE', `${this.tripBase()}/trip-costs/${v.cost.id}/photos/${ph.id}`), 'Photo removed.')) await this.openTripPhotos(v.cost);
+    },
+    newTravel() { Object.assign(this.trip, { travel: { date: this.trip.cur.startDate, hours: '', notes: '' }, cost: null }); },
+    async saveTravel() {
+      const r = await this.run(() => api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, this.trip.travel), 'Travel time saved.');
+      if (r) { this.trip.cur = r; this.trip.travel = null; }
+    },
+    async removeTravel(x) {
+      if (!confirm(`Delete ${x.hours} h of travel time on ${x.date}?`)) return;
+      const r = await this.run(() => api('DELETE', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time/${x.id}`), 'Travel time deleted.');
+      if (r) this.trip.cur = r;
+    },
+    /** Which invoices have billed a trip cost or hour, by project: "2601 on invoice 2601A". */
+    billedText(x) {
+      return (x.billed ?? []).map((b) => `${this.ar.jobs.find((j) => j.id === b.jobId)?.code ?? 'project'} on invoice ${b.number}`).join(', ');
+    },
+    // ---------------------------------------------------------------- Pull in unbilled time and costs
+    async openPull() {
+      const d = this.ar.doc;
+      if (!d.jobId && !d.contactId) { this.flash('Choose the project (or the customer) first.', 'bad'); return; }
+      const service = this.items.find((x) => x.kind === 'service'); const expense = this.items.find((x) => x.kind === 'expense');
+      this.ar.pull = { from: '', to: '', time: [], costs: [], tripCosts: [], pick: {}, loaded: false,
+        serviceItemId: service?.id ?? '', expenseItemId: expense?.id ?? '', accountId: service?.accountId ?? this.incomeAccounts()[0]?.id ?? '' };
+      await this.loadPull();
+    },
+    async loadPull() {
+      const d = this.ar.doc; const pl = this.ar.pull;
+      const q = new URLSearchParams(d.jobId ? { jobId: d.jobId } : { customerId: d.contactId });
+      if (pl.from) q.set('from', pl.from);
+      if (pl.to) q.set('to', pl.to);
+      const r = await this.run(() => api('GET', `${this.arBase()}/unbilled?${q}`));
+      if (!r) return;
+      // Anything already on this form (pulled earlier, or kept from the invoice being edited) is left out.
+      // A trip's time or cost is keyed with its project too (each project bills its own share).
+      const onForm = new Set(d.lines.flatMap((l) => [l.timeEntryId && `t${l.timeEntryId}${l.jobId || ''}`, l.billedLineId && `c${l.billedLineId}`,
+        l.tripCostId && `p${l.tripCostId}${l.jobId}`]).filter(Boolean));
+      pl.time = r.time.filter((x) => !onForm.has(this.pullKey('t', x))); pl.costs = r.costs.filter((x) => !onForm.has(`c${x.id}`));
+      pl.tripCosts = r.tripCosts.filter((x) => !onForm.has(this.pullKey('p', x)));
+      pl.pick = Object.fromEntries([...pl.time.map((x) => [this.pullKey('t', x), true]), ...pl.costs.map((x) => [`c${x.id}`, true]),
+        ...pl.tripCosts.map((x) => [this.pullKey('p', x), true])]);
+      pl.loaded = true;
+    },
+    pullKey(kind, x) { return kind === 't' ? `t${x.id}${x.lineJobId || ''}` : `p${x.id}${x.jobId}`; },
+    pullCount() { return Object.values(this.ar.pull?.pick ?? {}).filter(Boolean).length; },
+    addPulled() {
+      const d = this.ar.doc; const pl = this.ar.pull;
+      const svc = this.items.find((x) => x.id === pl.serviceItemId); const exp = this.items.find((x) => x.id === pl.expenseItemId);
+      const people = new Set(pl.time.filter((x) => pl.pick[this.pullKey('t', x)]).map((x) => x.userName));
+      const manyJobs = !d.jobId;
+      const tag = (x) => (manyJobs && x.jobCode ? ` (${x.jobCode})` : '');
+      const lines = [
+        ...pl.time.filter((x) => pl.pick[this.pullKey('t', x)]).map((x) => ({ ...blankLine(), itemId: svc?.id ?? '', serviceDate: x.date,
+          description: (x.tripName ? `Travel, ${x.tripName}${x.notes ? `: ${x.notes}` : ''} (${x.share}% of ${x.fullHours} h)${tag(x)}`
+            : `${people.size > 1 ? `${x.userName}: ` : ''}${x.notes || x.jobName}${tag(x)}`).slice(0, 300), quantity: x.quantity, qtyTyped: true,
+          unitPrice: svc?.rateCents != null ? (svc.rateCents / 100).toFixed(2) : '', taxable: !!svc?.taxable, accountId: svc?.accountId ?? pl.accountId,
+          timeEntryId: x.id, jobId: x.lineJobId || '', from: x.tripName ? `trip ${x.tripName}, ${x.share}%` : `timesheet, ${x.hours} h` })),
+        // A trip cost: the full cost as the price, the project's share as the quantity (type a different share to override).
+        ...pl.tripCosts.filter((x) => pl.pick[this.pullKey('p', x)]).map((x) => ({ ...blankLine(), itemId: exp?.id ?? '', serviceDate: x.date,
+          description: `${x.description} (${x.share}% of trip ${x.tripName})${tag(x)}`.slice(0, 300), quantity: x.quantity, qtyTyped: true,
+          unitPrice: (x.amountCents / 100).toFixed(2), taxable: !!exp?.taxable, accountId: exp?.accountId ?? pl.accountId,
+          tripCostId: x.id, jobId: x.jobId, from: `trip ${x.tripName}, ${x.share}%` })),
+        ...pl.costs.filter((x) => pl.pick[`c${x.id}`]).map((x) => ({ ...blankLine(), itemId: exp?.id ?? '', serviceDate: x.date,
+          description: `${x.description || x.vendorName}${tag(x)}`.slice(0, 300), quantity: '1', qtyTyped: true, unitPrice: (x.amountCents / 100).toFixed(2),
+          taxable: !!exp?.taxable, accountId: exp?.accountId ?? pl.accountId, billedLineId: x.id, from: `bill ${x.billNumber} · ${x.vendorName}` })),
+      ];
+      if (!lines.length) return;
+      if (lines.some((l) => !l.accountId)) { this.flash('Choose an income account for these lines.', 'bad'); return; }
+      // The empty starting line is replaced; lines already typed stay.
+      d.lines = [...d.lines.filter((l) => l.accountId || l.unitPrice || l.description), ...lines];
+      this.ar.pull = null;
+      this.flash(`Added ${lines.length} line${lines.length === 1 ? '' : 's'}. Check the rates, then save.`);
+    },
     newContact() {
       const open = this.ar.showContact && !this.ar.contact.id;
       this.ar.contact = blankContact(); this.ar.showContact = !open;
@@ -1010,7 +1540,7 @@ createApp({
     newDoc() {
       const invoice = this.S.kind === 'invoice';
       this.ar.doc = blankDoc(invoice ? this.company?.default_sales_tax_rate ?? '' : '');
-      this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
+      this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null; this.ar.pull = null;
       if (invoice) this.loadItems();
     },
     // ---------------------------------------------------------------- Invoice setup: saved rates, sales tax, letterhead, logo
@@ -1086,20 +1616,26 @@ createApp({
       const invoice = this.S.kind === 'invoice';
       const dollars = (c) => (c / 100).toFixed(2);
       this.ar.doc = { ...blankDoc(doc.taxRate ?? ''), editId: doc.id, editNumber: doc.number, contactId: doc.contactId, number: doc.number,
-        date: doc.date, dueDate: doc.dueDate ?? '', memo: doc.memo ?? '', project: doc.project ?? '',
+        date: doc.date, dueDate: doc.dueDate ?? '', memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
         attention: doc.attention ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
-          description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true })) };
+          description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true,
+          jobId: l.jobId ?? '', billable: !!l.billable, timeEntryId: l.timeEntryId ?? '', billedLineId: l.billedLineId ?? '', tripCostId: l.tripCostId ?? '',
+          from: l.tripCostId || (l.timeEntryId && l.jobId) ? 'a trip' : l.timeEntryId ? 'timesheet' : l.billedLineId ? 'a bill' : '' })) };
       this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
       if (invoice) this.loadItems();
+      this.ar.pull = null;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     async saveDoc() {
       const d = this.ar.doc;
       const lines = d.lines.filter((l) => l.accountId || l.unitPrice).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
-        unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined }));
+        unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined,
+        jobId: l.jobId || undefined, billable: !!l.jobId && l.billable, timeEntryId: l.timeEntryId || undefined, billedLineId: l.billedLineId || undefined,
+        tripCostId: l.tripCostId || undefined }));
       const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
-        project: this.S.kind === 'invoice' ? d.project : undefined, taxRate: d.taxRate || undefined, lines };
+        project: this.S.kind === 'invoice' ? d.project : undefined, jobId: this.S.kind === 'invoice' ? d.jobId || undefined : undefined,
+        taxRate: d.taxRate || undefined, lines };
       if (this.S.kind === 'invoice') Object.assign(body, { attention: d.attention, sendTo: d.sendTo, clientRef: d.clientRef });
       const newPerson = this.S.kind === 'invoice' && d.savePerson && this.docPersonIsNew()
         ? { name: d.attention.trim(), email: d.sendTo.trim(), phone: '' } : null;

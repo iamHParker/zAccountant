@@ -16,6 +16,24 @@ into another, so the books always balance. You don't need to know debits and cre
 The tiles show cash in the bank, and income, expenses and profit for this fiscal year. "✓ Your books are in balance"
 is checked every time the page loads. A full check of the books also runs every night.
 
+### Home cards and Statistics
+
+Beside *Record a transaction* are shortcut cards for the jobs you do most (New invoice, Customer paid, Enter a bill,
+Banking, New trip, Profit & Loss…). Press one to go straight there. **Arrange cards** lets you make the page yours:
+
+- **Add a card** from the list of the ones not showing (Pay a bill, Import from MileIQ, Timesheet, Payroll, Balance
+  Sheet, Journal entry, Back up your books…).
+- **Move** a card by dragging it, or with its arrows: ‹ › (or ↑ ↓ under *Record a transaction*) change its place, and
+  **→ column / ← column** moves it between the two columns.
+- **✕** removes a card (add it back any time). **Back to the standard cards** starts over.
+
+Your arrangement is yours alone and follows you from computer to phone. Cards for things your role can't do don't show.
+
+The **Statistics** card (under *Record a transaction* to start with) shows this month's money in and out. Press it for
+the last 12 months of income and expenses, cash in the bank at each month's end, this year's largest expenses, and what
+customers owe you and you owe vendors, with any past-due part. Hover over (or tap) a month to see its numbers, or open
+**Show the numbers** for the table.
+
 ## 3. Recording transactions
 
 - **Quick way (Home → Record a transaction):** choose *Money in*, *Money out* or *Transfer*. Enter the date, a
@@ -73,6 +91,13 @@ phone. Press **+ Add person** to add one.
    you type that isn't saved yet gets a tick box, "Save … to DWH - SATX for next time". **Claim / job number** is
    the client's own number; it prints in the box with the invoice number.
    **Project** (optional): the project name and site address. They print beside Bill To.
+   **Project** (the list above the project block): pick it and the customer, the project block (name and site
+   address) and the invoice number (the project number) fill in when they're empty.
+   **⏱ Pull in unbilled time and costs** lists the project's billable hours from timesheets and the costs on bills
+   marked "bill to client" that aren't on an invoice yet. Pick the rate for the hours (Eng Std Rate…) and the item for
+   the costs, untick anything to leave for later, and press **Add … lines**. Each hour or cost can be billed only
+   once: it drops off the list when the invoice is saved, and comes back if that invoice is voided. Leave the project
+   empty to see everything for all of the customer's projects. Hours are billed to 4 decimals (50 minutes = 0.8333 h).
 3. For each line:
    - **Rate or item:** pick one, and the rate, tax and income account fill in.
    - **Date:** the day the work was done or the cost was incurred.
@@ -133,6 +158,80 @@ Enter each **bill** with its expense accounts when it arrives. Press **Pay bills
 sits in Accounts Payable, so your profit is right even before you pay. The **Aging report** shows what you owe and
 what's overdue.
 
+**Costs you pass on to a client** (airfare, rental car, lodging): on the bill line, pick the **Project** and leave
+**Bill to client** ticked. The cost then waits on that project's "Pull in unbilled time and costs" list. A cost paid
+by credit card is entered the same way: a bill from the airline, paid from the credit card account. A bill whose cost
+is already on an invoice can't be edited or voided until that invoice is.
+
+### Trips
+
+**Trips** (top menu) keeps what a trip cost and which projects it was for.
+
+1. **+ New trip**: a name (Dallas, Oct 4-6) and the dates. Under **Projects and their share of the trip**, pick each
+   project and type its share in percent: a major client might carry 80% and a smaller job 10%. **Split evenly** fills
+   in equal shares. The shares can add up to less than 100%; the rest isn't billed to anyone.
+2. **+ Add cost** for each expense: pick what it was (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other), the
+   date, who was paid, the amount, the expense account, and what you paid with (bank, credit card, or an owner account
+   when you paid personally). For **Mileage**, type the miles and the rate per mile (the IRS standard mileage rate for
+   the year, from irs.gov, or your own); the amount is worked out. **📷 Take photo** keeps the receipt with the cost.
+   Saving records the expense in your books.
+3. **+ Add travel time**: the hours spent travelling. It's billed by the same shares, at the rate you pick on the invoice.
+4. A cost that shows up later (tolls two weeks after the trip): open the trip and add it. It waits on each project's
+   list until it's billed. To correct a cost, press **edit**; the old one is voided and the corrected one takes its
+   place, with its photos. A cost already on an invoice can't be changed until that invoice is edited or voided.
+
+On each project's invoice, **⏱ Pull in unbilled time and costs** lists its share of every trip cost and travel hour.
+Each line bills the full cost × the share (quantity 0.8 for 80%), so the client can see both. To bill a different
+share on one invoice, type another quantity on that line.
+
+### Your phone on the road
+
+The **Road page** lets you jot down trip costs, receipt photos, travel time and new project numbers on your phone
+while you travel, even with no signal, without signing in to your books on the phone.
+
+1. At your desk: **Trips → Your phone on the road**, type the phone's name and press **Make a road key**. A QR code
+   appears (shown once). Point the phone's camera at it and open the link. On an iPhone, press **Share → Add to Home
+   Screen** so it opens like an app. (No camera handy? **Copy link**, send it to yourself, and paste it into the Road
+   page's box.)
+2. On the road: **+ New trip** (name, dates, the projects it's for; type new project numbers like *2610 Garcia Barn*
+   one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other; the amount or
+   the miles and rate; **📷 Receipt photo**) and **+ Travel time**. Everything is saved on the phone first and sent when
+   there is signal. The top of the page says how many are waiting; **Send now** sends them at once.
+3. Back at the desk: **Trips → From the road** lists what arrived. Choose the expense account and what you paid with,
+   then **Accept** the new trip first (its projects share it evenly; open the trip to change the shares), then its
+   costs and travel time. **Dismiss** anything that shouldn't go in the books. On the phone each item then says
+   *In the books*; **Clear items already in the books** tidies the list.
+
+The road key can't see your books or change anything already saved; it can only add to the *From the road* box.
+It works for 90 days. Lost the phone? **Trips → Your phone on the road → turn off**.
+
+### Mileage from MileIQ
+
+MileIQ emails a monthly report. Choose **Download as CSV** in that email (the PDF can't be read), then in
+**Trips → Import from MileIQ** pick the file. You see every drive, a day at a time:
+
+- **Business** drives are ticked. Personal, commute, medical and charity drives are shown but never imported.
+- Each drive is put on the trip whose dates cover it (a Midland trip on Oct 8 gets that day's drives); the rest go on a
+  new trip, *Local driving, October 2026*. Change any drive's trip, or tick several and **Put the ticked drives on** a trip.
+- Choose the expense account (*Vehicle Expense*) and what paid for it (your own car: an owner account like
+  *Owner's Capital*). The rate per mile comes from the file; type another to change it.
+
+**Import** posts one mileage cost per trip per day, with MileIQ's own dollar figure (each drive rounded to the cent,
+then added up), so the total matches MileIQ's report to the penny. Tolls and parking in the file become their own costs.
+Importing the same file again, or next month's, never brings a drive in twice. Then open the local-driving trip and
+add the projects it was for, with their shares, so their invoices can bill it.
+
+### Projects
+
+**Sales → Projects** lists your projects (the same list as the jobs on the Time tab): number, name, customer and site
+address. **+ New project** adds one. To add many at once from your project folders:
+
+1. In File Explorer, open the folder that holds your project folders and select them (Ctrl+A for all).
+2. Hold **Shift**, right-click one of them, and choose **Copy as path**.
+3. In Projects, open **Add projects from your folder names**, paste, and press **Check the list**. The number at the
+   start of each folder name (2601 in "2601 Smith Residence") becomes the project number. Projects already on the
+   list are skipped. Pick a customer to set it on all of the new ones, then press **Add … new projects**.
+
 ## 6. Banking
 
 1. **Import** a statement downloaded from your bank's website as **CSV** or **QFX/OFX**. Importing the same dates
@@ -185,11 +284,19 @@ report ties out" when its own check passes. If you ever see ⚠, please send a �
   approves timesheets but doesn't record transactions.
 - **Departments:** group people (Accounting, Engineering, Field). A department's approver approves its timesheets.
 - **Invoice letterhead and logo**, **Invoice rates and items:** see section 4.
-- **Back up your books:** while zAccountant is in alpha testing, keep your own copy. **Download chart of accounts**
-  and **Download all transactions** give two CSV files that open in Excel. To rebuild the books, make a new
-  company and import them (Accounts → Import): the chart of accounts first, then the transactions. Every report
-  comes back the same. Invoice and bill details, customers, employees and timesheets are not in these files, so keep
-  your saved invoices and pay stubs too. Anyone who can see the books can download them.
+- **Back up your books:** while zAccountant is in alpha testing, keep your own copy.
+  - **Download the book file** (owner only) gives one `.zacc` file with everything: transactions, invoices and bills
+    line by line, customers, vendors, employees (without Social Security numbers), timesheets, trips, receipt and
+    check pictures, and the audit trail. Each part carries a fingerprint (SHA-256) in `manifest.json`, so a damaged
+    copy shows. It is an ordinary .zip: rename it to `.zip` to look inside. Keep one copy at hand and one elsewhere.
+  - **Download chart of accounts** and **Download all transactions** give the two spreadsheets that rebuild the books:
+    make a new company and import them (Accounts → Import), the chart first, then the transactions. Every report
+    comes back the same. (They are also inside the book file, in its `import` folder.) Anyone who can see the books
+    can download them.
+  - **For QuickBooks Desktop (.iif)** and **For QuickBooks Online (.csv)**: for moving to QuickBooks, or for an
+    accountant who works in it. Desktop: File → Utilities → Import → IIF Files (accounts come along). Online: import
+    the chart of accounts first (Settings → Import data → Accounts), then Journal entries. Every transaction arrives
+    as a journal entry, so the balances match; invoices and bills arrive as totals, not line by line.
 - **Close the books:** after a month or year is final (usually after the bank is reconciled and your accountant is
   done), close through its last day. Nothing dated on or before that day can be added or changed. Only the owner
   can reopen, with a two-step code and a reason, and that is logged.

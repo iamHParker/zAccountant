@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { HELP, helpForTab, searchHelp } from '../public/help.js';
 
 test('every screen has a guide, and guide links point at real guides', () => {
-  for (const tab of ['home', 'journal', 'sales', 'bills', 'bank', 'reports', 'time', 'accounts', 'payroll', 'settings']) {
+  for (const tab of ['home', 'journal', 'sales', 'bills', 'trips', 'bank', 'reports', 'time', 'accounts', 'payroll', 'settings']) {
     assert.equal(HELP.find((h) => h.id === helpForTab(tab)).tab, tab, tab);
   }
   assert.equal(helpForTab('new-company'), 'start');

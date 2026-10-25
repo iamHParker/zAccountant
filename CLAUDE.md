@@ -40,8 +40,9 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 ## Open items
 - DC $4,150 per-allowance withholding amount: no official 2026 source (latest FR-230 is 2018). Needs DC OTR
   confirmation before the Board certifies DC.
-- **Production has no backups yet** (Railway Hobby plan can't schedule them). Homer decides by mid-Nov: upgrade
-  to Pro, or Claude builds a nightly pg_dump to outside storage. Must be in place, with a restore drill, before alpha.
+- **Backups:** nightly off-site backup is built (`src/jobs/offsiteBackup.js`, pg_dump → AES-GCM → S3-compatible
+  bucket, migration 027); off until Homer creates the bucket and sets the `BACKUP_*` variables (runbook section 4).
+  Needs one real restore drill from the bucket before alpha (Dec 1).
 - Tax-ready level 1 is built (see below). Level 2+ (printed forms, e-file) is not planned: a CPA partner does real
   preparation through an accountant's role. Tax line numbers are `verified: false` until the Board checks them.
 - Front page claims: the Security section's "Coming" list (encryption on the user's side so we can't read the data;
@@ -80,6 +81,21 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   `project` block, letterhead (address, note with tax ID + TX firm number, closing line), logo in `company_logos`,
   pinned `default_sales_tax_rate`. Layout follows Homer's Excel invoice: Hours, Date, Task, Rate, T, Subtotal.
   Expense split across jobs: quantity `1/N` from the invoice's "Jobs sharing these expenses" box; typed quantities win.
+- Projects = `jobs` (+ site address; not plan-gated). Bill lines: project + "bill to client"; invoice "Pull in unbilled
+  time and costs" links each line to its time entry / bill line, billed once (trigger, migration 023,
+  `src/services/projectService.js`). Projects from pasted folder names (`src/core/projects.js`).
+- Trips (migration 024, `src/services/tripService.js`): projects with % shares; costs post their own entry (void + copy
+  to edit; mileage = miles × typed rate); travel time = time entry with `trip_id`; billed once per project.
+- Passkeys (migration 025, `src/security/webauthn.js`): Face ID / Windows Hello sign-in = both steps; adding one needs a
+  fresh authenticator code. Settings card + sign-in button.
+- Road page `/road` (migration 026, `src/services/roadService.js`, `public/road.*`): phone key (Bearer, hash only,
+  90 days) → inbox `road_items`; Trips → From the road accepts into the books. Offline via IndexedDB + service worker.
+- Book file `.zacc` (`src/services/bookFileService.js`): zip of every company table + manifest SHA-256s; QuickBooks
+  .iif / Online CSV exports. Whole-file re-import not built yet.
+- MileIQ import (migration 028, `src/core/mileiq.js`, `src/services/mileIqService.js`): monthly CSV → one mileage trip
+  cost per trip per day, amount = MileIQ's per-drive rounding (ties to its report); `mileage_drives` stops re-imports.
+- Home cards (migration 029, `HOME_CARDS` in `public/app.js`, `homeLayoutService.js`): per-person shortcut cards,
+  add/remove/move; Statistics card → `GET …/reports/statistics` (12 months, cash, top expenses, AR/AP).
 - New-company setup wizard (migration 017): `entity_type`, `books_start_date`, `setup_done`; `GET/PUT …/setup`;
   the `setup` tab; Home's "Finish setting up" list. Entity type feeds Tax-ready (`src/core/entityTypes.js`).
 - Tax-ready level 1 (plan feature `tax`, migration 018): `src/core/taxLines.js` (categories → form lines, 1099 threshold

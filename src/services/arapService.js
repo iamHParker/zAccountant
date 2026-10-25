@@ -202,6 +202,7 @@ const docOut = (d, today) => {
     memo: d.memo, project: d.project ?? null, subtotalCents: d.subtotal_cents, taxRate: d.tax_rate, taxCents: d.tax_cents, totalCents: d.total_cents,
     paidCents: paid, balanceCents: balance, status, voidDate: d.void_date, journalEntryId: d.journal_entry_id, entryNumber: d.entry_number ?? null,
     replacedById: d.replaced_by_id ?? null, attention: d.attention ?? null, sendTo: d.send_to ?? null, clientRef: d.client_ref ?? null,
+    jobId: d.job_id ?? null,
   };
 };
 
@@ -231,6 +232,8 @@ const DOC_SELECT = `
  * Validate the lines of an invoice or bill. Each line: { accountId, description, quantity, unitPrice }
  * (or just { accountId, description, amount }), and taxable: true for invoice lines that carry sales tax.
  * Optional: serviceDate (the day the work was done or the cost incurred) and itemId (the saved rate it came from).
+ * A bill line can name its project (jobId) and be marked billable (a cost passed on to that client). An invoice
+ * line can say which time entry (timeEntryId) or billable bill line (billedLineId) it bills; each is billed once.
  */
 async function cleanLines(c, companyId, kind, rawLines, errors) {
   if (!Array.isArray(rawLines) || rawLines.length === 0) { errors.push('add at least one line'); return []; }
@@ -241,6 +244,11 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
   const itemIds = [...new Set(rawLines.map((l) => l?.itemId).filter((x) => typeof x === 'string' && UUIDISH.test(x)))];
   const { rows: items } = itemIds.length ? await c.query('SELECT id FROM invoice_items WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, itemIds]) : { rows: [] };
   const itemSet = new Set(items.map((x) => x.id));
+  const jobIds = [...new Set(rawLines.map((l) => l?.jobId).filter((x) => typeof x === 'string' && UUIDISH.test(x)))];
+  const { rows: jobs } = jobIds.length ? await c.query('SELECT id FROM jobs WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, jobIds]) : { rows: [] };
+  const jobSet = new Set(jobs.map((x) => x.id));
+  const sources = await billableSources(c, companyId, rawLines);
+  const usedSources = new Set();
   return rawLines.map((l, i) => {
     const n = `line ${i + 1}`;
     const a = byId.get(l?.accountId);
@@ -252,6 +260,22 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
     if (serviceDate != null && !isIsoDate(serviceDate)) errors.push(`${n}: the date must be a real date (YYYY-MM-DD)`);
     const itemId = l?.itemId == null || l.itemId === '' ? null : l.itemId;
     if (itemId != null && !itemSet.has(itemId)) errors.push(`${n}: that saved rate was not found`);
+    // A bill line names its project; an invoice line names one only when it bills a project's share of a trip.
+    const jobId = l?.jobId != null && l.jobId !== '' ? l.jobId : null;
+    if (jobId != null && !jobSet.has(jobId)) errors.push(`${n}: that project was not found`);
+    const billable = kind === 'bill' && jobId != null && l.billable === true;
+    const timeEntryId = kind === 'invoice' && l?.timeEntryId ? l.timeEntryId : null;
+    const billedLineId = kind === 'invoice' && l?.billedLineId ? String(l.billedLineId) : null;
+    const tripCostId = kind === 'invoice' && l?.tripCostId ? l.tripCostId : null;
+    if (timeEntryId || billedLineId || tripCostId) {
+      const key = sourceKey({ timeEntryId, billedLineId, tripCostId, jobId });
+      const what = timeEntryId ? 'time' : 'cost';
+      const src = sources.get(key);
+      if (!src) errors.push(`${n}: that ${what} can't be billed (not found, not marked billable, or not for this project)`);
+      else if (src.billedOn) errors.push(`${n}: that ${what} is already billed on invoice ${src.billedOn}`);
+      if (usedSources.has(key)) errors.push(`${n}: the same ${what} is on this invoice twice`);
+      usedSources.add(key);
+    } else if (kind === 'invoice' && jobId != null) errors.push(`${n}: only a trip's cost or travel time names a project on an invoice line`);
     let unit = l?.unitPrice ?? l?.amount;
     unit = unit == null || unit === '' ? null : money(unit, `${n} price`, errors);
     if (unit == null) { if (!errors.some((e) => e.startsWith(n))) errors.push(`${n}: enter a price or amount`); return null; }
@@ -260,12 +284,46 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
     try { amount = lineAmount(l.quantity ?? '1', unit); } catch (e) { errors.push(`${n}: ${e.message}`); return null; }
     if (amount > MAX_LINE_CENTS) { errors.push(`${n}: amount is too large`); return null; }
     return { accountId: l.accountId, description: text(l.description, 300), quantity: String(l.quantity ?? '1').trim(), unitPriceCents: unit, amountCents: amount,
-      taxable: kind === 'invoice' && l.taxable === true, serviceDate, itemId };
+      taxable: kind === 'invoice' && l.taxable === true, serviceDate, itemId, jobId, billable, timeEntryId, billedLineId, tripCostId };
   });
 }
 
+const sourceKey = ({ timeEntryId, billedLineId, tripCostId, jobId }) =>
+  (timeEntryId ? `time:${timeEntryId}:${jobId ?? ''}` : tripCostId ? `trip:${tripCostId}:${jobId ?? ''}` : `cost:${billedLineId}`);
+
+/**
+ * What invoice lines say they bill: a time entry, a bill line passed on, or a trip cost; a trip's cost or travel
+ * time is billed per project (the line's jobId must be one of the trip's projects). Keyed by sourceKey, each with
+ * the invoice number it is already billed on (null when free). Anything not billable is left out.
+ */
+async function billableSources(c, companyId, rawLines) {
+  const out = new Map();
+  if (!Array.isArray(rawLines)) return out;
+  const billedOn = async (col, id, jobId) => (await c.query(`SELECT d.number FROM document_lines l JOIN documents d ON d.id = l.document_id
+    WHERE l.${col} = $1 AND d.status = 'posted' AND l.job_id IS NOT DISTINCT FROM $2 LIMIT 1`, [id, jobId])).rows[0]?.number ?? null;
+  const inTrip = async (tripId, jobId) => jobId != null && UUIDISH.test(jobId)
+    && (await c.query('SELECT 1 FROM trip_jobs WHERE trip_id = $1 AND job_id = $2', [tripId, jobId])).rows.length > 0;
+  for (const l of rawLines.slice(0, MAX_DOC_LINES)) {
+    const jobId = l?.jobId != null && l.jobId !== '' ? l.jobId : null;
+    if (typeof l?.timeEntryId === 'string' && UUIDISH.test(l.timeEntryId)) {
+      const { rows: [t] } = await c.query(`SELECT id, trip_id FROM time_entries WHERE company_id = $1 AND id = $2 AND billable AND status <> 'rejected'`, [companyId, l.timeEntryId]);
+      if (t && (t.trip_id ? await inTrip(t.trip_id, jobId) : jobId == null)) {
+        out.set(sourceKey({ timeEntryId: t.id, jobId }), { billedOn: await billedOn('time_entry_id', t.id, jobId) });
+      }
+    } else if (typeof l?.tripCostId === 'string' && UUIDISH.test(l.tripCostId)) {
+      const { rows: [tc] } = await c.query(`SELECT id, trip_id FROM trip_costs WHERE company_id = $1 AND id = $2 AND status = 'posted'`, [companyId, l.tripCostId]);
+      if (tc && await inTrip(tc.trip_id, jobId)) out.set(sourceKey({ tripCostId: tc.id, jobId }), { billedOn: await billedOn('trip_cost_id', tc.id, jobId) });
+    } else if (/^\d{1,18}$/.test(String(l?.billedLineId ?? '')) && jobId == null) {
+      const { rows: [x] } = await c.query(`SELECT x.id::text AS id FROM document_lines x JOIN documents d ON d.id = x.document_id
+        WHERE x.company_id = $1 AND x.id = $2 AND x.billable AND d.kind = 'bill' AND d.status = 'posted'`, [companyId, String(l.billedLineId)]);
+      if (x) out.set(sourceKey({ billedLineId: x.id }), { billedOn: await billedOn('billed_line_id', x.id, null) });
+    }
+  }
+  return out;
+}
+
 /** Create and post an invoice (kind 'invoice') or a bill (kind 'bill'). */
-export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
+export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
   const side = SIDE[kind];
   if (!side) throw new LedgerError('kind must be invoice or bill');
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
@@ -288,6 +346,15 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     const ref = text(clientRef, 60);
     if (sendToText && !EMAIL.test(sendToText)) errors.push('the send-to email address is not valid');
     if ((attn || sendToText) && kind !== 'invoice') errors.push('attention and send-to are for invoices');
+    let job = null;
+    if (jobId != null && jobId !== '') {
+      if (kind !== 'invoice') errors.push('a bill names its project on each line');
+      else if (typeof jobId !== 'string' || !UUIDISH.test(jobId)) errors.push('that project was not found');
+      else {
+        job = (await c.query('SELECT id FROM jobs WHERE company_id = $1 AND id = $2', [companyId, jobId])).rows[0];
+        if (!job) errors.push('that project was not found');
+      }
+    }
     const clean = await cleanLines(c, companyId, kind, lines, errors);
     let ppm = 0;
     let rate = null;
@@ -345,14 +412,16 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     const je = await insertEntry(c, companyId, entry, { source: kind, sourceRef: docId, actor });
     await c.query(
       `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, project, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by,
-                              attention, send_to, client_ref)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor, attn, sendToText, ref]);
+                              attention, send_to, client_ref, job_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor, attn, sendToText, ref, job?.id ?? null]);
     for (const l of clean) {
       await c.query(
-        `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable, service_date, item_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [companyId, docId, l.accountId, l.description, l.quantity, l.unitPriceCents, l.amountCents, l.taxable, l.serviceDate, l.itemId]);
+        `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable, service_date, item_id,
+                                     job_id, billable, time_entry_id, billed_line_id, trip_cost_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [companyId, docId, l.accountId, l.description, l.quantity, l.unitPriceCents, l.amountCents, l.taxable, l.serviceDate, l.itemId,
+          l.jobId, l.billable, l.timeEntryId, l.billedLineId, l.tripCostId]);
     }
     await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: kind, entityId: docId, actor,
       payload: { ...(replacesId ? { replacesId } : {}), number: num, ...(typedNumber ? { typedNumber } : {}), contactId: contact.id, date, dueDate: due, subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
@@ -366,9 +435,12 @@ export async function getDocument(db, companyId, docId, { today = null } = {}) {
   const { rows: [d] } = await db.query(`${DOC_SELECT} WHERE d.company_id = $1 AND d.id = $2`, [companyId, docId]);
   if (!d) throw new LedgerError('Invoice or bill not found');
   const { rows: lines } = await db.query(
-    `SELECT l.*, a.code, a.name AS account_name, i.name AS item_name, i.kind AS item_kind
-       FROM document_lines l JOIN accounts a ON a.id = l.account_id LEFT JOIN invoice_items i ON i.id = l.item_id
+    `SELECT l.*, a.code, a.name AS account_name, i.name AS item_name, i.kind AS item_kind, j.name AS job_name, j.code AS job_code,
+            (SELECT d2.number FROM document_lines l2 JOIN documents d2 ON d2.id = l2.document_id
+              WHERE l2.billed_line_id = l.id AND d2.status = 'posted' LIMIT 1) AS billed_on
+       FROM document_lines l JOIN accounts a ON a.id = l.account_id LEFT JOIN invoice_items i ON i.id = l.item_id LEFT JOIN jobs j ON j.id = l.job_id
       WHERE l.document_id = $1 ORDER BY l.id`, [d.id]);
+  const { rows: [job] } = d.job_id ? await db.query('SELECT name, code, address FROM jobs WHERE id = $1', [d.job_id]) : { rows: [] };
   const { rows: pays } = await db.query(
     `SELECT p.id, p.pay_date, p.method, p.reference, p.status, a.amount_cents FROM payment_applications a JOIN payments p ON p.id = a.payment_id
       WHERE a.document_id = $1 ORDER BY p.pay_date, p.created_at`, [d.id]);
@@ -376,9 +448,13 @@ export async function getDocument(db, companyId, docId, { today = null } = {}) {
   return {
     ...docOut(d, today),
     contact: ct,
-    lines: lines.map((l) => ({ accountId: l.account_id, accountCode: l.code, accountName: l.account_name, description: l.description,
+    job: job ?? null,
+    lines: lines.map((l) => ({ id: String(l.id), accountId: l.account_id, accountCode: l.code, accountName: l.account_name, description: l.description,
       quantity: l.quantity, unitPriceCents: l.unit_price_cents, amountCents: l.amount_cents, taxable: l.taxable,
-      serviceDate: l.service_date, itemId: l.item_id, itemName: l.item_name ?? null, itemKind: l.item_kind ?? null })),
+      serviceDate: l.service_date, itemId: l.item_id, itemName: l.item_name ?? null, itemKind: l.item_kind ?? null,
+      jobId: l.job_id ?? null, jobName: l.job_name ?? null, jobCode: l.job_code ?? null, billable: l.billable,
+      timeEntryId: l.time_entry_id ?? null, billedLineId: l.billed_line_id == null ? null : String(l.billed_line_id), billedOn: l.billed_on ?? null,
+      tripCostId: l.trip_cost_id ?? null })),
     payments: pays.map((p) => ({ id: p.id, date: p.pay_date, method: p.method, reference: p.reference, status: p.status, amountCents: p.amount_cents })),
   };
 }
@@ -409,6 +485,11 @@ export async function voidDocument(pool, companyId, docId, { date = null, actor 
     const { rows: paid } = await c.query(
       `SELECT 1 FROM payment_applications a JOIN payments p ON p.id = a.payment_id WHERE a.document_id = $1 AND p.status = 'posted' LIMIT 1`, [d.id]);
     if (paid.length) throw new LedgerError(`${label} has payments; ${replacedById ? 'edit or void those payments first' : 'void those payments first'}`);
+    if (d.kind === 'bill') {
+      const { rows: [b] } = await c.query(`SELECT d2.number FROM document_lines src JOIN document_lines l ON l.billed_line_id = src.id JOIN documents d2 ON d2.id = l.document_id
+        WHERE src.document_id = $1 AND d2.status = 'posted' LIMIT 1`, [d.id]);
+      if (b) throw new LedgerError(`${label} has a cost billed to a client on invoice ${b.number}; edit or void that invoice first`);
+    }
     const rev = await reverseEntry(c, companyId, d.journal_entry_id, { date: date || undefined, memo: `Void ${label}`, actor, fromDocument: true });
     await c.query(`UPDATE documents SET status = 'void', void_date = $3, void_entry_id = $4, voided_by = $5, voided_at = now(), replaced_by_id = $6
                     WHERE company_id = $1 AND id = $2`, [companyId, d.id, rev.entry_date, rev.id, actor, replacedById]);

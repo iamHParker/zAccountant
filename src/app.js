@@ -20,11 +20,18 @@ import * as arap from './services/arapService.js';
 import * as photos from './services/paymentPhotoService.js';
 import * as roles from './services/accessService.js';
 import * as time from './services/timesheetService.js';
+import * as projects from './services/projectService.js';
+import * as trips from './services/tripService.js';
+import * as roadSvc from './services/roadService.js';
+import * as bookFiles from './services/bookFileService.js';
+import * as mileIq from './services/mileIqService.js';
+import * as homeLayout from './services/homeLayoutService.js';
 import { AuthError } from './services/authService.js';
 import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
 import * as tax from './services/taxService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
+import { offsiteConfig, recentOffsiteBackups } from './jobs/offsiteBackup.js';
 import { createMetrics, bearerMatches } from './metrics.js';
 import * as feedback from './services/feedbackService.js';
 import { platformRole, appVersion } from './core/platform.js';
@@ -123,8 +130,11 @@ export function createApp(pool, { log } = {}) {
   app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '6mb' }));
   app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
   app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
+  app.use(/^\/api\/companies\/[^/]+\/mileiq\/(preview|import)$/, express.json({ limit: '3mb' })); // a MileIQ report, as text
   app.use(/^\/api\/companies\/[^/]+\/logo$/, express.json({ limit: '2mb' })); // the logo, as base64 (1 MB at most)
   app.use(/^\/api\/companies\/[^/]+\/payments\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a check photo, as base64 (3 MB at most)
+  app.use(/^\/api\/companies\/[^/]+\/trip-costs\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a receipt photo, likewise
+  app.use(/^\/api\/road\/items\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a receipt photo from the Road page
   app.use('/api/feedback', express.json({ limit: '6mb' })); // a picture of the screen, as base64
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
@@ -195,7 +205,55 @@ export function createApp(pool, { log } = {}) {
     setSessionCookie(res, r.token);
     res.json({ ok: true });
   });
+  // Passkeys (Face ID, Touch ID, Windows Hello). The site's name for them is its host name; the browser checks it.
+  const relyingParty = (req) => ({ rpId: (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, ''), origin: `${req.protocol}://${(req.headers.host ?? '').toLowerCase()}` });
+  const fullSession = async (req) => {
+    const s = await session(req);
+    if (!s?.session.mfa_passed) throw new AuthError('Please sign in', 401);
+    return s;
+  };
+  authApi.post('/passkey/options', async (req, res) => res.json(await auth.passkeyLoginOptions(pool, relyingParty(req))));
+  authApi.post('/passkey/login', async (req, res) => {
+    const r = await auth.passkeyLogin(pool, { credential: req.body?.credential }, relyingParty(req));
+    setSessionCookie(res, r.token);
+    res.json({ user: { ...r.user, platformRole: platformRole(r.user.email) }, next: null, version: appVersion() });
+  });
+  authApi.get('/passkeys', async (req, res) => res.json(await auth.listPasskeys(pool, (await fullSession(req)).user.id)));
+  authApi.post('/passkeys/options', async (req, res) => {
+    const s = await fullSession(req);
+    res.json(await auth.passkeyRegisterOptions(pool, s.user.id, { mfaCode: req.body?.mfaCode }, relyingParty(req)));
+  });
+  authApi.post('/passkeys', async (req, res) => {
+    const s = await fullSession(req);
+    res.status(201).json(await auth.passkeyRegister(pool, s.user.id, { credential: req.body?.credential, name: req.body?.name }, relyingParty(req)));
+  });
+  authApi.delete('/passkeys/:id', async (req, res) => {
+    await auth.removePasskey(pool, (await fullSession(req)).user.id, req.params.id);
+    res.json({ ok: true });
+  });
   app.use('/api/auth', authApi);
+
+  // ------------------------------------------------------------------ The Road page's phone key (src/services/roadService.js)
+  // No session: the phone sends its road key (Authorization: Bearer zr_…). It reaches only these few routes, scoped
+  // to the key's company and person, and stops working if the key is revoked or expires or the person loses the
+  // Bills permission.
+  const roadApi = express.Router();
+  const roadRoute = (handler, status = 200) => async (req, res) => {
+    const m = /^Bearer (\S{1,100})$/.exec(req.headers.authorization ?? '');
+    const key = m ? await roadSvc.findRoadKey(pool, m[1]) : null;
+    if (!key) return res.status(401).json({ error: 'This road key no longer works. Make a new one at your desk: Trips → Your phone on the road.', roadKey: 'invalid' });
+    const body = await withScope(pool, { userId: key.userId, companyId: key.companyId }, async (db) => {
+      const access = await auth.getAccess(db, key.userId, key.companyId);
+      if (!access?.permissions.has('bills')) throw new AuthError('This road key no longer works: your role in the company has changed.', 403);
+      return handler({ db, req, key });
+    });
+    res.status(status).json(body);
+  };
+  roadApi.get('/', roadRoute(({ db, key }) => roadSvc.roadSummary(db, key)));
+  roadApi.post('/items', roadRoute(({ db, req, key }) => roadSvc.receiveItem(db, key, req.body ?? {}), 201));
+  roadApi.post('/items/:clientId/photos', roadRoute(({ db, req, key }) => roadSvc.receivePhoto(db, key, req.params.clientId, req.body ?? {}), 201));
+  roadApi.post('/status', roadRoute(({ db, req, key }) => roadSvc.itemStatuses(db, key, req.body?.clientIds)));
+  app.use('/api/road', roadApi);
 
   // The front page lists the plans and their prices from the same catalog the Admin dashboard uses, so a price
   // set there shows here too. Public: names and prices only.
@@ -221,7 +279,7 @@ export function createApp(pool, { log } = {}) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId', 'itemId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId', 'itemId', 'tripId', 'costId', 'photoId', 'keyId', 'itemId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -286,9 +344,12 @@ export function createApp(pool, { log } = {}) {
     res.json(body);
   };
   const siteUrl = () => (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
-  api.get('/developer/summary', dev(async ({ db }) => ({
-    version: appVersion(), counts: await feedback.platformCounts(db), serverErrors: serverErrors.slice().reverse(),
-  })));
+  api.get('/developer/summary', dev(async ({ db }) => {
+    let offsite;
+    try { offsite = offsiteConfig() ? 'on' : 'off'; } catch (e) { offsite = e.message; }
+    return { version: appVersion(), counts: await feedback.platformCounts(db), serverErrors: serverErrors.slice().reverse(),
+      offsite, offsiteBackups: await recentOffsiteBackups(db) };
+  }));
   // A full backup, streamed straight from pg_dump (owner login, which sees every company). Logged: who and when.
   api.get('/developer/backup', async (req, res) => {
     if (req.user.platformRole !== 'developer') return res.status(403).json({ error: 'The Developer dashboard is for zAccountant developers.' });
@@ -476,8 +537,8 @@ export function createApp(pool, { log } = {}) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
       arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
-      const { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
-      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
+      const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
+      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
     }, 201));
   }
   api.get('/companies/:companyId/documents/:documentId', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {
@@ -489,9 +550,49 @@ export function createApp(pool, { log } = {}) {
   // Edit = void + corrected copy in one step, so it needs the same permission as Void.
   api.put('/companies/:companyId/documents/:documentId', route('post', async ({ db, req, companyId, can, actor }) => {
     await needSide(db, can, 'documents', req.params.documentId);
-    const { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
-    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
+    const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
+    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
   }));
+  // Billable time and costs not yet on an invoice, for the invoice form's "Pull in unbilled time and costs".
+  api.get('/companies/:companyId/unbilled', route('invoices', ({ db, req, companyId }) =>
+    projects.listUnbilled(db, companyId, { jobId: q(req.query.jobId), customerId: q(req.query.customerId), from: q(req.query.from), to: q(req.query.to) })));
+  // Trips: shared travel costs and travel time, billed to each project by its share. Costs are spending, so "bills".
+  const TR = '/companies/:companyId/trips';
+  const TC = '/companies/:companyId/trip-costs/:costId';
+  // The Road page: keys for the phone (each person sees and revokes only their own) and the inbox of what it sent.
+  const RK = '/companies/:companyId/road-keys';
+  const RI = '/companies/:companyId/road-items';
+  const siteOrigin = (req) => `${req.protocol}://${(req.headers.host ?? '').toLowerCase()}`;
+  api.get(RK, route('bills', ({ db, req, companyId }) => roadSvc.listRoadKeys(db, companyId, req.user.id)));
+  api.post(RK, route('bills', ({ db, req, companyId, actor }) => roadSvc.createRoadKey(db, companyId, req.user.id, req.body ?? {}, { origin: siteOrigin(req), actor }), 201));
+  api.post(`${RK}/:keyId/revoke`, route('bills', ({ db, req, companyId, actor }) => roadSvc.revokeRoadKey(db, companyId, req.user.id, req.params.keyId, { actor })));
+  api.get(RI, route(['view_books', 'bills'], ({ db, req, companyId }) => roadSvc.listRoadItems(db, companyId, { status: req.query.status })));
+  api.get(`${RI}/:itemId/photos/:photoId`, route(['view_books', 'bills'], async ({ db, req, companyId }) =>
+    ({ [FILE]: await roadSvc.getRoadPhoto(db, companyId, req.params.itemId, req.params.photoId) })));
+  api.post(`${RI}/:itemId/accept`, route('bills', ({ db, req, companyId, viewer, actor }) => roadSvc.acceptRoadItem(db, companyId, viewer, req.params.itemId, req.body ?? {}, { actor })));
+  api.post(`${RI}/:itemId/dismiss`, route('bills', ({ db, req, companyId, actor }) => roadSvc.dismissRoadItem(db, companyId, req.params.itemId, { actor })));
+  api.get(TR, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.listTrips(db, companyId, { includeClosed: req.query.closed !== '0' })));
+  api.post(TR, route('bills', ({ db, req, companyId, actor }) => trips.createTrip(db, companyId, req.body ?? {}, { actor }), 201));
+  api.get(`${TR}/:tripId`, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.getTrip(db, companyId, req.params.tripId)));
+  api.patch(`${TR}/:tripId`, route('bills', ({ db, req, companyId, actor }) => trips.updateTrip(db, companyId, req.params.tripId, req.body ?? {}, { actor })));
+  api.post(`${TR}/:tripId/costs`, route('bills', ({ db, req, companyId, actor }) =>
+    trips.addTripCost(db, companyId, req.params.tripId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) }), 201));
+  api.post(`${TR}/:tripId/travel-time`, route('bills', ({ db, req, companyId, viewer, actor }) =>
+    trips.addTravelTime(db, companyId, viewer, req.params.tripId, req.body ?? {}, { actor }), 201));
+  api.delete(`${TR}/:tripId/travel-time/:timeEntryId`, route('bills', ({ db, req, companyId, viewer, actor }) =>
+    trips.removeTravelTime(db, companyId, viewer, req.params.tripId, req.params.timeEntryId, { actor })));
+  // Edit = void + corrected copy, and Void reverses a posted entry: the same permission as for bills ("post").
+  api.put(TC, route('post', ({ db, req, companyId, actor }) => trips.replaceTripCost(db, companyId, req.params.costId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) })));
+  api.post(`${TC}/void`, route('post', ({ db, req, companyId, actor }) => trips.voidTripCost(db, companyId, req.params.costId, { actor })));
+  api.get(`${TC}/photos`, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.listCostPhotos(db, companyId, req.params.costId)));
+  api.get(`${TC}/photos/:photoId`, route(['view_books', 'bills'], async ({ db, req, companyId }) =>
+    ({ [FILE]: await trips.getCostPhoto(db, companyId, req.params.costId, req.params.photoId) })));
+  api.post(`${TC}/photos`, route('bills', ({ db, req, companyId, actor }) => trips.addCostPhoto(db, companyId, req.params.costId, { picture: req.body?.picture, actor }), 201));
+  api.delete(`${TC}/photos/:photoId`, route('bills', ({ db, req, companyId, actor }) => trips.deleteCostPhoto(db, companyId, req.params.costId, req.params.photoId, { actor })));
+  // MileIQ's monthly drive report → mileage costs on trips (src/services/mileIqService.js).
+  api.post('/companies/:companyId/mileiq/preview', route('bills', ({ db, req, companyId }) => mileIq.previewMileIq(db, companyId, { content: req.body?.content })));
+  api.post('/companies/:companyId/mileiq/import', route('bills', ({ db, req, companyId, actor }) => mileIq.importMileIq(db, companyId, req.body ?? {}, { actor }), 201));
+
   for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
@@ -542,6 +643,10 @@ export function createApp(pool, { log } = {}) {
 
   // Reports
   api.get('/companies/:companyId/reports/dashboard', route('view_books', ({ db, req, companyId }) => reports.getDashboard(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  api.get('/companies/:companyId/reports/statistics', route('view_books', ({ db, req, companyId }) => reports.getStatistics(db, companyId, { asOf: q(req.query.asOf) ?? today() })));
+  // Each person's own Home cards (any member: it's their page, not the company's books).
+  api.get('/companies/:companyId/home-layout', route('member', ({ db, req, companyId }) => homeLayout.getHomeLayout(db, companyId, req.user.id)));
+  api.put('/companies/:companyId/home-layout', route('member', ({ db, req, companyId }) => homeLayout.saveHomeLayout(db, companyId, req.user.id, req.body ?? {})));
   // Back up your books: the chart of accounts and every journal entry, in our import templates' layout.
   const backupFile = (title, rowsFor) => route('view_books', async ({ db, companyId }) => {
     const company = (await ledger.getCompany(db, companyId)).name;
@@ -549,6 +654,16 @@ export function createApp(pool, { log } = {}) {
   });
   api.get('/companies/:companyId/backup/accounts', backupFile('Chart of accounts', backup.chartRows));
   api.get('/companies/:companyId/backup/journal', backupFile('All transactions', backup.journalRows));
+  // The whole company as one .zacc file (src/services/bookFileService.js): owner-level, since it holds payroll and everything else.
+  api.get('/companies/:companyId/book-file', route('admin', async ({ db, companyId, actor }) => {
+    const f = await bookFiles.bookFile(db, companyId, { actor, appVersion: appVersion() });
+    return { [FILE]: { name: f.name, type: 'application/zip', body: f.body } };
+  }));
+  const qbName = async (db, companyId, ext) => `${(await ledger.getCompany(db, companyId)).name.replace(/[^\w .,()&-]+/g, '').trim().slice(0, 80)} for QuickBooks ${centralToday()}.${ext}`;
+  api.get('/companies/:companyId/export/quickbooks-desktop', route('view_books', async ({ db, companyId }) =>
+    ({ [FILE]: { name: await qbName(db, companyId, 'iif'), type: 'text/plain; charset=utf-8', body: await bookFiles.quickbooksIif(db, companyId) } })));
+  api.get('/companies/:companyId/export/quickbooks-online', route('view_books', async ({ db, companyId }) =>
+    ({ [FILE]: { name: await qbName(db, companyId, 'csv'), type: 'text/csv; charset=utf-8', body: await bookFiles.quickbooksOnlineCsv(db, companyId) } })));
 
   api.get('/companies/:companyId/reports/trial-balance', report('view_books', 'Trial Balance',
     ({ db, req, companyId }) => reports.getTrialBalance(db, companyId, { asOf: q(req.query.asOf) ?? today() }), statement('trial-balance')));
@@ -615,9 +730,12 @@ export function createApp(pool, { log } = {}) {
   // Jobs and timesheets. Who may see or change whose time is checked inside the service
   // (own time, your department's time with "approve time", or everyone's with "all time").
   const TIME = ['time_own', 'time_approve', 'time_all'];
-  const JOB_ADMIN = ['time_approve', 'time_all', 'admin'];
+  // Jobs are also the projects invoices and bills name, so whoever writes invoices can add them.
+  const JOB_ADMIN = ['time_approve', 'time_all', 'admin', 'invoices'];
   api.get('/companies/:companyId/jobs', route('member', ({ db, req, companyId }) => time.listJobs(db, companyId, { includeInactive: req.query.inactive === '1' })));
   api.post('/companies/:companyId/jobs', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.createJob(db, companyId, req.body ?? {}, { actor }), 201));
+  api.post('/companies/:companyId/jobs/import', route(JOB_ADMIN, ({ db, req, companyId, actor }) =>
+    projects.importProjects(db, companyId, { text: req.body?.text, customerId: req.body?.customerId || null, preview: req.body?.preview === true }, { actor })));
   api.patch('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.updateJob(db, companyId, req.params.jobId, req.body ?? {}, { actor })));
   const TE = '/companies/:companyId/time-entries';
   api.get(TE, route(TIME, ({ db, req, companyId, viewer }) => time.listTimeEntries(db, companyId, viewer, {
@@ -646,6 +764,7 @@ export function createApp(pool, { log } = {}) {
   const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
   app.get('/', (req, res) => res.sendFile('welcome.html', { root: publicDir }));
   app.get('/prices', (req, res) => res.sendFile('prices.html', { root: publicDir }));
+  app.get('/road', (req, res) => res.sendFile('road.html', { root: publicDir }));
   app.get(['/app', '/app/'], (req, res) => res.sendFile('index.html', { root: publicDir }));
   app.use(express.static(publicDir, { index: false }));
 

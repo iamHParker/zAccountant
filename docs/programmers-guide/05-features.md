@@ -7,6 +7,16 @@ lists every URL.
 Companies, chart of accounts (types and subtypes decide where an account appears on the statements), journal entries
 (simple and advanced), reversing, recurring entries, closing periods, statements with comparisons, CSV export.
 
+## Home cards and Statistics (`homeLayoutService.js`, `reportService.getStatistics`, migration 029)
+The card catalog is `HOME_CARDS` in `public/app.js` (id, icon, title, permissions, plan feature, and `go`: a tab plus
+an optional method to run there). The server stores only each person's `{ left, right }` id lists (`home_layouts`,
+RLS on company *and* user; route permission `member`) and checks their shape; the browser skips unknown ids and cards
+the role can't use. `GET /reports/statistics` (view_books): 12 calendar months ending with `asOf` (income = revenue
+credits − debits, expenses = expense debits − credits, cash = running balance of `cash_flow = 'cash'` accounts), the
+six largest expense accounts this fiscal year, and receivable/payable totals and past-due parts from `getAging`.
+Charts are plain HTML bars sized with `:style` (CSSOM, allowed by the CSP); series colors `--series-1/2` were checked
+with the dataviz palette validator in light and dark.
+
 ## Importing books (`importService.js`, `src/core/bookImport.js`, `src/core/xlsx.js`)
 Chart of accounts, opening balances and journals from CSV, Excel or a QuickBooks IIF file. `preview` checks
 everything and saves nothing. An import is one batch, and the whole batch can be undone.
@@ -25,6 +35,19 @@ Settings → Back up your books downloads two CSVs in exactly our import templat
 and every journal line (Entry, Date, Memo, Account, Debit, Credit, Source). Importing them into a new company
 (accounts first, then journal) rebuilds the same trial balance; `api.db.test.js` proves it. Documents (invoice
 lines, customers, employees, timesheets) and line memos are not in it. Alpha users are told to keep their own.
+
+**The book file (`.zacc`, `bookFileService.js`, `GET …/book-file`, permission `admin`):** a .zip (`src/core/zip.js`
+writes it; `unzip` in `xlsx.js` reads it) with `README.txt`, `manifest.json` (format `zacc`, version 1, company, time,
+each file's bytes, rows and SHA-256), `import/` (the two CSVs above), `tables/<table>.csv` for **every table with a
+`company_id` column** (found from `information_schema`, so new tables are included automatically; `SKIP_TABLES`
+and `SKIP_COLUMNS` keep out road keys, feedback, plans, `ssn_enc` and other secrets) and `pictures/` (bytea columns,
+named in their rows). Text starting with = + - @ gets a leading ' (CSV formula guard), as the manifest notes.
+Re-importing a whole .zacc is not built yet; the `import/` CSVs rebuild the books today.
+
+**QuickBooks (`GET …/export/quickbooks-desktop` .iif, `…/quickbooks-online` .csv, permission `view_books`):** every
+journal line; account names are "code name" (31 characters, ':' replaced, since QuickBooks reads it as a sub-account);
+IIF account types from type/subtype (`IIF_TYPE`); the customer or vendor name is filled from the invoice, bill or
+payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
 
 ## Sales and bills (`arapService.js`, `invoiceSetupService.js`)
 - Customers and vendors are `contacts` (`kind`). Invoices and bills are `documents` with `document_lines`.
@@ -59,6 +82,42 @@ lines, customers, employees, timesheets) and line memos are not in it. Alpha use
     `invoice_footer`), a logo in `company_logos` (≤1 MB PNG/JPEG, checked by its first bytes), and
     `default_sales_tax_rate`, which fills new invoices.
   - Sales tax = rate × the sum of taxable lines, rounded once (not per line). Zero to 20%.
+- **Projects and billing time and costs (migration 023, `src/services/projectService.js`, `src/core/projects.js`):**
+  - A project is a `jobs` row (the timesheet jobs), now with a site `address`. `/jobs` is no longer gated by the
+    Timesheets plan feature, and `invoices` may add projects. `POST …/jobs/import` adds projects from pasted folder
+    names (`parseProjectList`: last path part, leading number = `code`, whole folder name = `name`; preview first).
+  - A bill line can carry `job_id` and `billable` ("bill to client"). An invoice carries `job_id`; an invoice line
+    carries `time_entry_id` or `billed_line_id` (the bill line it passes on).
+  - `GET …/unbilled?jobId=|customerId=&from&to` (permission `invoices`) lists billable, non-rejected time and billable
+    lines of posted bills that no posted invoice line points at. Hours become a quantity with `minutesToQuantity`
+    (4 decimals, half-up: 50 min → 0.8333).
+  - Billed once: `cleanLines` checks first (clear message); trigger `zacc_bill_once` is the backstop, with an advisory
+    lock on the source so two invoices saved together take turns. Voiding the invoice frees the source; Edit's copy
+    carries the same links (the old invoice is voided first in the same transaction).
+  - **Trips (migration 024, `src/services/tripService.js`, Trips tab, permission `bills`; edit/void `post`):** a trip
+    lists projects with a share in hundredths of a percent (`share_bp`, total ≤ 100%; the rest is not billed). A trip
+    cost posts its own entry (source `trip`: Dr expense, Cr bank / credit card / owner equity "paid personally") and is
+    edited by void + corrected copy (`replaced_by_id`, photos copied). Kinds: airfare, rental car, lodging, meals,
+    tolls, mileage, other; mileage = miles × a typed rate per mile (`mileageAmount`, never a built-in IRS number).
+    Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tripCosts` (quantity = share,
+    `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share, `sharedHoursQuantity`). Those invoice
+    lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
+  - **Road page (migration 026, `src/services/roadService.js`, `public/road.html` + `road.js` + `road-sw.js`):** the phone
+    keeps items in IndexedDB and sends them with its road key (see Security); each item and photo has the phone's own
+    `client_id`, so a resend changes nothing. A service worker keeps a copy of the page for no-signal starts (network
+    first). Trips → From the road accepts an item in one transaction: a trip (new project numbers become jobs unless a
+    job with that name or number exists; even shares via `evenShares`), a cost (`addTripCost` with idempotency key
+    `road-<item id>`, photos copied), or travel time (a time entry for the sender). QR codes come from
+    `qrcode-generator` on the server (SVG).
+  - **MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`):** the CSV is laid out
+    like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's
+    header, reads only typed cells and works the dollars out itself. A drive's `key` is a SHA-256 of when, where, miles
+    and vehicle; `mileage_drives` keeps each imported drive, and a key counts as imported while its trip cost is posted
+    or was edited. Import groups drives per (trip, day, rate) into one `addTripCost` mileage cost whose amount is the
+    sum of each drive rounded (server-only `mileageCents` option, so the books tie out to MileIQ's report); tolls and
+    parking post as their own costs. Drives with trip `new` go on one new trip spanning their dates.
+  - Billed time can't be changed, deleted or sent back (`zacc_time_billed_final`, and the service says which invoice);
+    a bill with a billed cost can't be voided or edited (`zacc_bill_cost_billed`) until that invoice is.
 
 ## Banking (`bankService.js`, `src/core/bankImport.js`)
 CSV and OFX/QFX statements. Repeated lines are skipped by a fingerprint. Rules suggest an account. Each bank line

@@ -6,6 +6,7 @@
 // enters the 6-digit code from their authenticator app; only then can it reach any company data.
 import { hashPassword, verifyPassword, DUMMY_HASH, passwordProblems, sha256, randomToken, encryptField, decryptField } from '../security/crypto.js';
 import { newTotpSecret, verifyTotp, otpauthUri } from '../security/totp.js';
+import { verifyRegistration, verifyAssertion, ALGORITHMS, WebAuthnError } from '../security/webauthn.js';
 import { LedgerError } from '../core/ledger.js';
 import { PRESET_ROLES, PRESET_KEYS } from '../core/permissions.js';
 
@@ -132,6 +133,120 @@ export async function mfaVerify(db, userId, tokenHash, input) {
   // New session id after full sign-in (prevents session fixation).
   await db.query('DELETE FROM sessions WHERE token_hash = $1', [tokenHash]);
   return { token: await newSession(db, userId, true) };
+}
+
+// ---- Passkeys (src/security/webauthn.js explains them)
+
+const CHALLENGE_MINUTES = 5;
+const MAX_PASSKEYS = 10;
+const uuidBytes = (id) => Buffer.from(id.replace(/-/g, ''), 'hex').toString('base64url');
+
+async function newChallenge(db, purpose, userId = null) {
+  const challenge = randomToken(32);
+  await db.query('DELETE FROM auth_challenges WHERE expires_at < now()');
+  await db.query(`INSERT INTO auth_challenges (challenge_hash, purpose, user_id, expires_at)
+                  VALUES ($1,$2,$3, now() + interval '${CHALLENGE_MINUTES} minutes')`, [sha256(challenge), purpose, userId]);
+  return challenge;
+}
+
+/** Use up the challenge the browser signed (it is inside clientDataJSON). Returns it, or throws if unknown/expired. */
+async function takeChallenge(db, credential, purpose, userId = null) {
+  let challenge = null;
+  try {
+    const c = JSON.parse(Buffer.from(String(credential?.response?.clientDataJSON ?? ''), 'base64url').toString('utf8'));
+    if (typeof c?.challenge === 'string' && c.challenge.length <= 200) challenge = c.challenge;
+  } catch { /* handled below */ }
+  const { rows: [row] } = challenge ? await db.query(
+    `DELETE FROM auth_challenges WHERE challenge_hash = $1 AND purpose = $2 AND user_id IS NOT DISTINCT FROM $3 AND expires_at > now()
+     RETURNING 1`, [sha256(challenge), purpose, userId]) : { rows: [] };
+  if (!row) throw new AuthError('That request has expired. Try again.', 400);
+  return challenge;
+}
+
+const asAuthError = (e) => (e instanceof WebAuthnError ? new AuthError(e.message, 400) : e);
+
+/**
+ * Step 1 of adding a passkey. The person must be fully signed in and type their authenticator code again, so
+ * someone at an unlocked computer can't quietly add their own key to the account.
+ */
+export async function passkeyRegisterOptions(db, userId, { mfaCode }, rp) {
+  if (!mfaCode) throw new AuthError('Enter the 6-digit code from your authenticator app', 400);
+  await checkSecondFactor(db, userId, { code: mfaCode });
+  const { rows: [u] } = await db.query('SELECT id, email, name FROM users WHERE id = $1', [userId]);
+  const { rows: keys } = await db.query('SELECT credential_id, transports FROM passkeys WHERE user_id = $1', [userId]);
+  if (keys.length >= MAX_PASSKEYS) throw new LedgerError(`You can keep at most ${MAX_PASSKEYS} passkeys. Remove one first.`);
+  return {
+    challenge: await newChallenge(db, 'register', userId),
+    rp: { id: rp.rpId, name: 'zAccountant' },
+    user: { id: uuidBytes(u.id), name: u.email, displayName: u.name },
+    algorithms: ALGORITHMS,
+    excludeCredentials: keys.map((k) => ({ id: k.credential_id, transports: k.transports })),
+    timeout: CHALLENGE_MINUTES * 60_000,
+  };
+}
+
+/** Step 2: save the new passkey the device made. */
+export async function passkeyRegister(db, userId, { credential, name }, rp) {
+  const label = typeof name === 'string' ? name.trim() : '';
+  if (!label || label.length > 60) throw new LedgerError('Name this passkey (for example "Homer\'s iPhone"), at most 60 characters');
+  const challenge = await takeChallenge(db, credential, 'register', userId);
+  let k;
+  try { k = verifyRegistration(credential, { challenge, origin: rp.origin, rpId: rp.rpId }); } catch (e) { throw asAuthError(e); }
+  const { rows: [dup] } = await db.query('SELECT 1 FROM passkeys WHERE credential_id = $1', [k.credentialId]);
+  if (dup) throw new LedgerError('That passkey is already saved');
+  const { rows: [row] } = await db.query(
+    `INSERT INTO passkeys (user_id, credential_id, public_key, algorithm, sign_count, transports, name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, name, created_at AS "createdAt"`,
+    [userId, k.credentialId, k.publicKey, k.alg, k.signCount, k.transports, label]);
+  return row;
+}
+
+export async function listPasskeys(db, userId) {
+  const { rows } = await db.query(
+    `SELECT id, name, to_char(created_at AT TIME ZONE 'America/Chicago', 'YYYY-MM-DD') AS "createdAt",
+            to_char(last_used_at AT TIME ZONE 'America/Chicago', 'YYYY-MM-DD') AS "lastUsedAt"
+       FROM passkeys WHERE user_id = $1 ORDER BY created_at`, [userId]);
+  return rows;
+}
+
+export async function removePasskey(db, userId, id) {
+  if (typeof id !== 'string' || !UUIDISH.test(id)) throw new AuthError('Passkey not found', 404);
+  const { rowCount } = await db.query('DELETE FROM passkeys WHERE id = $1 AND user_id = $2', [id, userId]);
+  if (!rowCount) throw new AuthError('Passkey not found', 404);
+}
+
+/** Signing in with a passkey, step 1: a challenge for the device to sign. Any of the person's passkeys may answer. */
+export async function passkeyLoginOptions(db, rp) {
+  return { challenge: await newChallenge(db, 'login'), rpId: rp.rpId, timeout: CHALLENGE_MINUTES * 60_000 };
+}
+
+/**
+ * Step 2: check the signature and start a fully signed-in session. A passkey is two factors in one: something
+ * the person has (the device) and something they are or know (face, fingerprint or the device PIN).
+ */
+export async function passkeyLogin(db, { credential }, rp) {
+  const challenge = await takeChallenge(db, credential, 'login');
+  const id = typeof credential?.id === 'string' ? credential.id : '';
+  const { rows: [k] } = await db.query(
+    `SELECT k.*, u.email, u.name AS user_name, u.totp_enabled, u.locked_until FROM passkeys k JOIN users u ON u.id = k.user_id
+      WHERE k.credential_id = $1`, [id]);
+  if (!k) throw new AuthError('That passkey is not saved in zAccountant. Sign in with your password, then add it in Settings.');
+  const handle = credential?.response?.userHandle;
+  if (handle && handle !== uuidBytes(k.user_id)) throw new AuthError('That passkey belongs to a different account');
+  if (k.locked_until && new Date(k.locked_until) > new Date()) {
+    throw new AuthError(`Too many failed attempts. Try again after ${new Date(k.locked_until).toLocaleTimeString('en-US', { timeZone: 'America/Chicago' })} CT.`, 429);
+  }
+  let r;
+  try {
+    r = verifyAssertion(credential, { alg: k.algorithm, publicKey: k.public_key, signCount: Number(k.sign_count) },
+      { challenge, origin: rp.origin, rpId: rp.rpId });
+  } catch (e) { throw asAuthError(e); }
+  await db.query('UPDATE passkeys SET sign_count = $2, last_used_at = now() WHERE id = $1', [k.id, r.signCount]);
+  await db.query('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [k.user_id]);
+  return {
+    user: { id: k.user_id, email: k.email, name: k.user_name, mfaEnabled: k.totp_enabled },
+    token: await newSession(db, k.user_id, true),
+  };
 }
 
 // ---- Memberships

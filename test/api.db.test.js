@@ -515,10 +515,14 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const members = (await owner.c.call('GET', `${base}/members`)).body;
     const uid = (e) => members.find((m) => m.email === e).id;
 
-    // Jobs: approvers and the owner add them; staff can only pick them.
+    // Jobs: approvers, the owner and whoever writes invoices (staff) add them; a viewer can't.
     const job = await foreman.c.call('POST', `${base}/jobs`, { name: 'Smith Residence', code: 'J-101' });
     assert.equal(job.status, 201, JSON.stringify(job.body));
-    assert.equal((await worker.c.call('POST', `${base}/jobs`, { name: 'Nope' })).status, 403);
+    const viewerRole = (await owner.c.call('POST', `${base}/roles`, { name: 'Look only', permissions: ['time_own'] })).body;
+    const looker = await newUser('looker@example.com');
+    assert.equal((await owner.c.call('POST', `${base}/members`, { email: 'looker@example.com', role: viewerRole.id })).status, 201);
+    assert.equal((await looker.c.call('POST', `${base}/jobs`, { name: 'Nope' })).status, 403);
+    assert.equal((await looker.c.call('POST', `${base}/jobs/import`, { text: '2701 Nope' })).status, 403);
     assert.equal((await worker.c.call('GET', `${base}/jobs`)).body.length, 1);
 
     // A week of 9-hour days (Mon–Fri), entered by the worker.
@@ -555,6 +559,50 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     await worker.c.call('POST', `${base}/time-entries/submit`, { ids: [ids[4]] });
     assert.equal((await foreman.c.call('POST', `${base}/time-entries/review`, { ids, approve: true })).body.approved, 5);
     assert.equal((await worker.c.call('PATCH', `${base}/time-entries/${ids[0]}`, { date: '2026-11-02', hours: '1' })).status, 400, 'approved time is locked');
+
+    // Billing the job: projects pasted from folder names, then the unbilled hours pulled onto an invoice.
+    const pasted = await owner.c.call('POST', `${base}/jobs/import`, { text: '"C:\\Projects\\2701 Lee Garage"\n"C:\\Projects\\2702 Ruiz Deck"' });
+    assert.equal(pasted.status, 200, JSON.stringify(pasted.body));
+    assert.equal(pasted.body.added, 2);
+    const cust = (await owner.c.call('POST', `${base}/customers`, { name: 'Smith Family' })).body;
+    const unbilled = await owner.c.call('GET', `${base}/unbilled?jobId=${job.body.id}`);
+    assert.equal(unbilled.status, 200, JSON.stringify(unbilled.body));
+    assert.deepEqual(unbilled.body.time.map((x) => x.quantity), ['9', '9', '9', '9', '9']);
+    assert.equal((await worker.c.call('GET', `${base}/unbilled?jobId=${job.body.id}`)).status, 200, 'staff write invoices');
+    assert.equal((await looker.c.call('GET', `${base}/unbilled?jobId=${job.body.id}`)).status, 403);
+    const income = accts.find((a) => a.type === 'revenue').id;
+    const billed = await owner.c.call('POST', `${base}/invoices`, { contactId: cust.id, date: '2026-11-09', jobId: job.body.id,
+      lines: [{ accountId: income, description: 'framing', quantity: '9', unitPrice: '95', timeEntryId: unbilled.body.time[0].id }] });
+    assert.equal(billed.status, 201, JSON.stringify(billed.body));
+    assert.equal(billed.body.totalCents, 85500); // 9 h × $95
+    assert.equal((await owner.c.call('GET', `${base}/unbilled?jobId=${job.body.id}`)).body.time.length, 4);
+    const twice = await owner.c.call('POST', `${base}/invoices`, { contactId: cust.id, date: '2026-11-09',
+      lines: [{ accountId: income, quantity: '9', unitPrice: '95', timeEntryId: unbilled.body.time[0].id }] });
+    assert.equal(twice.status, 400);
+    assert.ok(twice.body.details.some((d) => /already billed/.test(d)));
+
+    // A trip shared by two projects, through the restricted database role: costs, a receipt photo, travel time, edit.
+    const garage = (await owner.c.call('GET', `${base}/jobs`)).body.find((j) => j.code === '2701');
+    const expense = accts.find((a) => a.type === 'expense').id;
+    const card = accts.find((a) => a.subtype === 'credit_card' || a.cashFlow === 'cash').id;
+    const trip = await owner.c.call('POST', `${base}/trips`, { name: 'Dallas', startDate: '2026-11-10',
+      jobs: [{ jobId: job.body.id, share: '75' }, { jobId: garage.id, share: '25' }] });
+    assert.equal(trip.status, 201, JSON.stringify(trip.body));
+    const withCost = await owner.c.call('POST', `${base}/trips/${trip.body.id}/costs`, { date: '2026-11-10', vendor: 'Avis', description: 'Rental car',
+      amount: '200.00', expenseAccountId: expense, paidFromAccountId: card }, { 'Idempotency-Key': 'trip-cost-1' });
+    assert.equal(withCost.status, 201, JSON.stringify(withCost.body));
+    const costId = withCost.body.costId;
+    const photo = await owner.c.call('POST', `${base}/trip-costs/${costId}/photos`, { picture: `data:image/png;base64,${Buffer.from('89504e470d0a1a0a', 'hex').toString('base64')}` });
+    assert.equal(photo.status, 201, JSON.stringify(photo.body));
+    assert.equal((await owner.c.call('POST', `${base}/trips/${trip.body.id}/travel-time`, { date: '2026-11-10', hours: '4' })).status, 201);
+    const tripPull = (await owner.c.call('GET', `${base}/unbilled?jobId=${garage.id}`)).body;
+    assert.deepEqual(tripPull.tripCosts.map((x) => [x.quantity, x.shareCents]), [['0.25', 5000]]);
+    assert.equal(tripPull.time[0].quantity, '1'); // 25% of 4 h
+    const edited = await owner.c.call('PUT', `${base}/trip-costs/${costId}`, { date: '2026-11-10', vendor: 'Avis', description: 'Rental car + tolls',
+      amount: '231.60', expenseAccountId: expense, paidFromAccountId: card });
+    assert.equal(edited.status, 200, JSON.stringify(edited.body));
+    assert.equal(edited.body.costs.find((x) => x.status === 'posted').photoCount, 1);
+    assert.equal((await looker.c.call('GET', `${base}/trips`)).status, 403);
 
     // HoursTracker import: the next week, two shifts; importing the same file again skips both.
     const csv = 'Job,Clocked In,Clocked Out,Duration,Hourly Rate,Earnings,Comment\n'

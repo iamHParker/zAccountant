@@ -22,6 +22,19 @@ so the books always balance. You don't need to know debits and credits for every
 "✓ Your books are in balance" is checked every time the page loads, and the full books check runs every night.</p>`,
   },
   {
+    id: 'home-cards', tab: 'home', title: 'Home cards and Statistics',
+    words: 'home cards shortcuts arrange move add remove drag statistics chart graph month income expenses cash dashboard',
+    html: `
+<p>The cards beside <em>Record a transaction</em> are shortcuts: press one to go straight to that job.</p>
+<ol>
+  <li><strong>Arrange cards</strong>, then <strong>Add a card</strong> from the list, or press <strong>✕</strong> on one to remove it.</li>
+  <li>Drag a card to move it, or use its arrows; <strong>→ column</strong> / <strong>← column</strong> moves it to the other side.</li>
+  <li><strong>Done arranging</strong>. Your cards are yours alone and follow you to your phone.</li>
+</ol>
+<p>The <strong>Statistics</strong> card opens 12 months of income and expenses, cash at each month's end, this year's largest expenses,
+and what customers owe you and you owe vendors. <strong>Show the numbers</strong> gives the table.</p>`,
+  },
+  {
     id: 'journal', tab: 'journal', title: 'Recording transactions',
     words: 'money in money out transfer journal entry debit credit reverse recurring search',
     html: `
@@ -54,7 +67,67 @@ Receivable in your books. Download it as CSV or print it.</p>
 <p><strong>Mistake on an invoice?</strong> Open it and press <strong>Edit</strong>. Saving replaces it with the corrected one (same number); the old one stays in history marked Replaced. Payments have an <strong>edit</strong> link on the Payments tab. If an invoice already has a payment, fix the payment first.</p>
 <p>An invoice with no payments can also be <strong>voided</strong>; it stays on record marked void.</p>
 <p><strong>Photo of the check:</strong> in Receive payment, press <strong>📷 Take photo</strong> (on an iPhone the camera opens) to keep the check and the remittance slip with the payment. Find them later under Payments → <strong>photos</strong>. A photo is a record only; deposit the check as usual.</p>
-<p>Billing by the hour? See <a href="#" data-help="invoice-setup">Invoice rates, letterhead and logo</a>.</p>`,
+<p>Billing by the hour? See <a href="#" data-help="invoice-setup">Invoice rates, letterhead and logo</a>, and
+<a href="#" data-help="projects">Projects: billing time and costs</a>.</p>`,
+  },
+  {
+    id: 'projects', tab: null, title: 'Projects: billing time and costs',
+    words: 'project job folder number unbilled billable time hours timesheet pull airfare rental car lodging cost pass on bill to client',
+    html: `
+<p><strong>Sales → Projects</strong> lists your projects (the same list as the jobs on the Time tab). To add many at once,
+select your project folders in File Explorer, hold Shift, right-click, choose <strong>Copy as path</strong>, and paste them
+under <em>Add projects from your folder names</em>. "2601 Smith Residence" becomes project number 2601.</p>
+<ol>
+  <li>On a bill for a cost you pass on (airfare, rental car, lodging), pick the <strong>Project</strong> on the line and leave
+      <strong>Bill to client</strong> ticked.</li>
+  <li>Enter your hours on the Time tab against the project, marked billable.</li>
+  <li>On a new invoice, pick the <strong>Project</strong>, then press <strong>⏱ Pull in unbilled time and costs</strong>. Choose
+      the rate for the hours, untick anything to leave for later, and add the lines.</li>
+</ol>
+<p>Each hour or cost is billed once. It comes back on the list if that invoice is voided. Billed time can't be changed until
+that invoice is edited or voided.</p>`,
+  },
+  {
+    id: 'trips', tab: 'trips', title: 'Trips: shared travel costs',
+    words: 'trip travel airfare rental car lodging hotel meals tolls mileage miles receipt photo share percent split project',
+    html: `
+<ol>
+  <li><strong>+ New trip</strong>: name, dates, and the projects it was for, each with its share in percent (80% for the major
+      client, 10% for a small job). <em>Split evenly</em> fills equal shares. Shares can add up to less than 100%; the rest isn't billed.</li>
+  <li><strong>+ Add cost</strong>: Airfare, Rental car, Lodging, Meals, Tolls, Mileage or Other, the amount, and what you paid
+      with. Mileage is miles × your rate per mile (the IRS standard rate from irs.gov, or your own). <strong>📷 Take photo</strong> keeps the receipt.</li>
+  <li><strong>+ Add travel time</strong> for the hours on the road.</li>
+</ol>
+<p>Late costs (tolls) can be added any time. On each project's invoice, <strong>⏱ Pull in unbilled time and costs</strong> adds
+its share of every cost; type another quantity on a line to bill a different share.</p>`,
+  },
+  {
+    id: 'road', tab: 'trips', title: 'Your phone on the road',
+    words: 'road phone iphone mobile offline no signal qr code key receipt photo travel away from desk home screen',
+    html: `
+<p>Jot down trip costs, receipt photos, travel time and new project numbers on your phone, even with no signal.
+The phone never signs in to your books: it gets a <strong>road key</strong> that can only add to a <em>From the road</em> box.</p>
+<ol>
+  <li><strong>Trips → Your phone on the road → Make a road key</strong>, then scan the QR code with the phone's camera.
+      On an iPhone: Share → <strong>Add to Home Screen</strong>.</li>
+  <li>On the road: <strong>+ New trip</strong>, <strong>+ Cost or receipt</strong>, <strong>+ Travel time</strong>. Items wait on the phone and go when there is signal.</li>
+  <li>At the desk: <strong>Trips → From the road</strong>: choose the expense account and what you paid with, <strong>Accept</strong>
+      the trip first, then its costs and time. <strong>Dismiss</strong> what doesn't belong.</li>
+</ol>
+<p>Lost the phone? <strong>turn off</strong> its key in the same place. Keys last 90 days.</p>`,
+  },
+  {
+    id: 'mileiq', tab: 'trips', title: 'Mileage from MileIQ',
+    words: 'mileiq mileage miles drive drives car vehicle log irs rate import csv tolls parking local driving',
+    html: `
+<p>In MileIQ's monthly email choose <strong>Download as CSV</strong>, then <strong>Trips → Import from MileIQ</strong> and pick the file.</p>
+<ol>
+  <li>Business drives are ticked; personal and commute drives are never imported.</li>
+  <li>Each drive goes on the trip whose dates cover it, or on a new <em>Local driving</em> trip. Change any of them.</li>
+  <li>Choose the expense account (Vehicle Expense) and what paid (your own car: an owner account), then <strong>Import</strong>.</li>
+</ol>
+<p>You get one mileage cost per trip per day, with MileIQ's own dollar figure, so the total matches its report. Tolls and parking
+come in as their own costs. A drive is never imported twice. Add projects to the local-driving trip so invoices can bill it.</p>`,
   },
   {
     id: 'invoice-setup', tab: null, title: 'Invoice rates, letterhead and logo',
@@ -215,7 +288,10 @@ account and enter the confirmation number. Your books then show the tax paid. A 
     id: 'close', tab: 'settings', title: 'Closing the books and the audit trail',
     words: 'close lock period reopen audit trail verify books check year end',
     html: `
-<p><strong>Back up your books</strong> (alpha testing: keep your own copy). Download the chart of accounts and all transactions as CSV files. To rebuild, import them into a new company: the chart first, then the transactions. Invoice details, customers, employees and timesheets are not included.</p>
+<p><strong>Back up your books</strong> (alpha testing: keep your own copy). <em>Download the book file</em> (owner) gives one .zacc file with everything,
+including invoice details, customers, employees (no Social Security numbers), timesheets, trips and pictures; it's an ordinary .zip inside.
+The chart of accounts and all transactions also come as two spreadsheets: import them into a new company (the chart first) to rebuild the books.
+<em>For QuickBooks Desktop (.iif)</em> and <em>For QuickBooks Online (.csv)</em> carry every transaction as a journal entry.</p>
 <p><strong>Close the books</strong> after a month or year is final (usually after the bank is reconciled and your accountant is done).
 Nobody can add or change transactions dated on or before that day. Only the owner can reopen, with a two-step sign-in code and a reason, and that is logged.</p>
 <p><strong>Audit trail:</strong> every change is written to a tamper-evident log. <em>Verify audit trail</em> checks every record,
@@ -233,10 +309,13 @@ and <em>Run full check now</em> also proves the trial balance and balance sheet 
   },
   {
     id: 'security', tab: null, title: 'Signing in and keeping your account safe',
-    words: 'password two-step 2fa authenticator recovery code security sign in lost phone',
+    words: 'password two-step 2fa authenticator recovery code security sign in lost phone passkey face id touch id windows hello pin',
     html: `
 <p>Two-step sign-in is required for everyone: your password plus a 6-digit code from an authenticator app
 (Google or Microsoft Authenticator, 1Password, Authy).</p>
+<p><strong>Face ID, Touch ID, Windows Hello:</strong> on each device you use, open <em>Settings → Sign in with Face ID</em>,
+name the device, type your 6-digit code and press <em>Add this device</em>. Then choose <em>Sign in with Face ID or a passkey</em>
+on the sign-in screen: nothing to type, so nothing a camera can see. Remove a lost device's passkey there too.</p>
 <p><strong>Recovery codes:</strong> save them somewhere safe when you set up. If you lose your phone, each code signs you in once.</p>
 <p>Social Security numbers are encrypted before they're stored, and each company's data is walled off by the database itself.</p>`,
   },

@@ -43,7 +43,34 @@ Alert rules for Grafana (thresholds from Section 14.2):
 
 ## 4. Backups and the restore drill (RTO under 4 hours)
 
-**While on Railway's Hobby plan (Homer, 2026-10-24) there are no automatic backups.** A developer downloads one
+### Nightly off-site backup (Homer stays on Hobby, 2026-10-25)
+
+Each night after the books check (2 a.m. Central) the server makes a full copy of the database (pg_dump), locks it
+with `BACKUP_ENCRYPTION_KEY` (AES-256-GCM) and uploads it to a storage bucket at another company
+(`src/jobs/offsiteBackup.js`). It is off until the variables below are set. The Developer dashboard shows each
+night's result; up to 3 tries a night.
+
+**Set it up once (about 15 minutes).** Cloudflare R2 is suggested (10 GB free, no download fees); Backblaze B2 or
+Amazon S3 work the same way.
+1. Cloudflare dashboard → **R2** → **Create bucket**, name `zaccountant-backups`, location automatic.
+2. In the bucket's **Settings → Object lifecycle rules**, add a rule: delete objects 90 days after upload.
+3. **R2 → Manage API tokens → Create API token**: permission **Object Read & Write**, applied to that one bucket only.
+   Copy the **Access Key ID**, the **Secret Access Key** and the **S3 endpoint** (`https://<account id>.r2.cloudflarestorage.com`).
+4. Make the encryption key: on any computer with Node, run `node -e "console.log(require('crypto').randomBytes(36).toString('base64'))"`.
+   **Save it in your password manager first.** Without it no backup can ever be opened, and Railway is not a safe
+   place to keep the only copy.
+5. Railway → the zAccountant service → **Variables**, add: `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`
+   (`zaccountant-backups`), `BACKUP_S3_REGION` (`auto`), `BACKUP_S3_KEY_ID`, `BACKUP_S3_SECRET`, `BACKUP_ENCRYPTION_KEY`.
+   Railway redeploys. To test at once rather than waiting for 2 a.m.: in the service's shell, `npm run backup:offsite`.
+6. The next morning, the Developer dashboard's **Nightly off-site backup** table shows "sent".
+
+**Opening one:** download the `.dump.zbk` file from the bucket, then
+`BACKUP_ENCRYPTION_KEY=… npm run backup:decrypt -- zaccountant-2026-11-02-pg16.dump.zbk backup.dump`, and restore
+`backup.dump` with the drill below (`--file backup.dump`). Do that once as the restore drill before alpha.
+
+### Downloading a backup by hand
+
+**While on Railway's Hobby plan (Homer, 2026-10-24) there are no automatic backups on Railway itself.** A developer downloads one
 from the Developer dashboard (**Download backup**, `GET /api/developer/backup`, pg_dump custom format, file named
 `zaccountant-backup-<date>-pg<version>.dump`) about once a week and keeps it private: it holds every company's books.
 Restore it with `pg_restore` of that PostgreSQL version, or check it with the drill's `--file` option below.

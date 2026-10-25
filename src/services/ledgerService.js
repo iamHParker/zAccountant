@@ -265,8 +265,8 @@ export async function reverseEntry(pool, companyId, entryId, { date, memo, actor
   });
 }
 
-const DOCUMENT_ENTRY = { invoice: 'an invoice (Sales tab)', bill: 'a bill (Bills tab)', payment: 'a payment (Sales or Bills tab)' };
-const SOURCES = ['manual', 'simple', 'payroll', 'import', 'reversal', 'bank', 'recurring', 'system', 'invoice', 'bill', 'payment'];
+const DOCUMENT_ENTRY = { invoice: 'an invoice (Sales tab)', bill: 'a bill (Bills tab)', payment: 'a payment (Sales or Bills tab)', trip: 'a trip cost (Trips tab)' };
+const SOURCES = ['manual', 'simple', 'payroll', 'import', 'reversal', 'bank', 'recurring', 'system', 'invoice', 'bill', 'payment', 'trip'];
 
 /**
  * Journal search. All filters are optional and combine with AND:

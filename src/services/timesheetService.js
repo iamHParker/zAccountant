@@ -14,7 +14,7 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400
 
 // ---------------------------------------------------------------- Jobs
 
-const JOB_COLS = `j.id, j.name, j.code, j.customer_id AS "customerId", c.name AS "customerName", j.is_active AS "isActive"`;
+const JOB_COLS = `j.id, j.name, j.code, j.customer_id AS "customerId", c.name AS "customerName", j.address, j.is_active AS "isActive"`;
 
 export async function listJobs(db, companyId, { includeInactive = false } = {}) {
   const { rows } = await db.query(
@@ -23,7 +23,7 @@ export async function listJobs(db, companyId, { includeInactive = false } = {}) 
   return rows;
 }
 
-async function cleanJob(db, companyId, { name, code, customerId }) {
+async function cleanJob(db, companyId, { name, code, customerId, address }) {
   const n = typeof name === 'string' ? name.trim() : '';
   if (!n || n.length > 80) throw new LedgerError('Job name is required (up to 80 characters)');
   const cd = typeof code === 'string' && code.trim() ? code.trim() : null;
@@ -35,7 +35,9 @@ async function cleanJob(db, companyId, { name, code, customerId }) {
     if (!c) throw new LedgerError('That customer does not exist');
     cust = c.id;
   }
-  return { name: n, code: cd, customerId: cust };
+  const addr = typeof address === 'string' && address.trim() ? address.trim() : null;
+  if (addr && addr.length > 300) throw new LedgerError('The site address can be up to 300 characters');
+  return { name: n, code: cd, customerId: cust, address: addr };
 }
 
 export async function createJob(pool, companyId, input, { actor = null } = {}) {
@@ -44,7 +46,7 @@ export async function createJob(pool, companyId, input, { actor = null } = {}) {
     const v = await cleanJob(c, companyId, input);
     const { rows: [dup] } = await c.query('SELECT 1 FROM jobs WHERE company_id = $1 AND lower(trim(name)) = lower($2)', [companyId, v.name]);
     if (dup) throw new LedgerError(`There is already a job named "${v.name}"`);
-    const { rows: [j] } = await c.query('INSERT INTO jobs (company_id, name, code, customer_id) VALUES ($1,$2,$3,$4) RETURNING id', [companyId, v.name, v.code, v.customerId]);
+    const { rows: [j] } = await c.query('INSERT INTO jobs (company_id, name, code, customer_id, address) VALUES ($1,$2,$3,$4,$5) RETURNING id', [companyId, v.name, v.code, v.customerId, v.address]);
     await appendAudit(c, companyId, { action: 'create', entity: 'job', entityId: j.id, actor, payload: v });
     return (await c.query(`SELECT ${JOB_COLS} FROM jobs j LEFT JOIN contacts c ON c.id = j.customer_id WHERE j.id = $1`, [j.id])).rows[0];
   });
@@ -57,8 +59,9 @@ export async function updateJob(pool, companyId, jobId, input, { actor = null } 
     const v = await cleanJob(c, companyId, input);
     const { rows: [dup] } = await c.query('SELECT 1 FROM jobs WHERE company_id = $1 AND lower(trim(name)) = lower($2) AND id <> $3', [companyId, v.name, jobId]);
     if (dup) throw new LedgerError(`There is already a job named "${v.name}"`);
-    const { rowCount } = await c.query('UPDATE jobs SET name = $3, code = $4, customer_id = $5, is_active = $6 WHERE company_id = $1 AND id = $2',
-      [companyId, jobId, v.name, v.code, v.customerId, input.isActive !== false]);
+    // The site address is left alone when the change doesn't mention it (closing a job sends only name, code, customer).
+    const { rowCount } = await c.query(`UPDATE jobs SET name = $3, code = $4, customer_id = $5, is_active = $6, address = CASE WHEN $7 THEN $8 ELSE address END
+      WHERE company_id = $1 AND id = $2`, [companyId, jobId, v.name, v.code, v.customerId, input.isActive !== false, input.address !== undefined, v.address]);
     if (!rowCount) throw new LedgerError('Job not found');
     await appendAudit(c, companyId, { action: 'update', entity: 'job', entityId: jobId, actor, payload: { ...v, isActive: input.isActive !== false } });
     return (await c.query(`SELECT ${JOB_COLS} FROM jobs j LEFT JOIN contacts c ON c.id = j.customer_id WHERE j.id = $1`, [jobId])).rows[0];
@@ -93,6 +96,7 @@ async function mayApprove(db, companyId, viewer, targetUserId) {
 }
 
 const deny = () => new LedgerError("You can't see or change that person's time");
+const billed = (number) => new LedgerError(`That time is billed on invoice ${number}. Edit or void that invoice first.`);
 
 /** SQL (and its parameters) limiting time entries to people the viewer may see. */
 function visibleClause(viewer, alias, params) {
@@ -111,8 +115,10 @@ function visibleClause(viewer, alias, params) {
 const ENTRY_COLS = `t.id, t.user_id AS "userId", u.name AS "userName", t.job_id AS "jobId", j.name AS "jobName",
   to_char(t.work_date, 'YYYY-MM-DD') AS date, t.minutes, to_char(t.start_time, 'HH24:MI') AS start, to_char(t.end_time, 'HH24:MI') AS "end",
   t.notes, t.billable, t.status, t.review_note AS "reviewNote", rv.name AS "reviewedBy", t.reviewed_at AS "reviewedAt",
-  t.paid_run_id AS "paidRunId", t.source`;
-const ENTRY_FROM = `time_entries t JOIN users u ON u.id = t.user_id LEFT JOIN jobs j ON j.id = t.job_id LEFT JOIN users rv ON rv.id = t.reviewed_by`;
+  t.paid_run_id AS "paidRunId", t.source, t.trip_id AS "tripId", tr.name AS "tripName",
+  (SELECT d.number FROM document_lines l JOIN documents d ON d.id = l.document_id WHERE l.time_entry_id = t.id AND d.status = 'posted' LIMIT 1) AS "billedOn"`;
+const ENTRY_FROM = `time_entries t JOIN users u ON u.id = t.user_id LEFT JOIN jobs j ON j.id = t.job_id LEFT JOIN users rv ON rv.id = t.reviewed_by
+  LEFT JOIN trips tr ON tr.id = t.trip_id`;
 const withHours = (r) => ({ ...r, hours: minutesToHours(r.minutes) });
 
 const STATUSES = ['draft', 'submitted', 'approved', 'rejected'];
@@ -173,8 +179,16 @@ async function cleanEntry(db, companyId, input) {
       else jobId = j.id;
     }
   }
+  // Travel time belongs to a trip (shared by the trip's projects) instead of a job.
+  let tripId = null;
+  if (input.tripId) {
+    if (jobId) errors.push('travel time goes on the trip, not a job');
+    const { rows: [tr] } = isId(input.tripId) ? await db.query('SELECT id FROM trips WHERE company_id = $1 AND id = $2', [companyId, input.tripId]) : { rows: [] };
+    if (!tr) errors.push('that trip does not exist');
+    else tripId = tr.id;
+  }
   if (errors.length) throw new LedgerError('Time entry is not valid', errors);
-  return { date: input.date, minutes, start, end, notes, jobId, billable: input.billable !== false };
+  return { date: input.date, minutes, start, end, notes, jobId, tripId, billable: input.billable !== false };
 }
 
 /** A person can't have more than 24 hours on one day. */
@@ -193,9 +207,9 @@ export async function createTimeEntry(pool, companyId, viewer, input, { actor = 
     const v = await cleanEntry(c, companyId, input);
     await checkDayTotal(c, companyId, userId, v.date, v.minutes);
     const { rows: [t] } = await c.query(
-      `INSERT INTO time_entries (company_id, user_id, job_id, work_date, minutes, start_time, end_time, notes, billable, entered_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [companyId, userId, v.jobId, v.date, v.minutes, v.start, v.end, v.notes, v.billable, viewer.userId]);
+      `INSERT INTO time_entries (company_id, user_id, job_id, trip_id, work_date, minutes, start_time, end_time, notes, billable, entered_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [companyId, userId, v.jobId, v.tripId, v.date, v.minutes, v.start, v.end, v.notes, v.billable, viewer.userId]);
     if (userId !== viewer.userId) await appendAudit(c, companyId, { action: 'create', entity: 'time_entry', entityId: t.id, actor, payload: { userId, date: v.date, minutes: v.minutes } });
     return getEntry(c, companyId, t.id);
   });
@@ -206,13 +220,14 @@ export async function updateTimeEntry(pool, companyId, viewer, id, input, { acto
   return withTransaction(pool, async (c) => {
     const e = await getEntry(c, companyId, id);
     if (!(await mayManage(c, companyId, viewer, e.userId))) throw deny();
+    if (e.billedOn) throw billed(e.billedOn);
     if (e.status === 'approved') throw new LedgerError('Approved time can\'t be changed. Ask the approver to send it back first.');
-    const v = await cleanEntry(c, companyId, { ...input, jobId: input.jobId === undefined ? e.jobId : input.jobId });
+    const v = await cleanEntry(c, companyId, { ...input, jobId: input.jobId === undefined ? e.jobId : input.jobId, tripId: input.tripId === undefined ? e.tripId : input.tripId });
     await checkDayTotal(c, companyId, e.userId, v.date, v.minutes, id);
     await c.query(
-      `UPDATE time_entries SET job_id = $3, work_date = $4, minutes = $5, start_time = $6, end_time = $7, notes = $8, billable = $9,
+      `UPDATE time_entries SET job_id = $3, work_date = $4, minutes = $5, start_time = $6, end_time = $7, notes = $8, billable = $9, trip_id = $10,
          status = 'draft', review_note = NULL, reviewed_by = NULL, reviewed_at = NULL, updated_at = now()
-       WHERE company_id = $1 AND id = $2`, [companyId, id, v.jobId, v.date, v.minutes, v.start, v.end, v.notes, v.billable]);
+       WHERE company_id = $1 AND id = $2`, [companyId, id, v.jobId, v.date, v.minutes, v.start, v.end, v.notes, v.billable, v.tripId]);
     if (e.userId !== viewer.userId) await appendAudit(c, companyId, { action: 'update', entity: 'time_entry', entityId: id, actor, payload: { userId: e.userId, date: v.date, minutes: v.minutes } });
     return getEntry(c, companyId, id);
   });
@@ -222,6 +237,7 @@ export async function deleteTimeEntry(pool, companyId, viewer, id, { actor = nul
   return withTransaction(pool, async (c) => {
     const e = await getEntry(c, companyId, id);
     if (!(await mayManage(c, companyId, viewer, e.userId))) throw deny();
+    if (e.billedOn) throw billed(e.billedOn);
     if (e.status === 'approved') throw new LedgerError('Approved time can\'t be deleted. Ask the approver to send it back first.');
     await c.query('DELETE FROM time_entries WHERE company_id = $1 AND id = $2', [companyId, id]);
     if (e.userId !== viewer.userId) await appendAudit(c, companyId, { action: 'delete', entity: 'time_entry', entityId: id, actor, payload: { userId: e.userId, date: e.date, minutes: e.minutes } });
@@ -266,6 +282,11 @@ export async function reviewTimeEntries(pool, companyId, viewer, { ids, approve,
         throw new LedgerError(r.user_id === viewer.userId ? 'Someone else has to approve your own time' : "You can't approve that person's time");
       }
       if (r.paid_run_id) throw new LedgerError('Some of those hours were already paid; paid time is final');
+      if (!approve) {
+        const { rows: [b] } = await c.query(`SELECT d.number FROM document_lines l JOIN documents d ON d.id = l.document_id
+          WHERE l.time_entry_id = $1 AND d.status = 'posted' LIMIT 1`, [r.id]);
+        if (b) throw billed(b.number);
+      }
       if (approve && r.status !== 'submitted') throw new LedgerError('Only submitted time can be approved');
       if (!approve && !['submitted', 'approved'].includes(r.status)) throw new LedgerError('Only submitted or approved time can be sent back');
     }
