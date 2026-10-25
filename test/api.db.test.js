@@ -456,6 +456,17 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.deepEqual([listed.name, listed.email, listed.phone, listed.address, listed.termsDays, listed.openCents],
       ['Staff Customer LLC', 'ap@staffcustomer.com', '512-555-0100', '1 Main St, Austin, TX 78701', 15, 25000]);
     assert.equal((await staff.c.call('PATCH', `${base}/contacts/${cust.body.id}`, { email: 'not an email' })).status, 400);
+    // Staff who take payments can photograph the check (and see it); the photo is served only to the company.
+    const sPay = await staff.c.call('POST', `${base}/payments-received`, { contactId: cust.body.id, date: '2026-12-16', accountId: A['1000'], method: 'check', reference: '77', applications: [{ documentId: inv.body.id, amount: '10' }] });
+    assert.equal(sPay.status, 201, JSON.stringify(sPay.body));
+    const jpeg = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9, 9]).toString('base64')}`;
+    const ph = await staff.c.call('POST', `${base}/payments/${sPay.body.id}/photos`, { picture: jpeg });
+    assert.equal(ph.status, 201, JSON.stringify(ph.body));
+    const got = await staff.c.call('GET', `${base}/payments/${sPay.body.id}/photos/${ph.body.id}`);
+    assert.equal(got.status, 200);
+    assert.match(got.headers['content-type'], /image\/jpeg/);
+    assert.equal((await staff.c.call('POST', `${base}/payments/${sPay.body.id}/void`, {})).status, 403);
+    assert.equal((await owner.c.call('POST', `${base}/payments/${sPay.body.id}/void`, {})).status, 200);
     // Editing an invoice voids it, so it needs the Void permission (the owner's or accountant's).
     assert.equal((await staff.c.call('PUT', `${base}/documents/${inv.body.id}`, { contactId: cust.body.id, date: '2026-12-15', lines: [{ accountId: A['4100'], amount: '260' }] })).status, 403);
     const ownerEdit = await owner.c.call('PUT', `${base}/documents/${inv.body.id}`, { contactId: cust.body.id, date: '2026-12-15', lines: [{ accountId: A['4100'], amount: '260' }] });

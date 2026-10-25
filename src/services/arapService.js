@@ -16,6 +16,7 @@ import { toCents, divRoundHalfUp, applyRate, percentToPpm } from '../core/money.
 import { insertEntry, reverseEntry, cleanIdempotencyKey } from './ledgerService.js';
 import { appendAudit } from './audit.js';
 import { blockText } from './invoiceSetupService.js';
+import { copyPaymentPhotos } from './paymentPhotoService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SIDE = {
@@ -389,7 +390,7 @@ const payOut = (p) => ({
   id: p.id, kind: p.kind, contactId: p.contact_id, contactName: p.contact_name, date: p.pay_date, amountCents: p.amount_cents,
   accountId: p.account_id, accountName: p.account_name, method: p.method, reference: p.reference, memo: p.memo, status: p.status,
   voidDate: p.void_date, journalEntryId: p.journal_entry_id, entryNumber: p.entry_number ?? null, applications: p.applications ?? [],
-  replacedById: p.replaced_by_id ?? null,
+  replacedById: p.replaced_by_id ?? null, photoCount: Number(p.photo_count ?? 0),
 });
 
 /**
@@ -473,7 +474,8 @@ const fmt = (c) => `$${(c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','
 export async function getPayment(db, companyId, paymentId) {
   if (typeof paymentId !== 'string' || !UUIDISH.test(paymentId)) throw new LedgerError('Payment not found');
   const { rows: [p] } = await db.query(
-    `SELECT p.*, ct.name AS contact_name, a.name AS account_name, e.entry_number FROM payments p
+    `SELECT p.*, ct.name AS contact_name, a.name AS account_name, e.entry_number,
+            (SELECT count(*) FROM payment_photos f WHERE f.payment_id = p.id) AS photo_count FROM payments p
        JOIN contacts ct ON ct.id = p.contact_id JOIN accounts a ON a.id = p.account_id JOIN journal_entries e ON e.id = p.journal_entry_id
       WHERE p.company_id = $1 AND p.id = $2`, [companyId, paymentId]);
   if (!p) throw new LedgerError('Payment not found');
@@ -488,6 +490,7 @@ export async function listPayments(db, companyId, { kind, contactId = null, limi
   if (contactId && !UUIDISH.test(contactId)) throw new LedgerError('Contact not found');
   const { rows } = await db.query(
     `SELECT p.*, ct.name AS contact_name, a.name AS account_name, e.entry_number,
+            (SELECT count(*) FROM payment_photos f WHERE f.payment_id = p.id) AS photo_count,
             (SELECT json_agg(json_build_object('documentId', x.document_id, 'number', d.number, 'amountCents', x.amount_cents) ORDER BY d.number)
                FROM payment_applications x JOIN documents d ON d.id = x.document_id WHERE x.payment_id = p.id) AS applications
        FROM payments p JOIN contacts ct ON ct.id = p.contact_id JOIN accounts a ON a.id = p.account_id JOIN journal_entries e ON e.id = p.journal_entry_id
@@ -532,7 +535,9 @@ export async function replacePayment(pool, companyId, paymentId, { idempotencyKe
     if (!old) throw new LedgerError('Payment not found');
     const { rows: [{ id: newId }] } = await c.query('SELECT gen_random_uuid() AS id');
     await voidPayment(c, companyId, paymentId, { actor, replacedById: newId });
-    return createPayment(c, companyId, { ...input, kind: old.kind, idempotencyKey, actor, paymentId: newId, replacesId: paymentId });
+    await createPayment(c, companyId, { ...input, kind: old.kind, idempotencyKey, actor, paymentId: newId, replacesId: paymentId });
+    await copyPaymentPhotos(c, companyId, paymentId, newId);   // the check photo belongs to the corrected payment too
+    return getPayment(c, companyId, newId);
   });
 }
 

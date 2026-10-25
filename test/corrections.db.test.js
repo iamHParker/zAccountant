@@ -5,6 +5,9 @@ import * as ledger from '../src/services/ledgerService.js';
 import * as arap from '../src/services/arapService.js';
 import * as reports from '../src/services/reportService.js';
 import { verifyChain } from '../src/services/audit.js';
+import * as photos from '../src/services/paymentPhotoService.js';
+
+const JPEG = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).toString('base64')}`;
 
 // Edit an invoice, bill or payment (Homer, 2026-10-25): the old record is voided and the corrected copy posted,
 // in one step. Nothing saved is changed in place.
@@ -49,12 +52,28 @@ test('edit: invoices, bills and payments are corrected by void + replace', { ski
       applications: [{ documentId: inv.id, amount: '1000' }] });
     await assert.rejects(arap.replaceDocument(pool, co.id, inv.id, { contactId: smith.id, date: '2026-03-02', lines: [{ accountId: A['4100'], amount: '1200' }] }),
       /edit or void those payments first/);
+    // The check and the remittance stub are photographed with the payment.
+    await photos.addPaymentPhoto(pool, co.id, pay.id, { picture: JPEG, actor: 'owner@x' });
+    await photos.addPaymentPhoto(pool, co.id, pay.id, { picture: JPEG, actor: 'owner@x' });
+    await assert.rejects(photos.addPaymentPhoto(pool, co.id, pay.id, { picture: 'data:image/gif;base64,R0lG' }), /PNG or JPEG/);
     // The check was really 1,200.00, number 502.
     const fixed = await arap.replacePayment(pool, co.id, pay.id, { contactId: smith.id, date: '2026-04-01', accountId: A['1000'], method: 'check', reference: '502',
       applications: [{ documentId: inv.id, amount: '1200' }] });
     assert.deepEqual([fixed.amountCents, fixed.reference, fixed.status], [120000, '502', 'posted']);
     const old = await arap.getPayment(pool, co.id, pay.id);
     assert.deepEqual([old.status, old.replacedById], ['void', fixed.id]);
+    // The photos go with the corrected payment; the voided one keeps its copies, which can't be removed.
+    assert.equal(fixed.photoCount, 2);
+    const list = await photos.listPaymentPhotos(pool, co.id, fixed.id);
+    assert.equal(list.length, 2);
+    const file = await photos.getPaymentPhoto(pool, co.id, fixed.id, list[0].id);
+    assert.equal(file.type, 'image/jpeg');
+    assert.equal(file.body.length, 8);
+    const oldList = await photos.listPaymentPhotos(pool, co.id, pay.id);
+    await assert.rejects(photos.deletePaymentPhoto(pool, co.id, pay.id, oldList[0].id), /kept with its history/);
+    await assert.rejects(photos.addPaymentPhoto(pool, co.id, pay.id, { picture: JPEG }), /void/);
+    await photos.deletePaymentPhoto(pool, co.id, fixed.id, list[1].id);
+    assert.equal((await arap.getPayment(pool, co.id, fixed.id)).photoCount, 1);
     assert.equal((await arap.getDocument(pool, co.id, inv.id)).balanceCents, 0);
     assert.equal(await arBal(), 1000);    // only invoice 1002 ($10) is open
     const ar = await arap.getAging(pool, co.id, { kind: 'invoice', asOf: '2026-12-31' });

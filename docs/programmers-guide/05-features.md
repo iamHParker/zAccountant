@@ -35,6 +35,11 @@ lines, customers, employees, timesheets) and line memos are not in it. Alpha use
   `PUT …/payments/:id`, permission `post`) does both in one transaction: `replaceDocument` / `replacePayment` void the
   old record with `replaced_by_id` set to the new id, then post the copy (an invoice keeps its number; the number index
   skips replaced invoices). Migration 020.
+- Payment photos (migration 021, `src/services/paymentPhotoService.js`): `payment_photos` (bytea ≤ 3 MB, JPEG/PNG,
+  6 per payment), routes `…/payments/:id/photos[/:photoId]` (add/remove: the side's permission; view: view_books or the
+  side). The browser shrinks each photo to 2000 px (`pictureFromFile`); the form's file inputs use
+  `capture="environment"` so an iPhone opens its camera. Edit copies the photos to the corrected payment. ⚠️ A check
+  photo carries bank numbers: audit entries record only the photo id and size.
 - **Professional-services invoices (migration 016):**
   - `invoice_items` holds saved rates. Kind `service` is hours × rate; kind `expense` is a cost passed on, usually
     quantity 1 and untaxed. A rate with no price means "type it on the invoice".

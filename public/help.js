@@ -38,7 +38,7 @@ automatically each night, or press <em>Post due entries now</em>.</p>
   },
   {
     id: 'sales', tab: 'sales', title: 'Invoices and getting paid',
-    words: 'invoice customer receive payment accounts receivable aging overdue void edit correct mistake',
+    words: 'invoice customer receive payment accounts receivable aging overdue void edit correct mistake photo check camera iphone',
     html: `
 <ol>
   <li>Add a customer (name, email, payment terms such as 30 days). To change one later, open the Customers tab and press <strong>edit</strong>.</li>
@@ -51,6 +51,7 @@ automatically each night, or press <em>Post due entries now</em>.</p>
 Receivable in your books. Download it as CSV or print it.</p>
 <p><strong>Mistake on an invoice?</strong> Open it and press <strong>Edit</strong>. Saving replaces it with the corrected one (same number); the old one stays in history marked Replaced. Payments have an <strong>edit</strong> link on the Payments tab. If an invoice already has a payment, fix the payment first.</p>
 <p>An invoice with no payments can also be <strong>voided</strong>; it stays on record marked void.</p>
+<p><strong>Photo of the check:</strong> in Receive payment, press <strong>📷 Take photo</strong> (on an iPhone the camera opens) to keep the check and the remittance slip with the payment. Find them later under Payments → <strong>photos</strong>. A photo is a record only; deposit the check as usual.</p>
 <p>Billing by the hour? See <a href="#" data-help="invoice-setup">Invoice rates, letterhead and logo</a>.</p>`,
   },
   {
