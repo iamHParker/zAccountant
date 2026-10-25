@@ -1,6 +1,6 @@
-# Tier 2: Payroll add-on
+# Tier 2: Payroll (Company plan)
 
-For companies with the Payroll add-on (every company during the beta), and people whose role has the payroll
+For companies on the Company plan (every company during the beta), and people whose role has the payroll
 permission.
 
 > **Calculate-only during the beta.** zAccountant works out each paycheck and records it in your books. You, or your

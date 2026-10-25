@@ -121,9 +121,9 @@
         switch plans on their own once they go in, in December. The server refuses any feature a company's plan doesn't include.</p>
       <template v-if="adm.data">
         <div class="tiles">
-          <div class="tile" v-for="p in adm.data.plans"><div class="label">{{ p.name }} · {{ planPrice(p.monthlyCents) }}</div>
+          <div class="tile" v-for="p in adm.data.plans"><div class="label">{{ p.name }} · {{ planPrice(p) }}</div>
             <div class="value">{{ adm.data.planCounts[p.key] || 0 }}</div><div class="muted small">{{ p.note }}</div></div>
-          <div class="tile" v-for="a in adm.data.addOns"><div class="label">Add-on: {{ a.name }} · {{ planPrice(a.monthlyCents) }}</div>
+          <div class="tile" v-for="a in adm.data.addOns"><div class="label">Add-on: {{ a.name }} · {{ planPrice(a) }}</div>
             <div class="value">{{ adm.data.companies.filter(c => c.addOns.includes(a.key)).length }}</div><div class="muted small">{{ adm.data.features[a.features[0]] }}</div></div>
         </div>
 
@@ -131,9 +131,9 @@
           <h2>Change plan: {{ adm.edit.name }}</h2>
           <div class="grid2">
             <label>Plan
-              <select v-model="adm.edit.plan"><option v-for="p in adm.data.plans" :value="p.key">{{ p.name }} ({{ planPrice(p.monthlyCents) }})</option></select></label>
+              <select v-model="adm.edit.plan"><option v-for="p in adm.data.plans" :value="p.key">{{ p.name }} ({{ planPrice(p) }})</option></select></label>
             <div><span class="label-like">Add-ons</span>
-              <label class="check" v-for="a in adm.data.addOns"><input type="checkbox" :value="a.key" v-model="adm.edit.addOns"> {{ a.name }} ({{ planPrice(a.monthlyCents) }})</label>
+              <label class="check" v-for="a in adm.data.addOns"><input type="checkbox" :value="a.key" v-model="adm.edit.addOns"> {{ a.name }} ({{ planPrice(a) }})</label>
               <p class="hint small" v-if="adm.edit.plan === 'beta'">Beta tester already includes everything.</p></div>
           </div>
           <label>Reason (goes in the change log and the company's audit trail)

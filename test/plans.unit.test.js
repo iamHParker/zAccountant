@@ -4,11 +4,13 @@ import { featuresOf, featureForPath, checkPlanChange, PLANS, FEATURES } from '..
 
 test('Beta tester includes every feature; Basic none; add-ons add their own', () => {
   assert.deepEqual(featuresOf('beta'), Object.keys(FEATURES).sort());
-  assert.deepEqual(featuresOf('basic'), []);
-  assert.deepEqual(featuresOf('basic', ['timesheets']), ['timesheets']);
-  assert.deepEqual(featuresOf('basic', ['payroll', 'timesheets', 'payroll']), ['payroll', 'timesheets']);
+  assert.deepEqual(featuresOf('individual'), []);
+  assert.deepEqual(featuresOf('company'), ['payroll'], 'payroll comes with the Company plan');
+  assert.deepEqual(featuresOf('individual', ['timesheets']), ['timesheets']);
+  assert.deepEqual(featuresOf('company', ['tax', 'timesheets', 'tax']), ['payroll', 'tax', 'timesheets']);
   assert.deepEqual(featuresOf('nonsense', ['nonsense']), []);
   assert.equal(PLANS.beta.monthlyCents, 0, 'testers pay nothing');
+  for (const p of ['individual', 'company']) assert.deepEqual([PLANS[p].monthlyCents, PLANS[p].annualCents], [null, null], 'no price invented');
 });
 
 test('which API paths need which feature', () => {
@@ -21,9 +23,10 @@ test('which API paths need which feature', () => {
 });
 
 test('a plan change needs a known plan, known add-ons and a reason', () => {
-  assert.deepEqual(checkPlanChange({ plan: 'basic', addOns: ['timesheets', 'payroll', 'payroll'], reason: ' paid ' }),
-    { plan: 'basic', addOns: ['payroll', 'timesheets'], reason: 'paid' });
+  assert.deepEqual(checkPlanChange({ plan: 'company', addOns: ['timesheets', 'tax', 'tax'], reason: ' paid ' }),
+    { plan: 'company', addOns: ['tax', 'timesheets'], reason: 'paid' });
+  assert.throws(() => checkPlanChange({ plan: 'company', addOns: ['payroll'], reason: 'x' }), /Add-ons/, 'payroll is not an add-on any more');
   assert.throws(() => checkPlanChange({ plan: 'gold', reason: 'x' }), /Plan must be/);
-  assert.throws(() => checkPlanChange({ plan: 'basic', addOns: 'payroll', reason: 'x' }), /Add-ons/);
-  assert.throws(() => checkPlanChange({ plan: 'basic', reason: '  ' }), /reason/);
+  assert.throws(() => checkPlanChange({ plan: 'company', addOns: 'payroll', reason: 'x' }), /Add-ons/);
+  assert.throws(() => checkPlanChange({ plan: 'company', reason: '  ' }), /reason/);
 });

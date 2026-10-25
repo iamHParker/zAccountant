@@ -1,4 +1,4 @@
-# Tier 1: Books (Basic plan)
+# Tier 1: Books (every plan)
 
 Every company has these. They are double-entry books: every transaction takes money out of one account and puts it
 into another, so the books always balance. You don't need to know debits and credits for everyday work.
