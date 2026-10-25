@@ -16,6 +16,7 @@ import { postDueRecurring } from '../services/ledgerService.js';
 import { getTrialBalance, getBalanceSheet } from '../services/reportService.js';
 import { verifyChain } from '../services/audit.js';
 import { getAging } from '../services/arapService.js';
+import { offsiteConfig, backedUp, runOffsiteBackup } from './offsiteBackup.js';
 
 /** Today's date in Central time (the business day the books are kept in). */
 export const centralToday = (now = new Date()) =>
@@ -115,19 +116,33 @@ async function ranToday(ownerPool, asOf) {
   return rows.length > 0;
 }
 
-/** Built-in scheduler: every 15 minutes, if it's past 2 a.m. Central and today's check hasn't run, run it. */
-export function startNightlyScheduler(ownerPool, { hour = 2, everyMs = 15 * 60_000 } = {}) {
+/**
+ * Built-in scheduler: every 15 minutes, if it's past 2 a.m. Central and today's check hasn't run, run it. Then, when
+ * the off-site backup is set up (src/jobs/offsiteBackup.js), send tonight's copy (at most 3 tries a night).
+ */
+export function startNightlyScheduler(ownerPool, { hour = 2, everyMs = 15 * 60_000, url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL } = {}) {
   const tick = async () => {
     const now = new Date();
     const ctHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hourCycle: 'h23' }).format(now));
     const asOf = centralToday(now);
     if (ctHour < hour) return;
     try {
-      if (await ranToday(ownerPool, asOf)) return;
-      const s = await runNightly(ownerPool, { asOf });
-      console.log(JSON.stringify({ level: 'info', msg: 'nightly_done', ...s, failed: s.failed?.length ?? 0 }));
+      if (!(await ranToday(ownerPool, asOf))) {
+        const s = await runNightly(ownerPool, { asOf });
+        console.log(JSON.stringify({ level: 'info', msg: 'nightly_done', ...s, failed: s.failed?.length ?? 0 }));
+      }
     } catch (err) {
       console.error(JSON.stringify({ level: 'error', msg: 'nightly_failed', error: err.message }));
+    }
+    try {
+      const cfg = offsiteConfig();
+      if (!cfg || (await backedUp(ownerPool, asOf))) return;
+      const { rows: [{ tries }] } = await ownerPool.query('SELECT count(*)::int AS tries FROM offsite_backups WHERE as_of = $1', [asOf]);
+      if (tries >= 3) return;
+      const r = await runOffsiteBackup(ownerPool, { cfg, url, asOf });
+      if (!r.skipped) console[r.ok ? 'log' : 'error'](JSON.stringify({ level: r.ok ? 'info' : 'error', msg: 'offsite_backup', asOf, ...r }));
+    } catch (err) {
+      console.error(JSON.stringify({ level: 'error', msg: 'offsite_backup_failed', error: err.message.replace(/postgres(ql)?:\/\/\S+/g, '[url]') }));
     }
   };
   const timer = setInterval(tick, everyMs);

@@ -28,6 +28,7 @@ import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxS
 import * as tax from './services/taxService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
+import { offsiteConfig, recentOffsiteBackups } from './jobs/offsiteBackup.js';
 import { createMetrics, bearerMatches } from './metrics.js';
 import * as feedback from './services/feedbackService.js';
 import { platformRole, appVersion } from './core/platform.js';
@@ -339,9 +340,12 @@ export function createApp(pool, { log } = {}) {
     res.json(body);
   };
   const siteUrl = () => (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
-  api.get('/developer/summary', dev(async ({ db }) => ({
-    version: appVersion(), counts: await feedback.platformCounts(db), serverErrors: serverErrors.slice().reverse(),
-  })));
+  api.get('/developer/summary', dev(async ({ db }) => {
+    let offsite;
+    try { offsite = offsiteConfig() ? 'on' : 'off'; } catch (e) { offsite = e.message; }
+    return { version: appVersion(), counts: await feedback.platformCounts(db), serverErrors: serverErrors.slice().reverse(),
+      offsite, offsiteBackups: await recentOffsiteBackups(db) };
+  }));
   // A full backup, streamed straight from pg_dump (owner login, which sees every company). Logged: who and when.
   api.get('/developer/backup', async (req, res) => {
     if (req.user.platformRole !== 'developer') return res.status(403).json({ error: 'The Developer dashboard is for zAccountant developers.' });

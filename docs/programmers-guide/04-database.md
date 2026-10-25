@@ -27,6 +27,7 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `020_corrections.sql` | `replaced_by_id` on documents and payments (Edit = void + corrected copy); invoice number unique among non-replaced |
 | `021_payment_photos.sql` | photos of the check and remittance kept with a payment (RLS by company) |
 | `022_customer_people.sql` | customer "Part of" group and people (adjusters); invoice attention, send-to, claim/job number |
+| `027_offsite_backups.sql` | one row per nightly off-site backup try (when, size, SHA-256, object key, error); no business data, no RLS |
 | `026_road.sql` | Road page: `road_keys` (hash only; no RLS, looked up before the company is known), `road_items` (the phone's inbox; `client_id` makes resends harmless), `road_photos`; RLS on items and photos |
 | `025_passkeys.sql` | passkeys (public keys only) and one-time sign-in challenges; no company, so no row-level security (like `users`) |
 | `024_trips.sql` | trips, their projects' shares (`trip_jobs.share_bp`), trip costs (own journal entry; kinds incl. mileage), receipt photos, travel time (`time_entries.trip_id`); billed once per project |
