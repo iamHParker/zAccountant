@@ -19,9 +19,9 @@ is checked every time the page loads. A full check of the books also runs every 
 ### Home cards and Statistics
 
 Beside *Record a transaction* are shortcut cards for the jobs you do most (New invoice, Customer paid, Enter a bill,
-Banking, New trip, Profit & Loss…). Press one to go straight there. **Arrange cards** lets you make the page yours:
+Banking, Credit cards, New trip, Profit & Loss…). Press one to go straight there. **Arrange cards** lets you make the page yours:
 
-- **Add a card** from the list of the ones not showing (Pay a bill, Import from MileIQ, Timesheet, Payroll, Balance
+- **Add a card** from the list of the ones not showing (Pay a bill, Pay the credit card, Import from MileIQ, Timesheet, Payroll, Balance
   Sheet, Journal entry, Back up your books…).
 - **Move** a card by dragging it, or with its arrows: ‹ › (or ↑ ↓ under *Record a transaction*) change its place, and
   **→ column / ← column** moves it between the two columns.
@@ -34,10 +34,15 @@ the last 12 months of income and expenses, cash in the bank at each month's end,
 customers owe you and you owe vendors, with any past-due part. Hover over (or tap) a month to see its numbers, or open
 **Show the numbers** for the table.
 
+**Credit cards** opens Banking with your card chosen: import the card's statement, match or categorize each charge, and
+reconcile it, just like a bank account. **Pay the credit card** fills in *Record a transaction* as a *Transfer* from your
+bank to the card; type the amount and Save. (With more than one card, pick the right one in the list.)
+
 ## 3. Recording transactions
 
 - **Quick way (Home → Record a transaction):** choose *Money in*, *Money out* or *Transfer*. Enter the date, a
-  description, the amount, the bank account, and what it was for. That's a complete, balanced entry.
+  description, the amount, the bank account, and what it was for. That's a complete, balanced entry. For *Money out*,
+  *Paid from* also lists your credit cards: a charge on the card raises what you owe on it instead of lowering the bank.
 - **Advanced journal entry (Transactions tab):** for anything else, such as depreciation, or a loan payment split
   into principal and interest. Each line is a debit or a credit, and the entry saves only when the "Difference" is
   $0.00. Rule of thumb: money arriving in an account you own is a debit; income is a credit.
