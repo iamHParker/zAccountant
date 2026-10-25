@@ -802,6 +802,27 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.deepEqual(await tb(copy.id), await tb(co.id));
   });
 
+  await t.test('new-company setup wizard: business type, start date, the checklist, and finishing', async () => {
+    const r = await owner.c.call('POST', '/api/companies', { name: 'Wizard Co', homeState: 'TX', fiscalYearStartMonth: 1, entityType: 's_corp', booksStartDate: '2026-01-01' });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const id = r.body.id;
+    let s = (await owner.c.call('GET', `/api/companies/${id}/setup`)).body;
+    assert.equal(s.setupDone, false, 'a new company starts with the setup list showing');
+    assert.deepEqual(s.steps, { basics: true, books: false, bank: false, invoicing: false, people: false });
+    assert.equal((await owner.c.call('POST', '/api/companies', { name: 'Bad', homeState: 'TX', fiscalYearStartMonth: 1, entityType: 'llp' })).status, 400);
+    // Starting fresh: a bank balance against Owner's Capital, dated the day before the books start.
+    const accts = (await owner.c.call('GET', `/api/companies/${id}/accounts`)).body;
+    const bankAcct = accts.find((a) => a.code === '1000'); const capital = accts.find((a) => a.code === '3000');
+    assert.equal((await owner.c.call('POST', `/api/companies/${id}/entries/simple`, { date: '2025-12-31', memo: 'Opening balance, Checking', amount: '12500.00', fromAccountId: capital.id, toAccountId: bankAcct.id })).status, 201);
+    s = (await owner.c.call('GET', `/api/companies/${id}/setup`)).body;
+    assert.equal(s.steps.books, true); assert.equal(s.steps.bank, true);
+    const u = await owner.c.call('PUT', `/api/companies/${id}/setup`, { entityType: 'sole_proprietor', setupDone: true });
+    assert.equal(u.status, 200, JSON.stringify(u.body));
+    assert.equal(u.body.entity_type, 'sole_proprietor'); assert.equal(u.body.books_start_date, '2026-01-01', 'unchanged when not sent');
+    assert.equal((await owner.c.call('GET', `/api/companies/${id}/setup`)).body.setupDone, true);
+    assert.equal((await owner.c.call('GET', `/api/companies/${co.id}/setup`)).body.setupDone, false, 'made in this test run, so not set by the migration');
+  });
+
   await t.test('cross-site requests and foreign Host headers are refused', async () => {
     const lock = `/api/companies/${co.id}/lock`;
     assert.equal((await owner.c.call('POST', lock, '{"through":null}', { 'content-type': 'text/plain' })).status, 415);

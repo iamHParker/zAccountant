@@ -10,7 +10,9 @@ export const HELP = [
 <p>zAccountant keeps <strong>double-entry books</strong>: every transaction moves money from one account to another,
 so the books always balance. You don't need to know debits and credits for everyday work; the simple screens handle them.</p>
 <ol>
-  <li><strong>Create your company</strong> (name, home state, the month your fiscal year starts). A standard chart of accounts is added for you.</li>
+  <li><strong>Create your company</strong> (name, type of business, home state, fiscal-year start, the day your books start). A standard chart of accounts is added,
+      and the <strong>setup wizard</strong> walks through the rest: your books (start fresh, QuickBooks, Excel or a zAccountant backup), bank accounts and
+      cards with their opening balances, invoicing, and people. Skip any step; <em>Finish setting up</em> on Home lists what's left.</li>
   <li><strong>Bring in what you have.</strong> Coming from QuickBooks or a spreadsheet? See <a data-help="import">Importing your books</a>.
       Starting fresh? Enter your bank balance as of the start date (see <a data-help="journal">Transactions</a>).</li>
   <li><strong>Add your bank account</strong> on <em>Accounts</em> if it isn't listed, then import statements on <em>Banking</em>.</li>

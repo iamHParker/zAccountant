@@ -6,6 +6,7 @@ import { validateEntry, simpleTransaction, reversingLines, LedgerError, ACCOUNT_
 import { toCents } from '../core/money.js';
 import { appendAudit } from './audit.js';
 import { FREQUENCIES, nextOccurrence } from '../core/recurring.js';
+import { ENTITY_KEYS } from '../core/entityTypes.js';
 
 const lockCompany = async (client, companyId) => {
   const { rows } = await client.query('SELECT * FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
@@ -14,18 +15,20 @@ const lockCompany = async (client, companyId) => {
 };
 
 /** Create a company with the default chart of accounts. If ownerUserId is given, that user becomes its owner. */
-export async function createCompany(pool, { name, homeState, fiscalYearStartMonth = 1, actor = null, ownerUserId = null }) {
+export async function createCompany(pool, { name, homeState, fiscalYearStartMonth = 1, entityType = null, booksStartDate = null, actor = null, ownerUserId = null }) {
   const errors = [];
   if (typeof name !== 'string' || !name.trim() || name.length > 120) errors.push('business name is required (up to 120 characters)');
   if (!['TX', 'CO', 'CA', 'DC'].includes(homeState)) errors.push('state must be TX, CO, CA or DC');
   if (!Number.isInteger(fiscalYearStartMonth) || fiscalYearStartMonth < 1 || fiscalYearStartMonth > 12) errors.push('fiscal year start month must be 1-12');
+  checkSetup({ entityType, booksStartDate }, errors);
   if (errors.length) throw new LedgerError('Company is not valid', errors);
   return withTransaction(pool, async (c) => {
     const id = randomUUID();
     if (c.__inTx) await setScopeCompany(c, id);
     const { rows: [co] } = await c.query(
-      'INSERT INTO companies (id, name, home_state, fiscal_year_start_month) VALUES ($1,$2,$3,$4) RETURNING *',
-      [id, name.trim(), homeState, fiscalYearStartMonth],
+      `INSERT INTO companies (id, name, home_state, fiscal_year_start_month, entity_type, books_start_date, setup_done)
+       VALUES ($1,$2,$3,$4,$5,$6,false) RETURNING *`,
+      [id, name.trim(), homeState, fiscalYearStartMonth, entityType || null, booksStartDate || null],
     );
     if (ownerUserId) await c.query("INSERT INTO memberships (company_id, user_id, role) VALUES ($1,$2,'owner')", [id, ownerUserId]);
     for (const a of DEFAULT_CHART) {
@@ -35,9 +38,50 @@ export async function createCompany(pool, { name, homeState, fiscalYearStartMont
         [co.id, a.code, a.name, a.type, a.subtype ?? null, a.cashFlow ?? null, a.key ?? null],
       );
     }
-    await appendAudit(c, co.id, { action: 'create', entity: 'company', entityId: co.id, actor, payload: { name, homeState, fiscalYearStartMonth } });
+    await appendAudit(c, co.id, { action: 'create', entity: 'company', entityId: co.id, actor, payload: { name, homeState, fiscalYearStartMonth, entityType, booksStartDate } });
     return co;
   });
+}
+
+function checkSetup({ entityType, booksStartDate }, errors) {
+  if (entityType != null && entityType !== '' && !ENTITY_KEYS.includes(entityType)) errors.push(`business type must be one of ${ENTITY_KEYS.join(', ')}`);
+  if (booksStartDate != null && booksStartDate !== '' && !isIsoDate(booksStartDate)) errors.push('books start date must be a date');
+}
+
+/** The setup wizard's answers: business type, books start date, and whether setup is finished. */
+export async function updateSetup(pool, companyId, { entityType, booksStartDate, setupDone, actor = null }) {
+  const errors = [];
+  checkSetup({ entityType, booksStartDate }, errors);
+  if (setupDone != null && typeof setupDone !== 'boolean') errors.push('setupDone must be true or false');
+  if (errors.length) throw new LedgerError('Setup is not valid', errors);
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const sets = []; const vals = [companyId];
+    if (entityType !== undefined) { vals.push(entityType || null); sets.push(`entity_type = $${vals.length}`); }
+    if (booksStartDate !== undefined) { vals.push(booksStartDate || null); sets.push(`books_start_date = $${vals.length}`); }
+    if (setupDone !== undefined) { vals.push(setupDone); sets.push(`setup_done = $${vals.length}`); }
+    if (!sets.length) throw new LedgerError('Nothing to change');
+    const { rows: [co] } = await c.query(`UPDATE companies SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, vals);
+    await appendAudit(c, companyId, { action: 'update_setup', entity: 'company', entityId: companyId, actor, payload: { entityType, booksStartDate, setupDone } });
+    return co;
+  });
+}
+
+/** What the "Finish setting up" list on Home checks off: counts only, no amounts. */
+export async function setupStatus(db, companyId) {
+  const { rows: [r] } = await db.query(
+    `SELECT c.setup_done, c.entity_type, c.books_start_date,
+            (SELECT count(*)::int FROM journal_entries WHERE company_id = c.id) AS entries,
+            EXISTS (SELECT 1 FROM journal_lines l JOIN accounts a ON a.id = l.account_id AND a.company_id = l.company_id
+                     WHERE l.company_id = c.id AND a.subtype IN ('bank', 'cash', 'credit_card')) AS money_used,
+            (c.invoice_address IS NOT NULL OR EXISTS (SELECT 1 FROM company_logos WHERE company_id = c.id)) AS letterhead,
+            (SELECT count(*)::int FROM invoice_items WHERE company_id = c.id) AS items,
+            (SELECT count(*)::int FROM memberships WHERE company_id = c.id) AS people
+       FROM companies c WHERE c.id = $1`, [companyId]);
+  if (!r) throw new LedgerError('Company not found');
+  return { setupDone: r.setup_done, entityType: r.entity_type, booksStartDate: r.books_start_date,
+    steps: { basics: Boolean(r.entity_type && r.books_start_date), books: r.entries > 0, bank: r.money_used,
+      invoicing: r.letterhead || r.items > 0, people: r.people > 1 } };
 }
 
 /** Record an audit event that has no ledger change (e.g. membership changes). */

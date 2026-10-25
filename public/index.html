@@ -265,9 +265,12 @@
     <!-- First run: create a company -->
     <section v-else-if="!company || tab === 'new-company'" class="card narrow">
       <h1>{{ companies.length ? 'Add a company' : 'Welcome! Let\'s set up your books' }}</h1>
-      <p class="hint">We'll create a standard chart of accounts for a small business. You can add accounts later.</p>
+      <p class="hint">Step 1 of 5. We'll create a standard chart of accounts; the next steps bring in your books, bank
+        accounts, invoicing and people, and every one of them can be skipped.</p>
       <form @submit.prevent="createCompany">
-        <label>Business name <input v-model.trim="newCompany.name" required></label>
+        <label>Business name (or your own name for personal books) <input v-model.trim="newCompany.name" required></label>
+        <label>Type of business
+          <select v-model="newCompany.entityType"><option value="">Not sure yet</option><option v-for="[k, l] in entityTypes" :value="k">{{ l }}</option></select></label>
         <label>State
           <select v-model="newCompany.homeState">
             <option value="TX">Texas</option><option value="CO">Colorado</option>
@@ -279,6 +282,8 @@
             <option v-for="(m, i) in months" :value="i + 1">{{ m }}</option>
           </select>
         </label>
+        <label>Books start on <input type="date" v-model="newCompany.booksStartDate">
+          <span class="muted small">Usually the first day of this fiscal year. Opening balances are as of the day before.</span></label>
         <button class="primary">Create company</button>
       </form>
       <div v-if="!companies.length" class="joining">
@@ -290,8 +295,101 @@
     </section>
 
     <template v-else>
+    <!-- NEW-COMPANY SETUP WIZARD (owner/admin). Every step can be skipped; Home lists what's left. -->
+    <section v-if="tab === 'setup'" class="card setup">
+      <h1>Set up {{ company.name }}</h1>
+      <ol class="steps">
+        <li v-for="(label, i) in ['Basics', 'Your books', 'Bank and cards', 'Invoicing', 'People']" :class="{ on: setup.step === i + 1, done: setup.status?.steps[['basics', 'books', 'bank', 'invoicing', 'people'][i]] }">
+          <button type="button" class="link" @click="setup.step = i + 1">{{ i + 1 }}. {{ label }}</button></li>
+      </ol>
+
+      <div v-if="setup.step === 1">
+        <form @submit.prevent="saveBasics" class="grid2">
+          <label>Type of business
+            <select v-model="setup.entityType"><option value="">Not sure yet</option><option v-for="[k, l] in entityTypes" :value="k">{{ l }}</option></select></label>
+          <label>Books start on <input type="date" v-model="setup.booksStartDate"></label>
+          <div><button class="primary">Save and continue</button></div>
+        </form>
+        <p class="muted small">The type of business decides which tax return your books feed (Schedule C, 1065, 1120-S or 1120).</p>
+      </div>
+
+      <div v-else-if="setup.step === 2">
+        <p>How do you want to start?</p>
+        <div class="choices">
+          <label class="choice"><input type="radio" value="fresh" v-model="setup.books"> <strong>Start fresh</strong>
+            <span class="muted small">Enter what's in each bank account and owed on each card in the next step.</span></label>
+          <label class="choice"><input type="radio" value="quickbooks" v-model="setup.books"> <strong>From QuickBooks</strong>
+            <span class="muted small">An Account List, a Trial Balance and the Journal (CSV or Excel), or a QuickBooks Desktop IIF file.</span></label>
+          <label class="choice"><input type="radio" value="excel" v-model="setup.books"> <strong>From Excel or CSV</strong>
+            <span class="muted small">Fill in our templates: chart of accounts, opening balances, transactions.</span></label>
+          <label class="choice"><input type="radio" value="backup" v-model="setup.books"> <strong>From a zAccountant backup</strong>
+            <span class="muted small">The two files from Settings → Back up your books.</span></label>
+        </div>
+        <p v-if="setup.books === 'fresh'"><button class="primary" @click="setup.step = 3">Continue</button></p>
+        <template v-else-if="setup.books === 'backup'">
+          <p>Import the chart of accounts file first, then the transactions file.</p>
+          <p><button class="primary" @click="setupImport('accounts')">1. Import chart of accounts</button>
+            <button @click="setupImport('journal')">2. Import transactions</button></p>
+        </template>
+        <template v-else>
+          <p>In order: the chart of accounts, then opening balances as of {{ usDate(openingDate()) }}, then transactions
+            since (or one IIF file from QuickBooks Desktop). Each file is checked before anything is saved, and every import can be undone.</p>
+          <p><button class="primary" @click="setupImport('accounts')">Chart of accounts</button>
+            <button @click="setupImport('opening')">Opening balances</button>
+            <button @click="setupImport('journal')">Transactions</button>
+            <button v-if="setup.books === 'quickbooks'" @click="setupImport('iif')">IIF file</button></p>
+        </template>
+      </div>
+
+      <div v-else-if="setup.step === 3">
+        <p>Your bank accounts, cash and credit cards. Add any others you use.</p>
+        <table class="data">
+          <thead><tr><th>Account</th><th>Kind</th><th v-if="!setup.status?.steps.books" class="num">Balance on {{ usDate(openingDate()) }}</th></tr></thead>
+          <tr v-for="a in moneyAccounts()"><td>{{ a.code }} · {{ a.name }}</td><td class="muted">{{ a.subtype === 'credit_card' ? 'credit card (amount owed)' : a.subtype === 'cash' ? 'cash' : 'bank' }}</td>
+            <td v-if="!setup.status?.steps.books" class="w150"><input v-model="setup.balances[a.id]" inputmode="decimal" class="num" placeholder="0.00"></td></tr>
+        </table>
+        <form @submit.prevent="addMoneyAccount" class="row wrap">
+          <label>Add an account <input v-model.trim="setup.newAcct.name" placeholder="e.g. Business Checking (Chase)" maxlength="100" required></label>
+          <label>Kind <select v-model="setup.newAcct.kind"><option value="bank">Bank account</option><option value="card">Credit card</option></select></label>
+          <button>Add</button>
+        </form>
+        <p v-if="setup.status?.steps.books" class="muted small">Your books already have entries, so opening balances are not asked for here.
+          To correct one, reverse it on the Transactions tab and enter it again.</p>
+        <p><button v-if="!setup.status?.steps.books" class="primary" :disabled="setup.busy" @click="saveBalances">Save balances and continue</button>
+          <button :class="{ primary: setup.status?.steps.books }" @click="setup.step = 4">{{ setup.status?.steps.books ? 'Continue' : 'Skip' }}</button></p>
+        <p class="muted small">To bring in statements, use the Banking tab after setup.</p>
+      </div>
+
+      <div v-else-if="setup.step === 4">
+        <p>If you send invoices: your logo, the address and tax ID that print on them, and your hourly rates and costs passed on.</p>
+        <p><button class="primary" @click="tab = 'settings'">Open Settings → Invoice letterhead and rates</button> <button @click="setup.step = 5">Skip</button></p>
+      </div>
+
+      <div v-else>
+        <p>Add a bookkeeper, an accountant or staff. They create their own zAccountant account first; then add their email and a role.</p>
+        <p><button @click="tab = 'settings'">Open Settings → People with access</button></p>
+      </div>
+
+      <p class="setup-foot">
+        <button v-if="setup.step < 5" class="link" @click="setup.step++">Skip this step</button>
+        <button class="primary" @click="finishSetup(true)">{{ setup.step === 5 ? 'Finish' : 'Finish now' }}</button>
+        <button class="link" @click="tab = 'home'">Finish later</button>
+      </p>
+    </section>
+
     <!-- HOME -->
     <section v-if="tab === 'home'">
+      <div class="card" v-if="can('admin') && setup.status && !setup.status.setupDone">
+        <h2>Finish setting up</h2>
+        <ul class="checklist">
+          <li v-for="(label, i) in ['Type of business and start date', 'Bring in your books', 'Bank accounts and cards', 'Invoicing (logo, letterhead, rates)', 'People']"
+            :class="{ done: setup.status.steps[['basics', 'books', 'bank', 'invoicing', 'people'][i]] }">
+            {{ setup.status.steps[['basics', 'books', 'bank', 'invoicing', 'people'][i]] ? '✓' : '○' }}
+            <button class="link" @click="setupGo(i + 1)">{{ label }}</button></li>
+        </ul>
+        <button class="primary" @click="setupGo((['basics', 'books', 'bank', 'invoicing', 'people'].findIndex(k => !setup.status.steps[k]) + 1) || 5)">Continue setting up</button>
+        <button class="link" @click="finishSetup(true)">I'm done, hide this</button>
+      </div>
       <div class="tiles" v-if="dash">
         <div class="tile"><div class="label">Cash in the bank</div><div class="value">{{ money(dash.cashCents) }}</div></div>
         <div class="tile"><div class="label">Income this year</div><div class="value">{{ money(dash.revenueYtdCents) }}</div></div>
@@ -975,6 +1073,8 @@
 
     <!-- ACCOUNTS -->
     <section v-if="tab === 'accounts'">
+      <p v-if="setup.fromImport" class="alpha-note">Setting up {{ company.name }}: import your files below, then
+        <button class="link" @click="backToSetup">← back to setup</button>.</p>
       <div class="row"><h1>Chart of accounts</h1>
         <div v-if="can('accounts')">
           <button @click="imp.show = !imp.show">{{ imp.show ? 'Close import' : 'Import from QuickBooks or Excel' }}</button>

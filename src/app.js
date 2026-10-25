@@ -315,9 +315,15 @@ export function createApp(pool, { log } = {}) {
   // Companies
   api.get('/companies', route(null, ({ db, req }) => ledger.listCompanies(db, { userId: req.user.id })));
   api.post('/companies', route(null, ({ db, req, actor }) => {
-    const { name, homeState, fiscalYearStartMonth } = req.body ?? {};
-    return ledger.createCompany(db, { name, homeState, fiscalYearStartMonth, actor, ownerUserId: req.user.id });
+    const { name, homeState, fiscalYearStartMonth, entityType, booksStartDate } = req.body ?? {};
+    return ledger.createCompany(db, { name, homeState, fiscalYearStartMonth, entityType, booksStartDate, actor, ownerUserId: req.user.id });
   }, 201));
+  // The new-company setup wizard: business type, books start date, and "setup finished".
+  api.put('/companies/:companyId/setup', route('admin', ({ db, req, companyId, actor }) => {
+    const { entityType, booksStartDate, setupDone } = req.body ?? {};
+    return ledger.updateSetup(db, companyId, { entityType, booksStartDate, setupDone, actor });
+  }));
+  api.get('/companies/:companyId/setup', route('member', ({ db, companyId }) => ledger.setupStatus(db, companyId)));
   api.get('/companies/:companyId', route('member', async ({ db, companyId, access }) => ({
     ...(await ledger.getCompany(db, companyId)), role: access.role, roleName: access.roleName, permissions: [...access.permissions], departmentId: access.departmentId,
     ...(await plans.getCompanyPlan(db, companyId)),
