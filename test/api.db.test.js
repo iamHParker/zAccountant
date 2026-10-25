@@ -785,6 +785,7 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.deepEqual(pub.plans.map((p) => p.key), ['beta', 'individual', 'company']);
     assert.deepEqual(pub.addOns.map((p) => p.key), ['tax', 'timesheets']);
     assert.deepEqual([pub.plans[2].monthlyCents, pub.plans[2].annualCents], [null, null], 'no price invented');
+    assert.ok([...pub.plans, ...pub.addOns].every((p) => p.points.length > 0), 'every card has its short points');
 
     const acc = await owner.c.call('GET', `/api/companies/${co.id}/backup/accounts`);
     assert.equal(acc.status, 200);
