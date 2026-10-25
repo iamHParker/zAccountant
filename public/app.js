@@ -1063,13 +1063,27 @@ createApp({
       if (!confirm('Remove the logo from your invoices?')) return;
       if (await this.run(() => api('PUT', `/companies/${this.companyId}/logo`, { picture: null }), 'Logo removed.')) this.company = { ...this.company, logoVersion: null };
     },
+    // Edit an invoice or bill: the form, filled in from the saved one. Saving voids it and posts the corrected copy.
+    editDoc(doc) {
+      const invoice = this.S.kind === 'invoice';
+      const dollars = (c) => (c / 100).toFixed(2);
+      this.ar.doc = { ...blankDoc(doc.taxRate ?? ''), editId: doc.id, editNumber: doc.number, contactId: doc.contactId, number: doc.number,
+        date: doc.date, dueDate: doc.dueDate ?? '', memo: doc.memo ?? '', project: doc.project ?? '',
+        lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
+          description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true })) };
+      this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
+      if (invoice) this.loadItems();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
     async saveDoc() {
       const d = this.ar.doc;
       const lines = d.lines.filter((l) => l.accountId || l.unitPrice).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
         unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined }));
       const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
         project: this.S.kind === 'invoice' ? d.project : undefined, taxRate: d.taxRate || undefined, lines };
-      const r = await this.run(() => api('POST', `${this.arBase()}/${this.S.docPath}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} saved.`);
+      const r = d.editId
+        ? await this.run(() => api('PUT', `${this.arBase()}/documents/${d.editId}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} ${d.editNumber} corrected.`)
+        : await this.run(() => api('POST', `${this.arBase()}/${this.S.docPath}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} saved.`);
       if (!r) return;
       this.ar.showDoc = false; this.ar.doc = blankDoc(); this.ar.panel = 'docs'; this.ar.view = 'open';
       await this.loadAr();
@@ -1091,12 +1105,32 @@ createApp({
       p.open = p.contactId ? ((await this.run(() => api('GET', `${this.arBase()}/${this.S.docPath}?status=open&contactId=${p.contactId}`))) ?? []).reverse() : [];
       p.amounts = {};
     },
+    // Edit a payment: the form, filled in. The invoices it paid are listed with their balance before this payment.
+    async editPay(p) {
+      this.ar.pay = { ...blankPay(), editId: p.id, contactId: p.contactId, date: p.date, accountId: p.accountId, method: p.method || 'check',
+        reference: p.reference ?? '', memo: p.memo ?? '' };
+      this.ar.showPay = true; this.ar.showDoc = false; this.ar.detail = null;
+      await this.loadPayDocs();
+      const pay = this.ar.pay;
+      for (const a of p.applications) {
+        const d = pay.open.find((x) => x.id === a.documentId);
+        if (d) d.balanceCents += a.amountCents;
+        else {
+          const full = await this.run(() => api('GET', `${this.arBase()}/documents/${a.documentId}`));
+          if (full) pay.open.push({ ...full, balanceCents: full.balanceCents + a.amountCents });
+        }
+        pay.amounts[a.documentId] = (a.amountCents / 100).toFixed(2);
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
     payInFull() { for (const d of this.ar.pay.open) this.ar.pay.amounts[d.id] = (d.balanceCents / 100).toFixed(2); },
     async savePay() {
       const p = this.ar.pay;
       const applications = p.open.filter((d) => cents(p.amounts[d.id]) > 0).map((d) => ({ documentId: d.id, amount: p.amounts[d.id] }));
       const body = { contactId: p.contactId, date: p.date, accountId: p.accountId, method: p.method, reference: p.reference, memo: p.memo, applications };
-      const r = await this.run(() => api('POST', `${this.arBase()}/${this.S.payPath}`, body, { 'Idempotency-Key': p.key }), `Payment of ${money(this.payTotal)} recorded.`);
+      const r = p.editId
+        ? await this.run(() => api('PUT', `${this.arBase()}/payments/${p.editId}`, body, { 'Idempotency-Key': p.key }), `Payment corrected: ${money(this.payTotal)}.`)
+        : await this.run(() => api('POST', `${this.arBase()}/${this.S.payPath}`, body, { 'Idempotency-Key': p.key }), `Payment of ${money(this.payTotal)} recorded.`);
       if (!r) return;
       this.ar.showPay = false; this.ar.pay = blankPay(); this.loadAr();
     },

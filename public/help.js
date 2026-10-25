@@ -38,7 +38,7 @@ automatically each night, or press <em>Post due entries now</em>.</p>
   },
   {
     id: 'sales', tab: 'sales', title: 'Invoices and getting paid',
-    words: 'invoice customer receive payment accounts receivable aging overdue void',
+    words: 'invoice customer receive payment accounts receivable aging overdue void edit correct mistake',
     html: `
 <ol>
   <li>Add a customer (name, email, payment terms such as 30 days). To change one later, open the Customers tab and press <strong>edit</strong>.</li>
@@ -49,7 +49,8 @@ automatically each night, or press <em>Post due entries now</em>.</p>
 </ol>
 <p><strong>Aging report</strong> shows who owes you and how late, in 30-day buckets, and checks that it agrees with Accounts
 Receivable in your books. Download it as CSV or print it.</p>
-<p>An invoice with no payments can be <strong>voided</strong>; it stays on record marked void. To undo a payment, void the payment first.</p>
+<p><strong>Mistake on an invoice?</strong> Open it and press <strong>Edit</strong>. Saving replaces it with the corrected one (same number); the old one stays in history marked Replaced. Payments have an <strong>edit</strong> link on the Payments tab. If an invoice already has a payment, fix the payment first.</p>
+<p>An invoice with no payments can also be <strong>voided</strong>; it stays on record marked void.</p>
 <p>Billing by the hour? See <a href="#" data-help="invoice-setup">Invoice rates, letterhead and logo</a>.</p>`,
   },
   {

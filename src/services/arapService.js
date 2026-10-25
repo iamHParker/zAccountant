@@ -8,7 +8,8 @@
 // The open balance of every invoice/bill is its total minus the payments applied to it, so the
 // customer (vendor) balances always add up to the Accounts Receivable (Payable) balance — the aging
 // report proves this to the penny. Nothing is edited after saving; a mistake is voided (its entry is
-// reversed, history kept) and entered again.
+// reversed, history kept) and entered again. "Edit" does both in one step (replaceDocument, replacePayment):
+// the old record is voided and marked replaced_by_id, and the corrected copy is posted; an invoice keeps its number.
 import { withTransaction } from '../db/pool.js';
 import { LedgerError, isIsoDate, validateEntry, MAX_LINE_CENTS } from '../core/ledger.js';
 import { toCents, divRoundHalfUp, applyRate, percentToPpm } from '../core/money.js';
@@ -172,6 +173,7 @@ const docOut = (d, today) => {
     id: d.id, kind: d.kind, contactId: d.contact_id, contactName: d.contact_name, number: d.number, date: d.doc_date, dueDate: d.due_date,
     memo: d.memo, project: d.project ?? null, subtotalCents: d.subtotal_cents, taxRate: d.tax_rate, taxCents: d.tax_cents, totalCents: d.total_cents,
     paidCents: paid, balanceCents: balance, status, voidDate: d.void_date, journalEntryId: d.journal_entry_id, entryNumber: d.entry_number ?? null,
+    replacedById: d.replaced_by_id ?? null,
   };
 };
 
@@ -219,7 +221,7 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
 }
 
 /** Create and post an invoice (kind 'invoice') or a bill (kind 'bill'). */
-export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, idempotencyKey = null, actor = null }) {
+export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
   const side = SIDE[kind];
   if (!side) throw new LedgerError('kind must be invoice or bill');
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
@@ -261,7 +263,7 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     let auto = false;
     if (kind === 'invoice' && num == null) { num = String(co.next_invoice_number); auto = true; }
     const dup = kind === 'invoice'
-      ? await c.query('SELECT 1 FROM documents WHERE company_id = $1 AND kind = $2 AND lower(number) = lower($3)', [companyId, kind, num])
+      ? await c.query('SELECT 1 FROM documents WHERE company_id = $1 AND kind = $2 AND lower(number) = lower($3) AND replaced_by_id IS NULL', [companyId, kind, num])
       : await c.query("SELECT 1 FROM documents WHERE company_id = $1 AND kind = 'bill' AND contact_id = $2 AND lower(number) = lower($3) AND status = 'posted'", [companyId, contact.id, num]);
     if (dup.rows.length) {
       throw new LedgerError(kind === 'invoice' ? `Invoice number ${num} is already used` : `Bill ${num} from ${contact.name} is already entered`);
@@ -284,7 +286,7 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
       jl.push({ accountId: control.id, debitCents: 0, creditCents: total, memo: label });
     }
     const entry = validateEntry({ date, memo: (cleanMemoText ? `${label}: ${cleanMemoText}` : label).slice(0, 500), lines: jl });
-    const { rows: [{ id: docId }] } = await c.query('SELECT gen_random_uuid() AS id');
+    const docId = documentId ?? (await c.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     const je = await insertEntry(c, companyId, entry, { source: kind, sourceRef: docId, actor });
     await c.query(
       `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, project, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by)
@@ -296,8 +298,8 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [companyId, docId, l.accountId, l.description, l.quantity, l.unitPriceCents, l.amountCents, l.taxable, l.serviceDate, l.itemId]);
     }
-    await appendAudit(c, companyId, { action: 'create', entity: kind, entityId: docId, actor,
-      payload: { number: num, contactId: contact.id, date, dueDate: due, subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
+    await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: kind, entityId: docId, actor,
+      payload: { ...(replacesId ? { replacesId } : {}), number: num, contactId: contact.id, date, dueDate: due, subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
     return getDocument(c, companyId, docId);
   });
 }
@@ -339,7 +341,7 @@ export async function listDocuments(db, companyId, { kind, status = 'open', cont
 }
 
 /** Void an invoice or bill: its entry is reversed. Payments applied to it must be voided first. */
-export async function voidDocument(pool, companyId, docId, { date = null, actor = null } = {}) {
+export async function voidDocument(pool, companyId, docId, { date = null, actor = null, replacedById = null } = {}) {
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
@@ -349,12 +351,35 @@ export async function voidDocument(pool, companyId, docId, { date = null, actor 
     if (d.status === 'void') throw new LedgerError(`${label} is already void`);
     const { rows: paid } = await c.query(
       `SELECT 1 FROM payment_applications a JOIN payments p ON p.id = a.payment_id WHERE a.document_id = $1 AND p.status = 'posted' LIMIT 1`, [d.id]);
-    if (paid.length) throw new LedgerError(`${label} has payments; void those payments first`);
+    if (paid.length) throw new LedgerError(`${label} has payments; ${replacedById ? 'edit or void those payments first' : 'void those payments first'}`);
     const rev = await reverseEntry(c, companyId, d.journal_entry_id, { date: date || undefined, memo: `Void ${label}`, actor, fromDocument: true });
-    await c.query(`UPDATE documents SET status = 'void', void_date = $3, void_entry_id = $4, voided_by = $5, voided_at = now() WHERE company_id = $1 AND id = $2`,
-      [companyId, d.id, rev.entry_date, rev.id, actor]);
+    await c.query(`UPDATE documents SET status = 'void', void_date = $3, void_entry_id = $4, voided_by = $5, voided_at = now(), replaced_by_id = $6
+                    WHERE company_id = $1 AND id = $2`, [companyId, d.id, rev.entry_date, rev.id, actor, replacedById]);
     await appendAudit(c, companyId, { action: 'void', entity: d.kind, entityId: d.id, actor, payload: { number: d.number, voidDate: rev.entry_date, reversalId: rev.id } });
     return getDocument(c, companyId, d.id);
+  });
+}
+
+/**
+ * Edit an invoice or bill: void it and post the corrected copy, in one step. The input is the whole corrected
+ * document (same fields as createDocument); an empty number keeps the old one. The void is dated like any void
+ * (the original date, or the first open day if that period is locked).
+ */
+export async function replaceDocument(pool, companyId, docId, { idempotencyKey = null, actor = null, ...input }) {
+  idempotencyKey = cleanIdempotencyKey(idempotencyKey);
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    if (idempotencyKey) {
+      const { rows: [prior] } = await c.query('SELECT id FROM documents WHERE company_id = $1 AND idempotency_key = $2', [companyId, idempotencyKey]);
+      if (prior) return { ...(await getDocument(c, companyId, prior.id)), replayed: true };
+    }
+    if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
+    const { rows: [old] } = await c.query('SELECT kind, number FROM documents WHERE company_id = $1 AND id = $2', [companyId, docId]);
+    if (!old) throw new LedgerError('Invoice or bill not found');
+    const { rows: [{ id: newId }] } = await c.query('SELECT gen_random_uuid() AS id');
+    await voidDocument(c, companyId, docId, { actor, replacedById: newId });
+    const number = input.number == null || String(input.number).trim() === '' ? old.number : input.number;
+    return createDocument(c, companyId, { ...input, kind: old.kind, number, idempotencyKey, actor, documentId: newId, replacesId: docId });
   });
 }
 
@@ -364,6 +389,7 @@ const payOut = (p) => ({
   id: p.id, kind: p.kind, contactId: p.contact_id, contactName: p.contact_name, date: p.pay_date, amountCents: p.amount_cents,
   accountId: p.account_id, accountName: p.account_name, method: p.method, reference: p.reference, memo: p.memo, status: p.status,
   voidDate: p.void_date, journalEntryId: p.journal_entry_id, entryNumber: p.entry_number ?? null, applications: p.applications ?? [],
+  replacedById: p.replaced_by_id ?? null,
 });
 
 /**
@@ -371,7 +397,7 @@ const payOut = (p) => ({
  * one or more of that contact's open invoices/bills: applications = [{ documentId, amount }].
  * The payment amount is the sum of the applications.
  */
-export async function createPayment(pool, companyId, { kind, contactId, date, accountId, method, reference, memo, applications, idempotencyKey = null, actor = null }) {
+export async function createPayment(pool, companyId, { kind, contactId, date, accountId, method, reference, memo, applications, idempotencyKey = null, actor = null, paymentId = null, replacesId = null }) {
   const docKind = DOC_FOR_PAYMENT[kind];
   if (!docKind) throw new LedgerError('kind must be received or made');
   const side = SIDE[docKind];
@@ -427,7 +453,7 @@ export async function createPayment(pool, companyId, { kind, contactId, date, ac
       ? [{ accountId: acct.id, debitCents: total, creditCents: 0 }, { accountId: control.id, debitCents: 0, creditCents: total }]
       : [{ accountId: control.id, debitCents: total, creditCents: 0 }, { accountId: acct.id, debitCents: 0, creditCents: total }];
     const memoText = text(memo, 500);
-    const { rows: [{ id: payId }] } = await c.query('SELECT gen_random_uuid() AS id');
+    const payId = paymentId ?? (await c.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     const je = await insertEntry(c, companyId, validateEntry({ date, memo: label, lines }), { source: 'payment', sourceRef: payId, actor });
     await c.query(
       `INSERT INTO payments (id, company_id, kind, contact_id, pay_date, amount_cents, account_id, method, reference, memo, journal_entry_id, idempotency_key, created_by)
@@ -436,8 +462,8 @@ export async function createPayment(pool, companyId, { kind, contactId, date, ac
     for (const a of apps) {
       await c.query('INSERT INTO payment_applications (company_id, payment_id, document_id, amount_cents) VALUES ($1,$2,$3,$4)', [companyId, payId, a.documentId, a.amountCents]);
     }
-    await appendAudit(c, companyId, { action: 'create', entity: 'payment', entityId: payId, actor,
-      payload: { kind, contactId: contact.id, date, amountCents: total, accountId: acct.id, applications: apps, entryId: je.id } });
+    await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: 'payment', entityId: payId, actor,
+      payload: { ...(replacesId ? { replacesId } : {}), kind, contactId: contact.id, date, amountCents: total, accountId: acct.id, applications: apps, entryId: je.id } });
     return getPayment(c, companyId, payId);
   });
 }
@@ -472,7 +498,7 @@ export async function listPayments(db, companyId, { kind, contactId = null, limi
 }
 
 /** Void a payment (e.g. a bounced check): its entry is reversed and the invoices/bills are open again. */
-export async function voidPayment(pool, companyId, paymentId, { date = null, actor = null } = {}) {
+export async function voidPayment(pool, companyId, paymentId, { date = null, actor = null, replacedById = null } = {}) {
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     if (typeof paymentId !== 'string' || !UUIDISH.test(paymentId)) throw new LedgerError('Payment not found');
@@ -485,10 +511,28 @@ export async function voidPayment(pool, companyId, paymentId, { date = null, act
       'SELECT 1 FROM reconciliation_lines rl JOIN journal_lines l ON l.id = rl.journal_line_id WHERE l.entry_id = $1', [p.journal_entry_id]);
     if (cleared) throw new LedgerError('This payment is part of a bank reconciliation and can no longer be voided');
     const rev = await reverseEntry(c, companyId, p.journal_entry_id, { date: date || undefined, memo: `Void payment of ${fmt(p.amount_cents)}`, actor, fromDocument: true });
-    await c.query(`UPDATE payments SET status = 'void', void_date = $3, void_entry_id = $4, voided_by = $5, voided_at = now() WHERE company_id = $1 AND id = $2`,
-      [companyId, p.id, rev.entry_date, rev.id, actor]);
+    await c.query(`UPDATE payments SET status = 'void', void_date = $3, void_entry_id = $4, voided_by = $5, voided_at = now(), replaced_by_id = $6
+                    WHERE company_id = $1 AND id = $2`, [companyId, p.id, rev.entry_date, rev.id, actor, replacedById]);
     await appendAudit(c, companyId, { action: 'void', entity: 'payment', entityId: p.id, actor, payload: { amountCents: p.amount_cents, voidDate: rev.entry_date, reversalId: rev.id } });
     return getPayment(c, companyId, p.id);
+  });
+}
+
+/** Edit a payment: void it and record the corrected one, in one step (same fields as createPayment). */
+export async function replacePayment(pool, companyId, paymentId, { idempotencyKey = null, actor = null, ...input }) {
+  idempotencyKey = cleanIdempotencyKey(idempotencyKey);
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    if (idempotencyKey) {
+      const { rows: [prior] } = await c.query('SELECT id FROM payments WHERE company_id = $1 AND idempotency_key = $2', [companyId, idempotencyKey]);
+      if (prior) return { ...(await getPayment(c, companyId, prior.id)), replayed: true };
+    }
+    if (typeof paymentId !== 'string' || !UUIDISH.test(paymentId)) throw new LedgerError('Payment not found');
+    const { rows: [old] } = await c.query('SELECT kind FROM payments WHERE company_id = $1 AND id = $2', [companyId, paymentId]);
+    if (!old) throw new LedgerError('Payment not found');
+    const { rows: [{ id: newId }] } = await c.query('SELECT gen_random_uuid() AS id');
+    await voidPayment(c, companyId, paymentId, { actor, replacedById: newId });
+    return createPayment(c, companyId, { ...input, kind: old.kind, idempotencyKey, actor, paymentId: newId, replacesId: paymentId });
   });
 }
 

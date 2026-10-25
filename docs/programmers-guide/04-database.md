@@ -23,6 +23,8 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `016_invoice_items.sql` | saved invoice rates/items, line dates, project block, letterhead, logo, default sales tax rate |
 | `017_company_setup.sql` | company type of business, books start date, setup-wizard done flag |
 | `018_tax_ready.sql` | tax category per income/expense account (Tax-ready level 1) |
+| `019_plan_names.sql` | plan renames: Basic → Company (includes payroll) |
+| `020_corrections.sql` | `replaced_by_id` on documents and payments (Edit = void + corrected copy); invoice number unique among non-replaced |
 
 ## How migrations run
 
