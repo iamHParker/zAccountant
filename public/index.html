@@ -1090,6 +1090,71 @@
         </div>
       </details>
 
+      <!-- MILEIQ: the monthly drive report → mileage on trips -->
+      <details class="card mileiq" v-if="!trip.cur && !trip.form && can('bills')" :open="Boolean(mileiq.preview)">
+        <summary><strong>Import from MileIQ</strong> <span class="muted small">· your monthly drive report becomes mileage on your trips</span></summary>
+        <p class="hint">In MileIQ's monthly email choose <strong>Download as CSV</strong> (the PDF can't be read), then pick that file here.
+          Business drives come in as mileage, one cost per trip per day, at the rate in the file. A drive already imported is never brought in twice.</p>
+        <label class="photo-btn">Choose the MileIQ CSV file… <input type="file" accept=".csv,text/csv" @change="pickMileIq"></label>
+        <template v-if="mileiq.preview">
+          <p><strong>{{ mileiq.file.name }}</strong>: {{ mileiq.preview.counts.drives }} drives, {{ mileiq.preview.counts.miles }} mi,
+            {{ usDate(mileiq.preview.from) }} – {{ usDate(mileiq.preview.to) }}.
+            <span v-if="mileiq.preview.counts.imported">{{ mileiq.preview.counts.imported }} already imported.</span>
+            <span v-if="mileiq.preview.counts.business < mileiq.preview.counts.drives">{{ mileiq.preview.counts.drives - mileiq.preview.counts.business }} not business (not imported).</span></p>
+          <p v-if="mileiq.preview.counts.toImport">Ready to import: {{ mileiq.preview.counts.toImport }} business drives, {{ mileiq.preview.counts.businessMiles }} mi,
+            <strong>{{ money(mileiq.preview.counts.mileIqValueCents) }}</strong>&#32;
+            <span v-if="mileiq.preview.counts.tollsCents || mileiq.preview.counts.parkingCents"> + tolls and parking {{ money(mileiq.preview.counts.tollsCents + mileiq.preview.counts.parkingCents) }}</span>
+            <span class="muted small">(MileIQ's own figure: each drive rounded to the cent, then added up, so it matches their report)</span></p>
+          <p v-else class="hint">Everything in this file is already imported.</p>
+          <template v-if="mileiq.preview.counts.toImport">
+            <div class="grid2">
+              <label>Mileage goes to (expense)
+                <select v-model="mileiq.expenseId"><option value="">Choose…</option><option v-for="a in tripExpenseAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+              <label>Paid with <span class="muted small">(your own car: an owner account)</span>
+                <select v-model="mileiq.paidFromId"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+              <label>Rate per mile <input v-model.trim="mileiq.rate" inputmode="decimal" class="num"></label>
+              <label>Name for the new local-driving trip <input v-model="mileiq.newTripName" maxlength="120"></label>
+            </div>
+            <div class="row wrap">
+              <button type="button" class="small" @click="mileIqAll(true)">Tick all</button>
+              <button type="button" class="small" @click="mileIqAll(false)">Untick all</button>
+              <label class="small">Put the ticked drives on
+                <select v-model="mileiq.bulkTrip"><option value="">Choose a trip…</option><option value="new">New: {{ mileiq.newTripName }}</option>
+                  <option v-for="t in trip.list.filter(t => t.isActive)" :value="t.id">{{ t.name }}</option></select></label>
+              <button type="button" class="small" @click="mileIqBulk" :disabled="!mileiq.bulkTrip">Apply</button>
+            </div>
+            <div class="table-scroll">
+              <table class="data mileiq-drives">
+                <thead><tr><th></th><th>Time</th><th>From → To</th><th class="num">Miles</th><th>Purpose</th><th>Trip</th></tr></thead>
+                <template v-for="day in mileIqDays()">
+                  <tr class="day-row"><td colspan="6"><strong>{{ usDate(day.date) }}</strong></td></tr>
+                  <tr v-for="d in day.drives" :class="{ muted: !d.business || d.imported }">
+                    <td><input type="checkbox" v-if="d.business && !d.imported" v-model="mileiq.pick[d.key]" :aria-label="'Import the drive at ' + d.startTime"></td>
+                    <td>{{ d.startTime }}</td>
+                    <td><span :title="d.from">{{ mileIqPlace(d.from) }}</span> → <span :title="d.to">{{ mileIqPlace(d.to) }}</span>
+                      <span v-if="d.tollsCents || d.parkingCents" class="small muted"> · tolls/parking {{ money(d.tollsCents + d.parkingCents) }}</span></td>
+                    <td class="num">{{ d.miles }}</td>
+                    <td>{{ d.business ? d.purpose : d.category + (d.purpose && d.purpose !== d.category ? ' · ' + d.purpose : '') }}</td>
+                    <td>
+                      <span v-if="d.imported" class="small">already imported</span>
+                      <span v-else-if="!d.business" class="small">not business</span>
+                      <select v-else v-model="mileiq.tripFor[d.key]" :disabled="!mileiq.pick[d.key]" aria-label="Trip">
+                        <option value="new">New: {{ mileiq.newTripName }}</option>
+                        <option v-for="t in trip.list.filter(t => t.isActive || t.id === mileiq.tripFor[d.key])" :value="t.id">{{ t.name }}</option></select>
+                    </td>
+                  </tr>
+                </template>
+              </table>
+            </div>
+            <div class="row wrap">
+              <button class="primary" :disabled="mileiq.busy || !mileIqTicked().length" @click="importMileIq">Import {{ mileIqTicked().length }} drives ({{ mileIqTickedMiles() }} mi)</button>
+              <button type="button" @click="mileiq.preview = null; mileiq.file = null">Cancel</button>
+            </div>
+            <p class="hint">A new local-driving trip has no projects yet. Open it afterwards and add the projects the driving was for, with their shares, so their invoices can bill it.</p>
+          </template>
+        </template>
+      </details>
+
       <template v-if="trip.cur && !trip.form">
         <div class="card">
           <div class="row wrap"><h2>{{ trip.cur.name }}</h2>

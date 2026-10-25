@@ -99,6 +99,13 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     job with that name or number exists; even shares via `evenShares`), a cost (`addTripCost` with idempotency key
     `road-<item id>`, photos copied), or travel time (a time entry for the sender). QR codes come from
     `qrcode-generator` on the server (SVG).
+  - **MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`):** the CSV is laid out
+    like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's
+    header, reads only typed cells and works the dollars out itself. A drive's `key` is a SHA-256 of when, where, miles
+    and vehicle; `mileage_drives` keeps each imported drive, and a key counts as imported while its trip cost is posted
+    or was edited. Import groups drives per (trip, day, rate) into one `addTripCost` mileage cost whose amount is the
+    sum of each drive rounded (server-only `mileageCents` option, so the books tie out to MileIQ's report); tolls and
+    parking post as their own costs. Drives with trip `new` go on one new trip spanning their dates.
   - Billed time can't be changed, deleted or sent back (`zacc_time_billed_final`, and the service says which invoice);
     a bill with a billed cost can't be voided or edited (`zacc_bill_cost_billed`) until that invoice is.
 

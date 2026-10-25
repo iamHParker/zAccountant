@@ -187,6 +187,22 @@ while you travel, even with no signal, without signing in to your books on the p
 The road key can't see your books or change anything already saved; it can only add to the *From the road* box.
 It works for 90 days. Lost the phone? **Trips → Your phone on the road → turn off**.
 
+### Mileage from MileIQ
+
+MileIQ emails a monthly report. Choose **Download as CSV** in that email (the PDF can't be read), then in
+**Trips → Import from MileIQ** pick the file. You see every drive, a day at a time:
+
+- **Business** drives are ticked. Personal, commute, medical and charity drives are shown but never imported.
+- Each drive is put on the trip whose dates cover it (a Midland trip on Oct 8 gets that day's drives); the rest go on a
+  new trip, *Local driving, October 2026*. Change any drive's trip, or tick several and **Put the ticked drives on** a trip.
+- Choose the expense account (*Vehicle Expense*) and what paid for it (your own car: an owner account like
+  *Owner's Capital*). The rate per mile comes from the file; type another to change it.
+
+**Import** posts one mileage cost per trip per day, with MileIQ's own dollar figure (each drive rounded to the cent,
+then added up), so the total matches MileIQ's report to the penny. Tolls and parking in the file become their own costs.
+Importing the same file again, or next month's, never brings a drive in twice. Then open the local-driving trip and
+add the projects it was for, with their shares, so their invoices can bill it.
+
 ### Projects
 
 **Sales → Projects** lists your projects (the same list as the jobs on the Time tab): number, name, customer and site
