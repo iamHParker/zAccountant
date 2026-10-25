@@ -44,6 +44,11 @@ The bar along the bottom has a zoom slider, like Word's: drag it, or press **−
 smaller in steps of 10% (50% to 200%). Press the percentage to go back to 100%. The setting is kept on this computer (or
 phone) for next time; printing always uses normal size.
 
+Beside the zoom are two more buttons. **⤢ Full screen** makes zAccountant fill the whole screen, like a slideshow (press
+it again, or Esc, to go back; iPhones don't offer it). **⋮ Options** holds this device's display settings. Today it shows
+*Theme override* (follow the device's light/dark setting, or pick one), marked *coming*: the choice is kept but doesn't
+change anything yet.
+
 ## 3. Recording transactions
 
 - **Quick way (Home → Record a transaction):** choose *Money in*, *Money out* or *Transfer*. Enter the date, a

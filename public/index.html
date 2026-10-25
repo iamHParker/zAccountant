@@ -2358,6 +2358,33 @@
       <button type="button" class="zoom-step" @click="setZoom(zoom + 10)" :disabled="zoom >= ZOOM_MAX" title="Zoom in" aria-label="Zoom in">+</button>
       <button type="button" class="zoom-pct" @click="setZoom(100)" title="Back to 100%">{{ zoom }}%</button>
     </span>
+    <span class="status-tools">
+      <button type="button" class="status-icon" v-if="fullscreenOk" @click="toggleFullscreen"
+              :title="fullscreen ? 'Leave full screen' : 'Full screen'" :aria-label="fullscreen ? 'Leave full screen' : 'Full screen'">
+        <svg v-if="!fullscreen" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/></svg>
+        <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M19 11h-6V5M13 11l7-7M5 13h6v6M11 13l-7 7"/></svg>
+      </button>
+      <button type="button" class="status-icon" @click="statusMenu = !statusMenu" title="Options" aria-label="Options"
+              :aria-expanded="statusMenu ? 'true' : 'false'">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+      </button>
+    </span>
+    <div class="status-menu-shade" v-if="statusMenu" @click="statusMenu = false"></div>
+    <div class="status-menu card" v-if="statusMenu" role="dialog" aria-label="Options" @keydown.esc="statusMenu = false">
+      <h3>Options</h3>
+      <section v-for="sec in STATUS_OPTIONS" :key="sec.id" class="status-menu-section">
+        <h4>{{ sec.title }}</h4>
+        <template v-for="o in sec.items" :key="o.id">
+          <label class="status-option" v-if="!o.showIf || prefs[o.showIf.id] === o.showIf.is">
+            <span>{{ o.label }} <span class="tag" v-if="!o.ready" title="The setting is kept, but doesn't change anything yet">coming</span></span>
+            <select v-model="prefs[o.id]" @change="savePrefs">
+              <option v-for="c in o.choices" :value="c[0]">{{ c[1] }}</option>
+            </select>
+          </label>
+        </template>
+      </section>
+      <p class="hint">More settings will be added here.</p>
+    </div>
   </footer>
 </div>
 </body>

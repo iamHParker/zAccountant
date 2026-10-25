@@ -87,6 +87,18 @@ const ZOOM_MIN = 50; const ZOOM_MAX = 200;
 const lastZoom = () => { try { const z = Number(localStorage.getItem('zacc.zoom')); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 100; } catch { return 100; } };
 const keepZoom = (z) => { try { localStorage.setItem('zacc.zoom', String(z)); } catch { /* private window: not kept */ } };
 const applyZoom = (z) => document.documentElement.style.setProperty('--zoom', String(z / 100));
+// Options menu (⋮ on the status bar): this browser's display settings, kept between visits. Each item names its choices;
+// `ready: false` marks a setting whose place is ready but which doesn't do anything yet (shown with a "coming" tag).
+// `showIf` shows an item only when another has a value (Theme appears when Theme override is Yes).
+const STATUS_OPTIONS = [
+  { id: 'display', title: 'Display', items: [
+    { id: 'themeOverride', label: 'Theme override', choices: [['no', 'No (follow this device)'], ['yes', 'Yes']], ready: false },
+    { id: 'theme', label: 'Theme', choices: [['light', 'Light'], ['dark', 'Dark']], ready: false, showIf: { id: 'themeOverride', is: 'yes' } },
+  ] },
+];
+const PREF_DEFAULTS = { themeOverride: 'no', theme: 'light' };
+const lastPrefs = () => { try { return { ...PREF_DEFAULTS, ...JSON.parse(localStorage.getItem('zacc.prefs') ?? '{}') }; } catch { return { ...PREF_DEFAULTS }; } };
+const keepPrefs = (p) => { try { localStorage.setItem('zacc.prefs', JSON.stringify(p)); } catch { /* private window: not kept */ } };
 const lastMileRate = () => { try { return localStorage.getItem('zacc.mileRate') ?? ''; } catch { return ''; } };
 const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } catch { /* private window: not kept */ } };
 // The accounts last used for costs that came in from the Road page.
@@ -220,6 +232,8 @@ createApp({
       help: { q: '', id: 'start', from: 'home' },
       version: '',
       zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX,
+      fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
+      statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
       fb: { open: false, note: '', picture: null, pictureSource: null, busy: false, error: '' },
       adm: { from: 'home', data: null, changes: [], edit: null, q: '' },
       dev: { from: 'home', summary: null, status: 'new', list: null, report: null, text: '', note: '', copied: false },
@@ -357,6 +371,8 @@ createApp({
   },
   async mounted() {
     applyZoom(this.zoom);
+    document.addEventListener('fullscreenchange', () => { this.fullscreen = !!document.fullscreenElement; });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.statusMenu = false; });
     startRecorder();
     onSignInNeeded = (next) => this.goAuth(next ?? 'signin');
     try {
@@ -720,6 +736,14 @@ createApp({
       if (g.then) await this[g.then]();
     },
     openJE() { this.showJE = true; },
+    /** Status bar ⤢: the whole browser window becomes the app (Esc, or the button again, leaves). */
+    async toggleFullscreen() {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else await document.documentElement.requestFullscreen();
+      } catch { this.flash("This browser won't go full screen here.", 'bad'); }
+    },
+    savePrefs() { keepPrefs(this.prefs); },
     /** Status bar zoom: whole steps of 10%, between ZOOM_MIN and ZOOM_MAX. */
     setZoom(z) {
       this.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z / 10) * 10));

@@ -23,10 +23,12 @@ so the books always balance. You don't need to know debits and credits for every
   },
   {
     id: 'zoom', tab: 'home', title: 'Zoom: bigger or smaller text',
-    words: 'zoom bigger smaller text size font enlarge magnify slider status bar',
+    words: 'zoom bigger smaller text size font enlarge magnify slider status bar full screen fullscreen options theme dark light',
     html: `
 <p>Use the zoom slider in the bar along the bottom of the screen, like Word's: drag it, or press <strong>−</strong> / <strong>+</strong>
-(50% to 200%). Press the percentage to go back to 100%. This computer remembers your choice; printing always uses normal size.</p>`,
+(50% to 200%). Press the percentage to go back to 100%. This computer remembers your choice; printing always uses normal size.</p>
+<p><strong>⤢</strong> fills the whole screen with zAccountant (Esc to leave). <strong>⋮</strong> opens Options: display settings for this
+device. Ones marked <em>coming</em> are kept but don't do anything yet.</p>`,
   },
   {
     id: 'home-cards', tab: 'home', title: 'Home cards and Statistics',
