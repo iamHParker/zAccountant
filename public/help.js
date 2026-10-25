@@ -54,7 +54,25 @@ Receivable in your books. Download it as CSV or print it.</p>
 <p><strong>Mistake on an invoice?</strong> Open it and press <strong>Edit</strong>. Saving replaces it with the corrected one (same number); the old one stays in history marked Replaced. Payments have an <strong>edit</strong> link on the Payments tab. If an invoice already has a payment, fix the payment first.</p>
 <p>An invoice with no payments can also be <strong>voided</strong>; it stays on record marked void.</p>
 <p><strong>Photo of the check:</strong> in Receive payment, press <strong>📷 Take photo</strong> (on an iPhone the camera opens) to keep the check and the remittance slip with the payment. Find them later under Payments → <strong>photos</strong>. A photo is a record only; deposit the check as usual.</p>
-<p>Billing by the hour? See <a href="#" data-help="invoice-setup">Invoice rates, letterhead and logo</a>.</p>`,
+<p>Billing by the hour? See <a href="#" data-help="invoice-setup">Invoice rates, letterhead and logo</a>, and
+<a href="#" data-help="projects">Projects: billing time and costs</a>.</p>`,
+  },
+  {
+    id: 'projects', tab: null, title: 'Projects: billing time and costs',
+    words: 'project job folder number unbilled billable time hours timesheet pull airfare rental car lodging cost pass on bill to client',
+    html: `
+<p><strong>Sales → Projects</strong> lists your projects (the same list as the jobs on the Time tab). To add many at once,
+select your project folders in File Explorer, hold Shift, right-click, choose <strong>Copy as path</strong>, and paste them
+under <em>Add projects from your folder names</em>. "2601 Smith Residence" becomes project number 2601.</p>
+<ol>
+  <li>On a bill for a cost you pass on (airfare, rental car, lodging), pick the <strong>Project</strong> on the line and leave
+      <strong>Bill to client</strong> ticked.</li>
+  <li>Enter your hours on the Time tab against the project, marked billable.</li>
+  <li>On a new invoice, pick the <strong>Project</strong>, then press <strong>⏱ Pull in unbilled time and costs</strong>. Choose
+      the rate for the hours, untick anything to leave for later, and add the lines.</li>
+</ol>
+<p>Each hour or cost is billed once. It comes back on the list if that invoice is voided. Billed time can't be changed until
+that invoice is edited or voided.</p>`,
   },
   {
     id: 'invoice-setup', tab: null, title: 'Invoice rates, letterhead and logo',

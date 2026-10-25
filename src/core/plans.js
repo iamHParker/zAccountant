@@ -48,7 +48,8 @@ export function featuresOf(plan = DEFAULT_PLAN, addOns = []) {
 const GATES = [
   [/^\/(employees|paychecks|payroll-runs|payroll-deposits|payroll-hours)(\/|$)/, 'payroll'],
   [/^\/reports\/payroll-(register|liabilities)(\/|$)/, 'payroll'],
-  [/^\/(time-entries|jobs)(\/|$)/, 'timesheets'],
+  // Jobs (projects) are not gated: invoices and bills name them too.
+  [/^\/time-entries(\/|$)/, 'timesheets'],
   [/^\/reports\/time-summary(\/|$)/, 'timesheets'],
   [/^\/(tax-categories|reports\/tax-(summary|1099|w2))(\/|$)/, 'tax'],
 ];

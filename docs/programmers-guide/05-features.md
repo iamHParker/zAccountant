@@ -59,6 +59,20 @@ lines, customers, employees, timesheets) and line memos are not in it. Alpha use
     `invoice_footer`), a logo in `company_logos` (≤1 MB PNG/JPEG, checked by its first bytes), and
     `default_sales_tax_rate`, which fills new invoices.
   - Sales tax = rate × the sum of taxable lines, rounded once (not per line). Zero to 20%.
+- **Projects and billing time and costs (migration 023, `src/services/projectService.js`, `src/core/projects.js`):**
+  - A project is a `jobs` row (the timesheet jobs), now with a site `address`. `/jobs` is no longer gated by the
+    Timesheets plan feature, and `invoices` may add projects. `POST …/jobs/import` adds projects from pasted folder
+    names (`parseProjectList`: last path part, leading number = `code`, whole folder name = `name`; preview first).
+  - A bill line can carry `job_id` and `billable` ("bill to client"). An invoice carries `job_id`; an invoice line
+    carries `time_entry_id` or `billed_line_id` (the bill line it passes on).
+  - `GET …/unbilled?jobId=|customerId=&from&to` (permission `invoices`) lists billable, non-rejected time and billable
+    lines of posted bills that no posted invoice line points at. Hours become a quantity with `minutesToQuantity`
+    (4 decimals, half-up: 50 min → 0.8333).
+  - Billed once: `cleanLines` checks first (clear message); trigger `zacc_bill_once` is the backstop, with an advisory
+    lock on the source so two invoices saved together take turns. Voiding the invoice frees the source; Edit's copy
+    carries the same links (the old invoice is voided first in the same transaction).
+  - Billed time can't be changed, deleted or sent back (`zacc_time_billed_final`, and the service says which invoice);
+    a bill with a billed cost can't be voided or edited (`zacc_bill_cost_billed`) until that invoice is.
 
 ## Banking (`bankService.js`, `src/core/bankImport.js`)
 CSV and OFX/QFX statements. Repeated lines are skipped by a fingerprint. Rules suggest an account. Each bank line

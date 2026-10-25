@@ -73,6 +73,13 @@ phone. Press **+ Add person** to add one.
    you type that isn't saved yet gets a tick box, "Save … to DWH - SATX for next time". **Claim / job number** is
    the client's own number; it prints in the box with the invoice number.
    **Project** (optional): the project name and site address. They print beside Bill To.
+   **Project** (the list above the project block): pick it and the customer, the project block (name and site
+   address) and the invoice number (the project number) fill in when they're empty.
+   **⏱ Pull in unbilled time and costs** lists the project's billable hours from timesheets and the costs on bills
+   marked "bill to client" that aren't on an invoice yet. Pick the rate for the hours (Eng Std Rate…) and the item for
+   the costs, untick anything to leave for later, and press **Add … lines**. Each hour or cost can be billed only
+   once: it drops off the list when the invoice is saved, and comes back if that invoice is voided. Leave the project
+   empty to see everything for all of the customer's projects. Hours are billed to 4 decimals (50 minutes = 0.8333 h).
 3. For each line:
    - **Rate or item:** pick one, and the rate, tax and income account fill in.
    - **Date:** the day the work was done or the cost was incurred.
@@ -132,6 +139,22 @@ Bills work like invoices in reverse. Add a vendor (tick **1099** for contractors
 Enter each **bill** with its expense accounts when it arrives. Press **Pay bills** when you pay. Until then the bill
 sits in Accounts Payable, so your profit is right even before you pay. The **Aging report** shows what you owe and
 what's overdue.
+
+**Costs you pass on to a client** (airfare, rental car, lodging): on the bill line, pick the **Project** and leave
+**Bill to client** ticked. The cost then waits on that project's "Pull in unbilled time and costs" list. A cost paid
+by credit card is entered the same way: a bill from the airline, paid from the credit card account. A bill whose cost
+is already on an invoice can't be edited or voided until that invoice is.
+
+### Projects
+
+**Sales → Projects** lists your projects (the same list as the jobs on the Time tab): number, name, customer and site
+address. **+ New project** adds one. To add many at once from your project folders:
+
+1. In File Explorer, open the folder that holds your project folders and select them (Ctrl+A for all).
+2. Hold **Shift**, right-click one of them, and choose **Copy as path**.
+3. In Projects, open **Add projects from your folder names**, paste, and press **Check the list**. The number at the
+   start of each folder name (2601 in "2601 Smith Residence") becomes the project number. Projects already on the
+   list are skipped. Pick a customer to set it on all of the new ones, then press **Add … new projects**.
 
 ## 6. Banking
 

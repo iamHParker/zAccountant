@@ -186,3 +186,10 @@ fieldset.people { border: 1px solid var(--line); border-radius: 8px; padding: 8p
 fieldset.people legend { color: var(--muted); font-size: 13px; padding: 0 4px; }
 .person { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; align-items: center; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px dashed var(--line); }
 .person .link { justify-self: start; }
+/* Invoice form: "Pull in unbilled time and costs" box, and Projects → paste folder names. */
+.pull-box { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0 12px; background: var(--bg); }
+.pull-box h3 { margin: 0 12px 0 0; }
+.pull-box table.data { margin: 6px 0 10px; }
+.paste-projects { margin-top: 14px; }
+.paste-projects summary { cursor: pointer; font-weight: 600; }
+.paste-projects textarea { width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }

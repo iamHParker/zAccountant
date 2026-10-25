@@ -7,7 +7,11 @@ approve everyone's timesheets".
 ## 1. Jobs
 
 Time is entered against a **job**: a project, optionally tied to a customer. Add jobs on the Time tab, or let a
-HoursTracker import create them.
+HoursTracker import create them. Jobs are the same list as **Sales → Projects**, where you can also add a site address
+and add many at once from your project folder names.
+
+Billable time can be pulled onto an invoice (Sales → New invoice → **Pull in unbilled time and costs**). Once it is
+billed, the entry shows "billed on invoice 2601" and can't be changed or deleted; void or edit that invoice first.
 
 ## 2. Entering time
 

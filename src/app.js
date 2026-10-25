@@ -20,6 +20,7 @@ import * as arap from './services/arapService.js';
 import * as photos from './services/paymentPhotoService.js';
 import * as roles from './services/accessService.js';
 import * as time from './services/timesheetService.js';
+import * as projects from './services/projectService.js';
 import { AuthError } from './services/authService.js';
 import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
 import * as tax from './services/taxService.js';
@@ -476,8 +477,8 @@ export function createApp(pool, { log } = {}) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
       arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
-      const { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
-      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
+      const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
+      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
     }, 201));
   }
   api.get('/companies/:companyId/documents/:documentId', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {
@@ -489,9 +490,12 @@ export function createApp(pool, { log } = {}) {
   // Edit = void + corrected copy in one step, so it needs the same permission as Void.
   api.put('/companies/:companyId/documents/:documentId', route('post', async ({ db, req, companyId, can, actor }) => {
     await needSide(db, can, 'documents', req.params.documentId);
-    const { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
-    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
+    const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
+    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
   }));
+  // Billable time and costs not yet on an invoice, for the invoice form's "Pull in unbilled time and costs".
+  api.get('/companies/:companyId/unbilled', route('invoices', ({ db, req, companyId }) =>
+    projects.listUnbilled(db, companyId, { jobId: q(req.query.jobId), customerId: q(req.query.customerId), from: q(req.query.from), to: q(req.query.to) })));
   for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
@@ -615,9 +619,12 @@ export function createApp(pool, { log } = {}) {
   // Jobs and timesheets. Who may see or change whose time is checked inside the service
   // (own time, your department's time with "approve time", or everyone's with "all time").
   const TIME = ['time_own', 'time_approve', 'time_all'];
-  const JOB_ADMIN = ['time_approve', 'time_all', 'admin'];
+  // Jobs are also the projects invoices and bills name, so whoever writes invoices can add them.
+  const JOB_ADMIN = ['time_approve', 'time_all', 'admin', 'invoices'];
   api.get('/companies/:companyId/jobs', route('member', ({ db, req, companyId }) => time.listJobs(db, companyId, { includeInactive: req.query.inactive === '1' })));
   api.post('/companies/:companyId/jobs', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.createJob(db, companyId, req.body ?? {}, { actor }), 201));
+  api.post('/companies/:companyId/jobs/import', route(JOB_ADMIN, ({ db, req, companyId, actor }) =>
+    projects.importProjects(db, companyId, { text: req.body?.text, customerId: req.body?.customerId || null, preview: req.body?.preview === true }, { actor })));
   api.patch('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.updateJob(db, companyId, req.params.jobId, req.body ?? {}, { actor })));
   const TE = '/companies/:companyId/time-entries';
   api.get(TE, route(TIME, ({ db, req, companyId, viewer }) => time.listTimeEntries(db, companyId, viewer, {

@@ -52,8 +52,11 @@ const ENTITY_TYPES = [
   ['partnership', 'Partnership or multi-member LLC'], ['s_corp', 'S corporation (or LLC taxed as one)'], ['c_corp', 'C corporation'],
 ];
 const blankCompany = () => ({ name: '', homeState: 'TX', fiscalYearStartMonth: 1, entityType: '', booksStartDate: `${today().slice(0, 4)}-01-01` });
-const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
-const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', attention: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
+// A bill line can name its project and be billed to that client; an invoice line can come from a time entry or such a cost.
+const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false,
+  jobId: '', billable: false, timeEntryId: '', billedLineId: '', from: '' });
+const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
+const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', jobId: '', attention: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, groupName: '', people: [] });
 const blankPerson = () => ({ name: '', email: '', phone: '' });
@@ -205,7 +208,8 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null,
-        showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null },
+        showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        jobs: [], proj: { form: blankProject(), editId: null, show: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
@@ -965,11 +969,92 @@ createApp({
     async loadAr() {
       const ar = this.ar; const S = this.S; const base = this.arBase();
       ar.contacts = (await this.run(() => api('GET', `${base}/${S.contacts}`))) ?? [];
+      ar.jobs = (await this.run(() => api('GET', `${base}/jobs?inactive=1`))) ?? [];
       if (ar.panel === 'docs') ar.docs = (await this.run(() => api('GET', `${base}/${S.docPath}?status=${ar.view}`))) ?? [];
       if (ar.panel === 'payments') ar.payments = (await this.run(() => api('GET', `${base}/${S.payPath}`))) ?? [];
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
     },
     arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.ar.photoView = null; this.loadAr(); },
+    // ---------------------------------------------------------------- Projects (the jobs time is entered against)
+    activeJobs() { return this.ar.jobs.filter((j) => j.isActive); },
+    jobLabel(j) { return j.code && !j.name.startsWith(j.code) ? `${j.code} · ${j.name}` : j.name; },
+    editProject(j) {
+      this.ar.proj.editId = j?.id ?? null; this.ar.proj.show = true;
+      this.ar.proj.form = j ? { name: j.name, code: j.code ?? '', customerId: j.customerId ?? '', address: j.address ?? '' } : blankProject();
+    },
+    async saveProject() {
+      const p = this.ar.proj; const f = { ...p.form, customerId: p.form.customerId || null };
+      const r = p.editId
+        ? await this.run(() => api('PATCH', `${this.arBase()}/jobs/${p.editId}`, { ...f, isActive: this.ar.jobs.find((j) => j.id === p.editId)?.isActive !== false }), 'Project saved.')
+        : await this.run(() => api('POST', `${this.arBase()}/jobs`, f), 'Project added.');
+      if (r) { p.editId = null; p.show = false; p.form = blankProject(); this.loadAr(); }
+    },
+    async toggleProject(j) {
+      if (await this.run(() => api('PATCH', `${this.arBase()}/jobs/${j.id}`, { name: j.name, code: j.code, customerId: j.customerId, isActive: !j.isActive }),
+        j.isActive ? 'Project closed.' : 'Project reopened.')) this.loadAr();
+    },
+    // Folder names pasted from File Explorer ("Copy as path") become projects: 2601 Smith Residence → number 2601.
+    async pasteProjects(preview) {
+      const p = this.ar.proj;
+      const r = await this.run(() => api('POST', `${this.arBase()}/jobs/import`, { text: p.paste, customerId: p.pasteCustomer || null, preview }));
+      if (!r) return;
+      if (preview) { p.preview = r; return; }
+      this.flash(r.added ? `Added ${r.added} project${r.added === 1 ? '' : 's'}.` : 'All of those projects were already on the list.');
+      p.paste = ''; p.preview = null; this.loadAr();
+    },
+    // The invoice's project: fills in the customer, the printed project block, and its number as the invoice number.
+    pickDocProject() {
+      const d = this.ar.doc; const j = this.ar.jobs.find((x) => x.id === d.jobId);
+      if (!j) return;
+      if (!d.contactId && j.customerId) d.contactId = j.customerId;
+      if (!d.project.trim()) d.project = [j.name, j.address].filter(Boolean).join('\n');
+      if (!d.number && !d.editId && j.code) d.number = j.code;
+    },
+    // ---------------------------------------------------------------- Pull in unbilled time and costs
+    async openPull() {
+      const d = this.ar.doc;
+      if (!d.jobId && !d.contactId) { this.flash('Choose the project (or the customer) first.', 'bad'); return; }
+      const service = this.items.find((x) => x.kind === 'service'); const expense = this.items.find((x) => x.kind === 'expense');
+      this.ar.pull = { from: '', to: '', time: [], costs: [], pick: {}, loaded: false,
+        serviceItemId: service?.id ?? '', expenseItemId: expense?.id ?? '', accountId: service?.accountId ?? this.incomeAccounts()[0]?.id ?? '' };
+      await this.loadPull();
+    },
+    async loadPull() {
+      const d = this.ar.doc; const pl = this.ar.pull;
+      const q = new URLSearchParams(d.jobId ? { jobId: d.jobId } : { customerId: d.contactId });
+      if (pl.from) q.set('from', pl.from);
+      if (pl.to) q.set('to', pl.to);
+      const r = await this.run(() => api('GET', `${this.arBase()}/unbilled?${q}`));
+      if (!r) return;
+      // Anything already on this form (pulled earlier, or kept from the invoice being edited) is left out.
+      const onForm = new Set(d.lines.flatMap((l) => [l.timeEntryId && `t${l.timeEntryId}`, l.billedLineId && `c${l.billedLineId}`]).filter(Boolean));
+      pl.time = r.time.filter((x) => !onForm.has(`t${x.id}`)); pl.costs = r.costs.filter((x) => !onForm.has(`c${x.id}`));
+      pl.pick = Object.fromEntries([...pl.time.map((x) => [`t${x.id}`, true]), ...pl.costs.map((x) => [`c${x.id}`, true])]);
+      pl.loaded = true;
+    },
+    pullCount() { return Object.values(this.ar.pull?.pick ?? {}).filter(Boolean).length; },
+    addPulled() {
+      const d = this.ar.doc; const pl = this.ar.pull;
+      const svc = this.items.find((x) => x.id === pl.serviceItemId); const exp = this.items.find((x) => x.id === pl.expenseItemId);
+      const people = new Set(pl.time.filter((x) => pl.pick[`t${x.id}`]).map((x) => x.userName));
+      const manyJobs = !d.jobId;
+      const tag = (x) => (manyJobs && x.jobCode ? ` (${x.jobCode})` : '');
+      const lines = [
+        ...pl.time.filter((x) => pl.pick[`t${x.id}`]).map((x) => ({ ...blankLine(), itemId: svc?.id ?? '', serviceDate: x.date,
+          description: `${people.size > 1 ? `${x.userName}: ` : ''}${x.notes || x.jobName}${tag(x)}`.slice(0, 300), quantity: x.quantity, qtyTyped: true,
+          unitPrice: svc?.rateCents != null ? (svc.rateCents / 100).toFixed(2) : '', taxable: !!svc?.taxable, accountId: svc?.accountId ?? pl.accountId,
+          timeEntryId: x.id, from: `timesheet, ${x.hours} h` })),
+        ...pl.costs.filter((x) => pl.pick[`c${x.id}`]).map((x) => ({ ...blankLine(), itemId: exp?.id ?? '', serviceDate: x.date,
+          description: `${x.description || x.vendorName}${tag(x)}`.slice(0, 300), quantity: '1', qtyTyped: true, unitPrice: (x.amountCents / 100).toFixed(2),
+          taxable: !!exp?.taxable, accountId: exp?.accountId ?? pl.accountId, billedLineId: x.id, from: `bill ${x.billNumber} · ${x.vendorName}` })),
+      ];
+      if (!lines.length) return;
+      if (lines.some((l) => !l.accountId)) { this.flash('Choose an income account for these lines.', 'bad'); return; }
+      // The empty starting line is replaced; lines already typed stay.
+      d.lines = [...d.lines.filter((l) => l.accountId || l.unitPrice || l.description), ...lines];
+      this.ar.pull = null;
+      this.flash(`Added ${lines.length} line${lines.length === 1 ? '' : 's'}. Check the rates, then save.`);
+    },
     newContact() {
       const open = this.ar.showContact && !this.ar.contact.id;
       this.ar.contact = blankContact(); this.ar.showContact = !open;
@@ -1010,7 +1095,7 @@ createApp({
     newDoc() {
       const invoice = this.S.kind === 'invoice';
       this.ar.doc = blankDoc(invoice ? this.company?.default_sales_tax_rate ?? '' : '');
-      this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
+      this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null; this.ar.pull = null;
       if (invoice) this.loadItems();
     },
     // ---------------------------------------------------------------- Invoice setup: saved rates, sales tax, letterhead, logo
@@ -1086,20 +1171,25 @@ createApp({
       const invoice = this.S.kind === 'invoice';
       const dollars = (c) => (c / 100).toFixed(2);
       this.ar.doc = { ...blankDoc(doc.taxRate ?? ''), editId: doc.id, editNumber: doc.number, contactId: doc.contactId, number: doc.number,
-        date: doc.date, dueDate: doc.dueDate ?? '', memo: doc.memo ?? '', project: doc.project ?? '',
+        date: doc.date, dueDate: doc.dueDate ?? '', memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
         attention: doc.attention ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
-          description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true })) };
+          description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true,
+          jobId: l.jobId ?? '', billable: !!l.billable, timeEntryId: l.timeEntryId ?? '', billedLineId: l.billedLineId ?? '',
+          from: l.timeEntryId ? 'timesheet' : l.billedLineId ? 'a bill' : '' })) };
       this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
       if (invoice) this.loadItems();
+      this.ar.pull = null;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     async saveDoc() {
       const d = this.ar.doc;
       const lines = d.lines.filter((l) => l.accountId || l.unitPrice).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
-        unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined }));
+        unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined,
+        jobId: l.jobId || undefined, billable: !!l.jobId && l.billable, timeEntryId: l.timeEntryId || undefined, billedLineId: l.billedLineId || undefined }));
       const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
-        project: this.S.kind === 'invoice' ? d.project : undefined, taxRate: d.taxRate || undefined, lines };
+        project: this.S.kind === 'invoice' ? d.project : undefined, jobId: this.S.kind === 'invoice' ? d.jobId || undefined : undefined,
+        taxRate: d.taxRate || undefined, lines };
       if (this.S.kind === 'invoice') Object.assign(body, { attention: d.attention, sendTo: d.sendTo, clientRef: d.clientRef });
       const newPerson = this.S.kind === 'invoice' && d.savePerson && this.docPersonIsNew()
         ? { name: d.attention.trim(), email: d.sendTo.trim(), phone: '' } : null;

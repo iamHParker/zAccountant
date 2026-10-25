@@ -33,7 +33,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT DELETE ON company_roles, departments TO ${role};
     GRANT DELETE ON memberships TO ${role};
     GRANT UPDATE (user_id) ON employees TO ${role};
-    GRANT UPDATE (name, code, customer_id, is_active) ON jobs TO ${role};
+    GRANT UPDATE (name, code, customer_id, address, is_active) ON jobs TO ${role};
     GRANT UPDATE (job_id, work_date, minutes, start_time, end_time, notes, billable, status, review_note, reviewed_by, reviewed_at, paid_run_id, paid_paycheck_id, updated_at) ON time_entries TO ${role};
     GRANT DELETE ON time_entries TO ${role};
     GRANT UPDATE (category, updated_at, updated_by) ON account_tax_categories TO ${role};
