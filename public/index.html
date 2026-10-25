@@ -589,7 +589,44 @@
           </div>
           <label class="check" v-if="S.kind === 'invoice' && docPersonIsNew() && ar.doc.contactId"><input type="checkbox" v-model="ar.doc.savePerson">
             Save {{ ar.doc.attention.trim() }} to {{ ar.contacts.find(c => c.id === ar.doc.contactId)?.name }} for next time</label>
-          <label v-if="S.kind === 'invoice'">Project (optional: name and site address, printed on the invoice)
+          <div class="grid2" v-if="S.kind === 'invoice'">
+            <label>Project (optional) <select v-model="ar.doc.jobId" @change="pickDocProject"><option value="">None</option>
+              <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === ar.doc.jobId)" :value="j.id">{{ jobLabel(j) }}{{ j.customerName ? ' · ' + j.customerName : '' }}</option></select></label>
+            <div><button type="button" @click="openPull" :disabled="!ar.doc.jobId && !ar.doc.contactId">⏱ Pull in unbilled time and costs</button>
+              <p class="muted small">Billable hours from timesheets, and costs on bills marked “bill to client”, for {{ ar.doc.jobId ? 'this project' : 'all of this customer’s projects' }}.</p></div>
+          </div>
+          <div class="pull-box" v-if="S.kind === 'invoice' && ar.pull">
+            <div class="row wrap">
+              <h3>Unbilled time and costs</h3>
+              <label>From <input type="date" v-model="ar.pull.from" @change="loadPull"></label>
+              <label>To <input type="date" v-model="ar.pull.to" @change="loadPull"></label>
+            </div>
+            <p class="hint" v-if="ar.pull.loaded && !ar.pull.time.length && !ar.pull.costs.length">Nothing unbilled{{ ar.pull.from || ar.pull.to ? ' in those dates' : '' }}.
+              Time counts when it's marked billable and has this project; a cost counts when its bill line names the project and “bill to client” is ticked.</p>
+            <template v-if="ar.pull.time.length">
+              <label>Rate for the hours <select v-model="ar.pull.serviceItemId" class="auto"><option value="">(type the rate on each line)</option>
+                <option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></select></label>
+              <table class="data">
+                <thead><tr><th></th><th>Date</th><th>Who</th><th>Project</th><th>Task / notes</th><th class="num">Hours</th><th>Status</th></tr></thead>
+                <tr v-for="x in ar.pull.time"><td><input type="checkbox" v-model="ar.pull.pick['t' + x.id]" class="auto-w"></td><td>{{ usDate(x.date) }}</td><td>{{ x.userName }}</td>
+                  <td>{{ x.jobCode || x.jobName }}</td><td>{{ x.notes }}</td><td class="num">{{ x.hours }}</td><td class="small" :class="{ muted: x.status === 'approved' }">{{ x.status }}</td></tr>
+              </table>
+            </template>
+            <template v-if="ar.pull.costs.length">
+              <label>Item for the costs <select v-model="ar.pull.expenseItemId" class="auto"><option value="">(use the account below)</option>
+                <option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></select></label>
+              <table class="data">
+                <thead><tr><th></th><th>Date</th><th>Vendor</th><th>Project</th><th>Description</th><th class="num">Amount</th></tr></thead>
+                <tr v-for="x in ar.pull.costs"><td><input type="checkbox" v-model="ar.pull.pick['c' + x.id]" class="auto-w"></td><td>{{ usDate(x.date) }}</td><td>{{ x.vendorName }} · bill {{ x.billNumber }}</td>
+                  <td>{{ x.jobCode || x.jobName }}</td><td>{{ x.description }}</td><td class="num">{{ money(x.amountCents) }}</td></tr>
+              </table>
+            </template>
+            <label v-if="(ar.pull.time.length && !ar.pull.serviceItemId) || (ar.pull.costs.length && !ar.pull.expenseItemId)">Income account for lines without a saved rate
+              <select v-model="ar.pull.accountId" class="auto"><option value="">Choose…</option><option v-for="a in incomeAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+            <div><button type="button" class="primary" v-if="ar.pull.time.length || ar.pull.costs.length" :disabled="!pullCount()" @click="addPulled">Add {{ pullCount() }} line{{ pullCount() === 1 ? '' : 's' }} to the invoice</button>
+              <button type="button" @click="ar.pull = null">Close</button></div>
+          </div>
+          <label v-if="S.kind === 'invoice'">Project block (optional: name and site address, printed on the invoice)
             <textarea v-model="ar.doc.project" rows="3" maxlength="300" placeholder="Project name&#10;Street&#10;City, State ZIP"></textarea></label>
           <template v-if="S.kind === 'invoice'">
           <label class="split-jobs">Jobs sharing these expenses
@@ -604,7 +641,8 @@
                   <optgroup label="By the hour"><option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
                   <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
                 <td class="w150"><input type="date" v-model="l.serviceDate"></td>
-                <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit"></td>
+                <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit">
+                  <span v-if="l.from" class="tag" :title="'Billed once: this line is linked to its ' + (l.timeEntryId ? 'time entry' : 'cost')">from {{ l.from }}</span></td>
                 <td class="w90"><input v-model="l.quantity" @input="l.qtyTyped = true" inputmode="decimal" class="num" title="Hours, a quantity, or a share like 1/3"></td>
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td><input type="checkbox" v-model="l.taxable" class="auto-w" title="Taxable"></td>
@@ -617,7 +655,8 @@
           <p class="muted small" v-if="!items.length">Tip: save your rates (Eng Std Rate, Drafting, Equipment rental…) in Settings → Invoice rates and items, then pick them here.</p>
           </template>
           <table class="data lines" v-else>
-            <thead><tr><th>{{ S.lineHint }}</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th v-if="S.kind === 'invoice'">Taxable</th><th class="num">Amount</th><th></th></tr></thead>
+            <thead><tr><th>{{ S.lineHint }}</th><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th v-if="S.kind === 'invoice'">Taxable</th><th class="num">Amount</th>
+              <th v-if="S.kind === 'bill'">Project</th><th v-if="S.kind === 'bill'" title="Pass this cost on to the project's client">Bill to client</th><th></th></tr></thead>
             <tbody>
               <tr v-for="(l, i) in ar.doc.lines">
                 <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
@@ -626,6 +665,9 @@
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td v-if="S.kind === 'invoice'"><input type="checkbox" v-model="l.taxable" class="auto-w"></td>
                 <td class="num">{{ money(lineCents(l.quantity, l.unitPrice)) }}</td>
+                <td v-if="S.kind === 'bill'"><select v-model="l.jobId" @change="l.billable = !!l.jobId"><option value="">None</option>
+                  <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === l.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></td>
+                <td v-if="S.kind === 'bill'"><input type="checkbox" v-model="l.billable" :disabled="!l.jobId" class="auto-w" title="Bill to client"></td>
                 <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
               </tr>
             </tbody>
@@ -746,7 +788,8 @@
         <table class="data">
           <thead><tr><th>Description</th><th v-if="S.kind === 'bill'">Account</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr></thead>
           <tbody>
-            <tr v-for="l in ar.detail.lines"><td>{{ l.description || l.accountName }}<span v-if="l.taxable" class="muted small"> (taxable)</span></td>
+            <tr v-for="l in ar.detail.lines"><td>{{ l.description || l.accountName }}<span v-if="l.taxable" class="muted small"> (taxable)</span>
+              <span v-if="l.jobName" class="muted small"> · {{ l.jobName }}{{ l.billable ? (l.billedOn ? ', billed on invoice ' + l.billedOn : ', to bill the client') : '' }}</span></td>
               <td v-if="S.kind === 'bill'">{{ l.accountCode }} · {{ l.accountName }}</td>
               <td class="num">{{ l.quantity }}</td><td class="num">{{ money(l.unitPriceCents) }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
             <tr v-if="ar.detail.taxCents"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Subtotal</td><td class="num">{{ money(ar.detail.subtotalCents) }}</td></tr>
@@ -766,6 +809,52 @@
         <button :class="{ active: ar.panel === 'contacts' }" @click="arPanel('contacts')">{{ S.Whos }}</button>
         <button :class="{ active: ar.panel === 'payments' }" @click="arPanel('payments')">Payments</button>
         <button :class="{ active: ar.panel === 'aging' }" @click="arPanel('aging')">Aging report</button>
+        <button :class="{ active: ar.panel === 'projects' }" @click="arPanel('projects')">Projects</button>
+      </div>
+
+      <div class="card" v-if="ar.panel === 'projects'">
+        <div class="row"><h2>Projects</h2>
+          <button v-if="can('invoices') || can('admin')" @click="ar.proj.show && !ar.proj.editId ? (ar.proj.show = false) : editProject(null)">+ New project</button></div>
+        <p class="muted small">The same list your timesheets use for jobs. Name each project on its invoice, and on a bill line for a cost you pass on to the client.</p>
+        <form v-if="ar.proj.show" @submit.prevent="saveProject" class="grid4">
+          <label>Number <input v-model.trim="ar.proj.form.code" maxlength="30" placeholder="2601"></label>
+          <label>Name <input v-model.trim="ar.proj.form.name" maxlength="80" required placeholder="2601 Smith Residence"></label>
+          <label v-if="S.kind === 'invoice'">Customer (optional) <select v-model="ar.proj.form.customerId"><option value="">None</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+          <label>Site address (optional) <textarea v-model="ar.proj.form.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
+          <div><button class="primary">{{ ar.proj.editId ? 'Save project' : 'Add project' }}</button> <button type="button" @click="ar.proj.show = false; ar.proj.editId = null">Cancel</button></div>
+        </form>
+        <p class="hint" v-if="!ar.jobs.length">No projects yet. Add one above, or paste your project folder names below.</p>
+        <table class="data" v-else>
+          <thead><tr><th>Number</th><th>Project</th><th>Customer</th><th>Site address</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="j in ar.jobs" :class="{ muted: !j.isActive }">
+              <td>{{ j.code }}</td><td>{{ j.name }}<span v-if="!j.isActive" class="muted small"> · closed</span></td><td>{{ j.customerName }}</td><td class="pre-line small">{{ j.address }}</td>
+              <td class="actions"><template v-if="can('invoices') || can('admin')">
+                <button class="link" @click="editProject(j)">edit</button>
+                <button class="link" @click="toggleProject(j)">{{ j.isActive ? 'close' : 'reopen' }}</button></template></td>
+            </tr>
+          </tbody>
+        </table>
+        <details v-if="can('invoices') || can('admin')" class="paste-projects">
+          <summary>Add projects from your folder names</summary>
+          <ol class="small">
+            <li>In File Explorer, open the folder that holds your project folders.</li>
+            <li>Select the project folders (Ctrl+A for all of them).</li>
+            <li>Hold Shift, right-click one of them, and choose <strong>Copy as path</strong>.</li>
+            <li>Paste here. The number at the start of each folder name becomes the project number.</li>
+          </ol>
+          <textarea v-model="ar.proj.paste" rows="6" @input="ar.proj.preview = null" placeholder='"C:\Projects\2601 Smith Residence"&#10;"C:\Projects\2602 Jones Roof"'></textarea>
+          <div class="row wrap">
+            <label v-if="S.kind === 'invoice'">Customer for all of them (optional) <select v-model="ar.proj.pasteCustomer" class="auto"><option value="">None</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+            <button type="button" :disabled="!ar.proj.paste.trim()" @click="pasteProjects(true)">Check the list</button>
+            <button type="button" class="primary" v-if="ar.proj.preview" :disabled="!ar.proj.preview.projects.some(p => p.isNew)" @click="pasteProjects(false)">
+              Add {{ ar.proj.preview.projects.filter(p => p.isNew).length }} new project{{ ar.proj.preview.projects.filter(p => p.isNew).length === 1 ? '' : 's' }}</button>
+          </div>
+          <table class="data" v-if="ar.proj.preview">
+            <thead><tr><th>Number</th><th>Project</th><th></th></tr></thead>
+            <tr v-for="p in ar.proj.preview.projects"><td>{{ p.code }}</td><td>{{ p.name }}</td><td :class="p.isNew ? 'ok' : 'muted'">{{ p.isNew ? 'new' : 'already on the list' }}</td></tr>
+          </table>
+        </details>
       </div>
 
       <div class="card" v-if="ar.panel === 'docs'">
@@ -1329,8 +1418,9 @@
             <td>{{ e.jobName }}</td><td>{{ e.start ? e.start + '–' + e.end : '' }}</td><td class="num">{{ e.hours }}</td>
             <td>{{ e.notes }}<span v-if="!e.billable" class="muted small"> (not billable)</span></td>
             <td><span :class="'status-' + e.status">{{ e.paidRunId ? 'paid' : e.status === 'rejected' ? 'sent back' : e.status }}</span>
-              <div v-if="e.reviewNote" class="muted small">“{{ e.reviewNote }}” – {{ e.reviewedBy }}</div></td>
-            <td class="actions"><template v-if="e.status !== 'approved'"><button class="link" @click="editTime(e)">change</button> <button class="link" @click="deleteTime(e)">delete</button></template></td>
+              <div v-if="e.reviewNote" class="muted small">“{{ e.reviewNote }}” – {{ e.reviewedBy }}</div>
+              <div v-if="e.billedOn" class="muted small">billed on invoice {{ e.billedOn }}</div></td>
+            <td class="actions"><template v-if="e.status !== 'approved' && !e.billedOn"><button class="link" @click="editTime(e)">change</button> <button class="link" @click="deleteTime(e)">delete</button></template></td>
           </tr>
           <tr class="total"><td colspan="3">Week total</td><td class="num">{{ hrs(time.entries.reduce((t, e) => t + e.minutes, 0)) }}</td><td colspan="3"></td></tr>
         </table>
@@ -1387,6 +1477,7 @@
 
       <div class="card" v-if="canManageTime() || can('admin')">
         <div class="row"><h2>Jobs</h2><button @click="time.showJobs = !time.showJobs">{{ time.showJobs ? 'Close' : 'Manage jobs' }}</button></div>
+        <p class="muted small">Jobs are your projects. Sales → Projects has the same list, with site addresses and a way to add many at once from your folder names.</p>
         <template v-if="time.showJobs">
           <table class="data" v-if="time.jobs.length">
             <thead><tr><th>Code</th><th>Job</th><th>Customer</th><th></th></tr></thead>
