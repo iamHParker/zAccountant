@@ -18,6 +18,8 @@
     "db:grant": "node src/db/grant.js",
     "job:nightly": "node src/jobs/booksCheck.js",
     "drill:restore": "node src/jobs/restoreDrill.js",
+    "backup:offsite": "node src/jobs/offsiteBackup.js",
+    "backup:decrypt": "node src/jobs/offsiteBackup.js decrypt",
     "test:load": "node src/jobs/loadTest.js"
   },
   "license": "UNLICENSED",

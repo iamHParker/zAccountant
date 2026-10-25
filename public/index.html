@@ -252,6 +252,19 @@
         <p class="hint">Downloads a complete copy of the database (every company's books) to this computer. Railway's Hobby plan has no automatic
           backups, so do this about once a week and keep the file somewhere private. To check one, run the restore drill on it (docs/runbooks/operations.md).</p>
         <a class="button" href="/api/developer/backup">Download backup</a>
+        <template v-if="dev.summary">
+          <h3>Nightly off-site backup</h3>
+          <p :class="{ bad: !['on', 'off'].includes(dev.summary.offsite) }">
+            {{ dev.summary.offsite === 'on' ? 'On: a locked copy goes to the storage bucket every night after the books check.'
+              : dev.summary.offsite === 'off' ? 'Off: the BACKUP_S3_… and BACKUP_ENCRYPTION_KEY variables are not set in Railway (docs/runbooks/operations.md).'
+              : dev.summary.offsite }}</p>
+          <table class="data" v-if="dev.summary.offsiteBackups.length">
+            <thead><tr><th>Night of</th><th>Result</th><th class="num">Size</th><th>File</th></tr></thead>
+            <tr v-for="b in dev.summary.offsiteBackups"><td>{{ usDate(b.asOf) }}</td>
+              <td :class="b.ok ? 'ok' : 'bad'">{{ b.ok ? 'sent' : b.ok === false ? 'failed: ' + b.error : 'running' }}</td>
+              <td class="num">{{ b.bytes ? (b.bytes / 1048576).toFixed(1) + ' MB' : '' }}</td><td class="small break">{{ b.objectKey }}</td></tr>
+          </table>
+        </template>
       </div>
 
       <div class="card" v-if="dev.summary">

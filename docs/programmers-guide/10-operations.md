@@ -30,13 +30,17 @@ migration; never edit the failed file once it is on `main`.
 
 ## Backups
 
-The Hobby plan has no scheduled backups. Until Homer decides (by mid-November 2026), a developer downloads one with
-**Developer dashboard → Download backup** (pg_dump custom format, streamed from the server). Restore it with
-`pg_restore` into a scratch database, and prove it with `npm run drill:restore`. Backups must be scheduled, with a
-recorded restore drill, before the December 1 alpha.
+The Hobby plan has no scheduled backups, so the server makes its own: `src/jobs/offsiteBackup.js` runs after the
+nightly books check (same scheduler, its own advisory lock, at most 3 tries a night), pg_dumps the whole database,
+locks it with AES-256-GCM (key from `BACKUP_ENCRYPTION_KEY` via HKDF; file = `ZACCBK1\n` | IV | ciphertext | tag) and
+PUTs it to an S3-compatible bucket with a hand-written Signature V4 (`signV4`, tested against AWS's published
+example). Each try is a row in `offsite_backups`, shown on the Developer dashboard. Off until the `BACKUP_*` variables
+are set; setup steps for Homer are in `docs/runbooks/operations.md` section 4. `npm run backup:decrypt` unlocks a file;
+`npm run drill:restore -- --file` proves it. A developer can still download one by hand (**Developer dashboard →
+Download backup**). A recorded restore drill from the bucket is required before the December 1 alpha.
 
 ## Secrets
 
-`AUDIT_HMAC_KEY`, `FIELD_ENCRYPTION_KEY` and the database passwords live only in Railway's variables. Never put them
+`AUDIT_HMAC_KEY`, `FIELD_ENCRYPTION_KEY`, `BACKUP_ENCRYPTION_KEY`, `BACKUP_S3_SECRET` and the database passwords live only in Railway's variables. Never put them
 in code, docs, commits, logs or chat. Losing `FIELD_ENCRYPTION_KEY` makes stored Social Security numbers and
-authenticator secrets unreadable, so keep a copy in a password manager.
+authenticator secrets unreadable, and losing `BACKUP_ENCRYPTION_KEY` makes every off-site backup unreadable, so keep a copy of both in a password manager.
