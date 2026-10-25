@@ -64,6 +64,10 @@ the invoice is due 20 days after its date).
    - **Hours / qty:** hours for a rate; usually 1 for a cost.
    - **Rate / price:** change it for a one-off rate (for example 1.25 × your standard rate).
    - **Tax:** tick it if the line is taxable.
+   - **Jobs sharing these expenses** (top of the lines): when one trip served several jobs, set the number of
+     jobs (1 by default, never less). Each cost passed on (lodging, rental car, airfare) gets quantity 1/3 for
+     3 jobs, so $350 of lodging bills $116.67. Hourly rates aren't split. Write one invoice per job with the same
+     number. To split one cost differently, type its quantity yourself (0.5, 1/4…); it stays as you typed it.
 4. **Sales tax rate %:** type it (for example 8.25). Press **📌 Save 8.25% as the default** and every new invoice
    starts with it. Only lines with Tax ticked are taxed. The tax is worked on their total, rounded to the cent once.
 5. Check the subtotal, tax and total, then **Save invoice**. Saving records the income and what the customer owes

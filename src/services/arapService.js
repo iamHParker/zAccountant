@@ -47,11 +47,20 @@ async function systemAccount(c, companyId, key, missing) {
   return a;
 }
 
-/** Quantity "2.5" × unit price cents → line amount in cents, rounded half-up (exact, no floating point). */
+/**
+ * Quantity "2.5" × unit price cents → line amount in cents, rounded half-up (exact, no floating point).
+ * A share "1/3" (a cost split evenly across 3 jobs, Homer 2026-10-24) is price × 1 ÷ 3, divided exactly
+ * then rounded once, so $350.00 at 1/3 is $116.67 (35000 ÷ 3 = 11666.67 → 11667 cents).
+ */
 export function lineAmount(quantity, unitPriceCents) {
   const q = String(quantity ?? '1').trim();
+  const f = /^(\d{1,4})\/(\d{1,4})$/.exec(q);
+  if (f) {
+    if (BigInt(f[2]) === 0n) throw new LedgerError('A share like 1/3 cannot divide by 0');
+    return Number(divRoundHalfUp(BigInt(f[1]) * BigInt(unitPriceCents), BigInt(f[2])));
+  }
   const m = /^(\d{1,9})(?:\.(\d{1,4}))?$/.exec(q);
-  if (!m) throw new LedgerError('Quantity must be a number with up to 4 decimals');
+  if (!m) throw new LedgerError('Quantity must be a number with up to 4 decimals, or a share like 1/3');
   const q4 = BigInt(m[1]) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0'));
   return Number(divRoundHalfUp(q4 * BigInt(unitPriceCents), 10000n));
 }

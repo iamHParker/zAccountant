@@ -25,6 +25,8 @@ function cents(v) {
 /** Quantity × price → cents, rounded half-up exactly like the server (BigInt, no floating point). */
 function lineCents(qty, price) {
   const p = cents(price);
+  const f = /^(\d{1,4})\/(\d{1,4})$/.exec(String(qty || '').trim()); // a share like 1/3 (split across jobs)
+  if (f) return p == null || Number(f[2]) === 0 ? null : Number((BigInt(f[1]) * BigInt(p) * 2n + BigInt(f[2])) / (2n * BigInt(f[2])));
   const m = /^(\d{1,9})(?:\.(\d{1,4}))?$/.exec(String(qty || '1').trim());
   if (p == null || !m) return null;
   const n = (BigInt(m[1]) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0'))) * BigInt(p);
@@ -46,7 +48,7 @@ const SIDES = {
     payPath: 'payments-made', agingPath: 'ap-aging', payVerb: 'Pay bills', control: 'Accounts Payable', lineHint: 'Expense account' },
 };
 const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
-const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', taxRate, lines: [blankLine()], key: newKey() });
+const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false });
 const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', open: [], amounts: {}, key: newKey() });
@@ -887,8 +889,16 @@ createApp({
       if (!it) return;
       l.accountId = it.accountId; l.taxable = it.taxable;
       if (it.rateCents != null) l.unitPrice = (it.rateCents / 100).toFixed(2);
-      if (it.kind === 'expense') l.quantity = '1';
+      if (it.kind === 'expense') { l.quantity = this.shareText(); l.qtyTyped = false; }
       if (!l.serviceDate) l.serviceDate = this.ar.doc.date;
+    },
+    /** Expenses split evenly across jobs: "1" for one job, "1/3" for three. Never fewer than 1 job. */
+    shareText() { const n = Math.max(1, Math.floor(Number(this.ar.doc.splitJobs) || 1)); return n === 1 ? '1' : `1/${n}`; },
+    setSplitJobs() {
+      this.ar.doc.splitJobs = Math.max(1, Math.min(99, Math.floor(Number(this.ar.doc.splitJobs) || 1)));
+      const q = this.shareText();
+      // A quantity typed by hand on a line is the user's override: leave it alone.
+      for (const l of this.ar.doc.lines) if (!l.qtyTyped && this.items.find((x) => x.id === l.itemId)?.kind === 'expense') l.quantity = q;
     },
     itemLabel(it) { return `${it.name}${it.rateCents != null ? ` · ${this.money(it.rateCents)}${it.kind === 'service' ? '/hr' : ''}` : ''}`; },
     async pinTaxRate() {

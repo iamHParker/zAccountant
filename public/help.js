@@ -65,6 +65,9 @@ Receivable in your books. Download it as CSV or print it.</p>
 <p>On a <strong>new invoice</strong>, pick a rate in <em>Rate or item</em> and the line fills in its rate, tax and income account.
 Type the date, the task (Report, Site visit…) and the hours. A one-off rate (say 1.25 × your standard rate) is typed right over the rate.
 Changing a saved rate never changes invoices already saved.</p>
+<p><strong>One trip, several jobs:</strong> set <em>Jobs sharing these expenses</em> (top of the invoice) to the number of jobs, say 3.
+Every cost passed on (lodging, rental car, airfare…) is billed at 1/3 of its price; hourly rates aren't split. Write one invoice per job with
+the same number. A quantity you type on a line yourself is kept, so you can split one cost differently.</p>
 <p>The <em>Project</em> box prints the project name and site address beside Bill to.</p>
 <p><strong>Sales tax</strong>: type the rate, then press <em>📌 Save … as the default</em> and every new invoice starts with it.
 Only lines with <em>Tax</em> ticked are taxed.</p>`,

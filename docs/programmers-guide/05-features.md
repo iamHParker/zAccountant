@@ -26,6 +26,10 @@ lines, customers, employees, timesheets) and line memos are not in it. Alpha use
 - **Professional-services invoices (migration 016):**
   - `invoice_items` holds saved rates. Kind `service` is hours × rate; kind `expense` is a cost passed on, usually
     quantity 1 and untaxed. A rate with no price means "type it on the invoice".
+  - Quantity may be a share `"1/N"` (an expense split across N jobs, Homer 2026-10-24): `lineAmount` divides the
+    price by N exactly and rounds once, half-up. The invoice's *Jobs sharing these expenses* box writes `1/N` on
+    every expense-kind line except ones whose quantity the user typed (`qtyTyped`). Each invoice rounds on its own,
+    so three thirds of $350.00 bill $116.67 each ($350.01 in all).
   - Picking a rate fills the line; the line keeps its own copy of the numbers, so changing a rate later never
     changes old invoices.
   - Lines have `service_date` and `item_id`. Invoices have `project` (name and site address).
