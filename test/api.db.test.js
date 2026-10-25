@@ -780,6 +780,7 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     assert.equal(page.status, 200);
     assert.match(await page.text(), /no frills|no-frills/);
     assert.match(await (await fetch(`${base}/app`)).text(), /id="app"/, 'the app moved to /app');
+    assert.match(await (await fetch(`${base}/prices`)).text(), /id="price-list"/, 'prices have their own page');
     const pub = await (await fetch(`${base}/api/public/plans`)).json();
     assert.deepEqual(pub.plans.map((p) => p.key), ['beta', 'basic']);
     assert.equal(pub.plans.find((p) => p.key === 'basic').monthlyCents, null, 'no price invented');

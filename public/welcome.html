@@ -7,7 +7,6 @@
   <meta name="description" content="zAccountant is the no-frills accounting software for individuals and small companies that don't need hand-holding.">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/welcome.css">
-  <script type="module" src="/welcome.js"></script>
 </head>
 <body class="welcome">
   <header class="top welcome-top">
@@ -16,7 +15,7 @@
       <rect width="32" height="32" rx="3" fill="#da291c"/><path d="M13 6h6v7h7v6h-7v7h-6v-7H6v-6h7z" fill="#fff"/></svg>
     <nav class="welcome-nav">
       <a href="#services">Services</a>
-      <a href="#prices">Prices</a>
+      <a href="/prices">Prices</a>
       <a href="#security">Security</a>
     </nav>
     <div class="welcome-signin">
@@ -70,18 +69,6 @@
       </div>
     </section>
 
-    <section id="prices">
-      <h2>Prices</h2>
-      <p class="hint">During the beta, testers pay nothing and get every feature.</p>
-      <div class="cards3" id="price-list">
-        <!-- Filled in by welcome.js from the plan catalog; this is what shows if that can't load. -->
-        <div class="card"><h3>Basic</h3><p class="price">Price to be announced</p><p>Books, invoices, bills, banking, reports</p></div>
-        <div class="card"><h3>Payroll add-on</h3><p class="price">Price to be announced</p></div>
-        <div class="card"><h3>Timesheets add-on</h3><p class="price">Price to be announced</p></div>
-        <div class="card"><h3>Tax-ready add-on</h3><p class="price">Price to be announced</p></div>
-      </div>
-    </section>
-
     <section id="security">
       <h2>Security</h2>
       <div class="cards2">
@@ -106,6 +93,7 @@
 
   <footer class="welcome-foot">
     <span>zAccountant</span>
+    <a href="/prices">Prices</a>
     <a href="/app">Sign in</a>
   </footer>
 </body>

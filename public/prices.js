@@ -1,4 +1,4 @@
-// The front page's price list, from the same plan catalog the Admin dashboard uses (src/core/plans.js).
+// The Prices page's list (/prices), from the same plan catalog the Admin dashboard uses (src/core/plans.js).
 // A plan with no price yet shows "Price to be announced"; prices are Homer's to set.
 const dollars = (cents) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: cents % 100 ? 2 : 0 })}`;
 const price = (cents) => (cents == null ? 'Price to be announced' : cents === 0 ? 'Free' : `${dollars(cents)} a month`);

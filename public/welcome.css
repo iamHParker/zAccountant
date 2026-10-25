@@ -18,7 +18,8 @@ a.button.primary { background: var(--brand); color: var(--brand-ink); border-col
 .cards3 h3, .cards2 h3 { margin-top: 0; }
 .price { font-size: 22px; font-weight: 700; margin: 4px 0; }
 .tag { font-size: 12px; font-weight: 600; color: var(--brand); border: 1px solid var(--brand); border-radius: 999px; padding: 1px 8px; vertical-align: middle; }
-.welcome-foot { display: flex; justify-content: space-between; max-width: 1080px; margin: 0 auto; padding: 16px; border-top: 1px solid var(--line); color: var(--muted); }
+.welcome-foot { display: flex; gap: 16px; max-width: 1080px; margin: 0 auto; padding: 16px; border-top: 1px solid var(--line); color: var(--muted); }
+.welcome-foot a:first-of-type { margin-left: auto; }
 html { scroll-behavior: smooth; }
 section[id] { scroll-margin-top: 70px; }
 @media (max-width: 800px) {

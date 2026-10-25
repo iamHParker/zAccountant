@@ -612,9 +612,10 @@ export function createApp(pool, { log } = {}) {
   // Draws a picture of the screen for Beta feedback (loaded only when the dialog asks for one).
   const htmlToImagePath = fileURLToPath(new URL('../node_modules/html-to-image/dist/html-to-image.js', import.meta.url));
   app.get('/vendor/html-to-image.js', (req, res) => res.type('text/javascript').sendFile(htmlToImagePath));
-  // The front page (services, prices, sign-in) is at /; the app itself is at /app.
+  // The front page (services, security, sign-in) is at /, prices at /prices; the app itself is at /app.
   const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
   app.get('/', (req, res) => res.sendFile('welcome.html', { root: publicDir }));
+  app.get('/prices', (req, res) => res.sendFile('prices.html', { root: publicDir }));
   app.get(['/app', '/app/'], (req, res) => res.sendFile('index.html', { root: publicDir }));
   app.use(express.static(publicDir, { index: false }));
 
