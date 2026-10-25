@@ -17,6 +17,7 @@
       </select>
       <nav v-if="company">
         <button v-for="t in tabs.filter(t => canTab(t.id))" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
+        <span class="build" v-if="version" :title="'Build ' + version + ' (name this in a beta report)'">Build {{ version }}</span>
       </nav>
       <div class="who" v-if="auth.user">
         <button class="help-btn beta-btn" @click="openFeedback" title="Something wrong or confusing? Tell the zAccountant team">🐞 Beta feedback</button>

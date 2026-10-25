@@ -87,6 +87,10 @@ box. **Attach a photo or picture** adds a screenshot or a phone photo. The pictu
 screen, including amounts from your books. Only zAccountant's developers can see it, and you can remove it before
 sending.
 
+**Which build am I on?** The top bar shows **Build** and a number just after Settings, for example
+`Build 0.1.0+b8e08b2`. The part after `+` names the exact code installed. A report already includes it, but if you
+send us a screenshot or tell us about a problem some other way, mention that number.
+
 ## 6. Keeping your account safe
 
 > **Alpha testing: keep your own backup.** Download a copy of your books regularly from **Settings → Back up your

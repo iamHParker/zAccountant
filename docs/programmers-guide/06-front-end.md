@@ -32,6 +32,9 @@ that shows it redraws by itself. You never write "find this element and change i
 - **Money in the browser:** amounts arrive as integer cents. Show them with `money(cents)`. Typed amounts are sent
   as text (`"531.25"`), and the server parses them.
 - **Dates:** ISO `'YYYY-MM-DD'` everywhere. `usDate()` shows MM/DD/YYYY on printed documents.
+- **Build number:** `GET /api/auth/me` (and sign-in) return `version` from `appVersion()` in `src/core/platform.js`:
+  `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The top nav shows
+  it after Settings as `Build …`, and beta reports record the same string.
 
 ## Security rules the browser must follow
 
