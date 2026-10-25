@@ -115,9 +115,10 @@ function visibleClause(viewer, alias, params) {
 const ENTRY_COLS = `t.id, t.user_id AS "userId", u.name AS "userName", t.job_id AS "jobId", j.name AS "jobName",
   to_char(t.work_date, 'YYYY-MM-DD') AS date, t.minutes, to_char(t.start_time, 'HH24:MI') AS start, to_char(t.end_time, 'HH24:MI') AS "end",
   t.notes, t.billable, t.status, t.review_note AS "reviewNote", rv.name AS "reviewedBy", t.reviewed_at AS "reviewedAt",
-  t.paid_run_id AS "paidRunId", t.source,
+  t.paid_run_id AS "paidRunId", t.source, t.trip_id AS "tripId", tr.name AS "tripName",
   (SELECT d.number FROM document_lines l JOIN documents d ON d.id = l.document_id WHERE l.time_entry_id = t.id AND d.status = 'posted' LIMIT 1) AS "billedOn"`;
-const ENTRY_FROM = `time_entries t JOIN users u ON u.id = t.user_id LEFT JOIN jobs j ON j.id = t.job_id LEFT JOIN users rv ON rv.id = t.reviewed_by`;
+const ENTRY_FROM = `time_entries t JOIN users u ON u.id = t.user_id LEFT JOIN jobs j ON j.id = t.job_id LEFT JOIN users rv ON rv.id = t.reviewed_by
+  LEFT JOIN trips tr ON tr.id = t.trip_id`;
 const withHours = (r) => ({ ...r, hours: minutesToHours(r.minutes) });
 
 const STATUSES = ['draft', 'submitted', 'approved', 'rejected'];
@@ -178,8 +179,16 @@ async function cleanEntry(db, companyId, input) {
       else jobId = j.id;
     }
   }
+  // Travel time belongs to a trip (shared by the trip's projects) instead of a job.
+  let tripId = null;
+  if (input.tripId) {
+    if (jobId) errors.push('travel time goes on the trip, not a job');
+    const { rows: [tr] } = isId(input.tripId) ? await db.query('SELECT id FROM trips WHERE company_id = $1 AND id = $2', [companyId, input.tripId]) : { rows: [] };
+    if (!tr) errors.push('that trip does not exist');
+    else tripId = tr.id;
+  }
   if (errors.length) throw new LedgerError('Time entry is not valid', errors);
-  return { date: input.date, minutes, start, end, notes, jobId, billable: input.billable !== false };
+  return { date: input.date, minutes, start, end, notes, jobId, tripId, billable: input.billable !== false };
 }
 
 /** A person can't have more than 24 hours on one day. */
@@ -198,9 +207,9 @@ export async function createTimeEntry(pool, companyId, viewer, input, { actor = 
     const v = await cleanEntry(c, companyId, input);
     await checkDayTotal(c, companyId, userId, v.date, v.minutes);
     const { rows: [t] } = await c.query(
-      `INSERT INTO time_entries (company_id, user_id, job_id, work_date, minutes, start_time, end_time, notes, billable, entered_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [companyId, userId, v.jobId, v.date, v.minutes, v.start, v.end, v.notes, v.billable, viewer.userId]);
+      `INSERT INTO time_entries (company_id, user_id, job_id, trip_id, work_date, minutes, start_time, end_time, notes, billable, entered_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [companyId, userId, v.jobId, v.tripId, v.date, v.minutes, v.start, v.end, v.notes, v.billable, viewer.userId]);
     if (userId !== viewer.userId) await appendAudit(c, companyId, { action: 'create', entity: 'time_entry', entityId: t.id, actor, payload: { userId, date: v.date, minutes: v.minutes } });
     return getEntry(c, companyId, t.id);
   });
@@ -213,12 +222,12 @@ export async function updateTimeEntry(pool, companyId, viewer, id, input, { acto
     if (!(await mayManage(c, companyId, viewer, e.userId))) throw deny();
     if (e.billedOn) throw billed(e.billedOn);
     if (e.status === 'approved') throw new LedgerError('Approved time can\'t be changed. Ask the approver to send it back first.');
-    const v = await cleanEntry(c, companyId, { ...input, jobId: input.jobId === undefined ? e.jobId : input.jobId });
+    const v = await cleanEntry(c, companyId, { ...input, jobId: input.jobId === undefined ? e.jobId : input.jobId, tripId: input.tripId === undefined ? e.tripId : input.tripId });
     await checkDayTotal(c, companyId, e.userId, v.date, v.minutes, id);
     await c.query(
-      `UPDATE time_entries SET job_id = $3, work_date = $4, minutes = $5, start_time = $6, end_time = $7, notes = $8, billable = $9,
+      `UPDATE time_entries SET job_id = $3, work_date = $4, minutes = $5, start_time = $6, end_time = $7, notes = $8, billable = $9, trip_id = $10,
          status = 'draft', review_note = NULL, reviewed_by = NULL, reviewed_at = NULL, updated_at = now()
-       WHERE company_id = $1 AND id = $2`, [companyId, id, v.jobId, v.date, v.minutes, v.start, v.end, v.notes, v.billable]);
+       WHERE company_id = $1 AND id = $2`, [companyId, id, v.jobId, v.date, v.minutes, v.start, v.end, v.notes, v.billable, v.tripId]);
     if (e.userId !== viewer.userId) await appendAudit(c, companyId, { action: 'update', entity: 'time_entry', entityId: id, actor, payload: { userId: e.userId, date: v.date, minutes: v.minutes } });
     return getEntry(c, companyId, id);
   });

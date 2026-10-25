@@ -8,6 +8,8 @@ import { parseProjectList } from '../core/projects.js';
 import { minutesToHours } from '../core/timesheets.js';
 import { divRoundHalfUp } from '../core/money.js';
 import { appendAudit } from './audit.js';
+import { lineAmount } from './arapService.js';
+import { bpToQuantity, bpToPercent } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
@@ -15,6 +17,14 @@ const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
 /** Minutes → hours as an invoice quantity with up to 4 decimals, half-up (50 min → "0.8333", 90 → "1.5"). */
 export function minutesToQuantity(minutes) {
   const q4 = divRoundHalfUp(BigInt(minutes) * 10000n, 60n);
+  const whole = q4 / 10000n;
+  const frac = String(q4 % 10000n).padStart(4, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : String(whole);
+}
+
+/** A share of a trip's travel time, in hours to 4 decimals: 6 h (360 min) at 60% → "3.6". */
+export function sharedHoursQuantity(minutes, shareBp) {
+  const q4 = divRoundHalfUp(BigInt(minutes) * BigInt(shareBp), 60n); // minutes × bp / 60 = hours × 10000
   const whole = q4 / 10000n;
   const frac = String(q4 % 10000n).padStart(4, '0').replace(/0+$/, '');
   return frac ? `${whole}.${frac}` : String(whole);
@@ -80,8 +90,38 @@ export async function listUnbilled(db, companyId, { jobId = null, customerId = n
         AND ($4::date IS NULL OR coalesce(l.service_date, d.doc_date) >= $4) AND ($5::date IS NULL OR coalesce(l.service_date, d.doc_date) <= $5)
         AND ${notBilled('billed_line_id', 'l.id')}
       ORDER BY coalesce(l.service_date, d.doc_date), l.id LIMIT 1000`, params);
+  // A trip's travel time and costs, one row per project of the trip at that project's share; billed once per project.
+  const notBilledFor = (col, id) => `NOT EXISTS (SELECT 1 FROM document_lines bl JOIN documents bd ON bd.id = bl.document_id
+    WHERE bl.${col} = ${id} AND bl.job_id = j.id AND bd.status = 'posted')`;
+  const { rows: tripTime } = await db.query(
+    `SELECT t.id, to_char(t.work_date, 'YYYY-MM-DD') AS date, t.minutes, t.notes, t.status, u.name AS "userName",
+            j.id AS "jobId", j.name AS "jobName", j.code AS "jobCode", tr.name AS "tripName", tj.share_bp AS "shareBp"
+       FROM time_entries t JOIN trips tr ON tr.id = t.trip_id JOIN trip_jobs tj ON tj.trip_id = tr.id JOIN jobs j ON j.id = tj.job_id
+       JOIN users u ON u.id = t.user_id
+      WHERE t.company_id = $1 AND ${jobMatch} AND tj.share_bp > 0 AND t.billable AND t.status <> 'rejected'
+        AND ($4::date IS NULL OR t.work_date >= $4) AND ($5::date IS NULL OR t.work_date <= $5)
+        AND ${notBilledFor('time_entry_id', 't.id')}
+      ORDER BY t.work_date, j.name LIMIT 1000`, params);
+  const { rows: tripCosts } = await db.query(
+    `SELECT tc.id, to_char(tc.cost_date, 'YYYY-MM-DD') AS date, tc.description, tc.vendor AS "vendorName", tc.amount_cents AS "amountCents",
+            j.id AS "jobId", j.name AS "jobName", j.code AS "jobCode", tr.name AS "tripName", tj.share_bp AS "shareBp"
+       FROM trip_costs tc JOIN trips tr ON tr.id = tc.trip_id JOIN trip_jobs tj ON tj.trip_id = tr.id JOIN jobs j ON j.id = tj.job_id
+      WHERE tc.company_id = $1 AND ${jobMatch} AND tj.share_bp > 0 AND tc.status = 'posted'
+        AND ($4::date IS NULL OR tc.cost_date >= $4) AND ($5::date IS NULL OR tc.cost_date <= $5)
+        AND ${notBilledFor('trip_cost_id', 'tc.id')}
+      ORDER BY tc.cost_date, tc.created_at, j.name LIMIT 1000`, params);
   return {
-    time: time.map((t) => ({ ...t, hours: minutesToHours(t.minutes), quantity: minutesToQuantity(t.minutes) })),
+    time: [
+      ...time.map((t) => ({ ...t, hours: minutesToHours(t.minutes), quantity: minutesToQuantity(t.minutes), lineJobId: null })),
+      ...tripTime.map((t) => {
+        const quantity = sharedHoursQuantity(t.minutes, t.shareBp);
+        return { ...t, hours: quantity, fullHours: minutesToHours(t.minutes), share: bpToPercent(t.shareBp), quantity, lineJobId: t.jobId };
+      }),
+    ],
     costs,
+    tripCosts: tripCosts.map((x) => {
+      const quantity = bpToQuantity(x.shareBp);
+      return { ...x, amountCents: Number(x.amountCents), share: bpToPercent(x.shareBp), quantity, shareCents: lineAmount(quantity, Number(x.amountCents)) };
+    }),
   };
 }

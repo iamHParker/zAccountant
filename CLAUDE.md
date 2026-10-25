@@ -82,7 +82,12 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   Expense split across jobs: quantity `1/N` from the invoice's "Jobs sharing these expenses" box; typed quantities win.
 - Projects = `jobs` (+ site address; not plan-gated). Bill lines: project + "bill to client"; invoice "Pull in unbilled
   time and costs" links each line to its time entry / bill line, billed once (trigger, migration 023,
-  `src/services/projectService.js`). Projects from pasted folder names (`src/core/projects.js`). Next: Trips (Homer).
+  `src/services/projectService.js`). Projects from pasted folder names (`src/core/projects.js`).
+- Trips (migration 024, `src/services/tripService.js`): projects with % shares; costs post their own entry (void + copy
+  to edit; mileage = miles × typed rate); travel time = time entry with `trip_id`; billed once per project.
+- Queued (Homer 2026-10-25): **Road** page (/road, limited phone key, offline batch, review on return) with **passkeys**
+  (Face ID / Windows Hello); **.zacc book file** (zip of CSVs + manifest/SHA-256, optional password; also the nightly
+  backup) plus an "Export for QuickBooks"; MileIQ import (needs a sample CSV).
 - New-company setup wizard (migration 017): `entity_type`, `books_start_date`, `setup_done`; `GET/PUT …/setup`;
   the `setup` tab; Home's "Finish setting up" list. Entity type feeds Tax-ready (`src/core/entityTypes.js`).
 - Tax-ready level 1 (plan feature `tax`, migration 018): `src/core/taxLines.js` (categories → form lines, 1099 threshold

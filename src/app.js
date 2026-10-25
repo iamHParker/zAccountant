@@ -21,6 +21,7 @@ import * as photos from './services/paymentPhotoService.js';
 import * as roles from './services/accessService.js';
 import * as time from './services/timesheetService.js';
 import * as projects from './services/projectService.js';
+import * as trips from './services/tripService.js';
 import { AuthError } from './services/authService.js';
 import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
 import * as tax from './services/taxService.js';
@@ -126,6 +127,7 @@ export function createApp(pool, { log } = {}) {
   app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
   app.use(/^\/api\/companies\/[^/]+\/logo$/, express.json({ limit: '2mb' })); // the logo, as base64 (1 MB at most)
   app.use(/^\/api\/companies\/[^/]+\/payments\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a check photo, as base64 (3 MB at most)
+  app.use(/^\/api\/companies\/[^/]+\/trip-costs\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a receipt photo, likewise
   app.use('/api/feedback', express.json({ limit: '6mb' })); // a picture of the screen, as base64
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
@@ -222,7 +224,7 @@ export function createApp(pool, { log } = {}) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId', 'itemId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId', 'itemId', 'tripId', 'costId', 'photoId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -496,6 +498,28 @@ export function createApp(pool, { log } = {}) {
   // Billable time and costs not yet on an invoice, for the invoice form's "Pull in unbilled time and costs".
   api.get('/companies/:companyId/unbilled', route('invoices', ({ db, req, companyId }) =>
     projects.listUnbilled(db, companyId, { jobId: q(req.query.jobId), customerId: q(req.query.customerId), from: q(req.query.from), to: q(req.query.to) })));
+  // Trips: shared travel costs and travel time, billed to each project by its share. Costs are spending, so "bills".
+  const TR = '/companies/:companyId/trips';
+  const TC = '/companies/:companyId/trip-costs/:costId';
+  api.get(TR, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.listTrips(db, companyId, { includeClosed: req.query.closed !== '0' })));
+  api.post(TR, route('bills', ({ db, req, companyId, actor }) => trips.createTrip(db, companyId, req.body ?? {}, { actor }), 201));
+  api.get(`${TR}/:tripId`, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.getTrip(db, companyId, req.params.tripId)));
+  api.patch(`${TR}/:tripId`, route('bills', ({ db, req, companyId, actor }) => trips.updateTrip(db, companyId, req.params.tripId, req.body ?? {}, { actor })));
+  api.post(`${TR}/:tripId/costs`, route('bills', ({ db, req, companyId, actor }) =>
+    trips.addTripCost(db, companyId, req.params.tripId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) }), 201));
+  api.post(`${TR}/:tripId/travel-time`, route('bills', ({ db, req, companyId, viewer, actor }) =>
+    trips.addTravelTime(db, companyId, viewer, req.params.tripId, req.body ?? {}, { actor }), 201));
+  api.delete(`${TR}/:tripId/travel-time/:timeEntryId`, route('bills', ({ db, req, companyId, viewer, actor }) =>
+    trips.removeTravelTime(db, companyId, viewer, req.params.tripId, req.params.timeEntryId, { actor })));
+  // Edit = void + corrected copy, and Void reverses a posted entry: the same permission as for bills ("post").
+  api.put(TC, route('post', ({ db, req, companyId, actor }) => trips.replaceTripCost(db, companyId, req.params.costId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) })));
+  api.post(`${TC}/void`, route('post', ({ db, req, companyId, actor }) => trips.voidTripCost(db, companyId, req.params.costId, { actor })));
+  api.get(`${TC}/photos`, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.listCostPhotos(db, companyId, req.params.costId)));
+  api.get(`${TC}/photos/:photoId`, route(['view_books', 'bills'], async ({ db, req, companyId }) =>
+    ({ [FILE]: await trips.getCostPhoto(db, companyId, req.params.costId, req.params.photoId) })));
+  api.post(`${TC}/photos`, route('bills', ({ db, req, companyId, actor }) => trips.addCostPhoto(db, companyId, req.params.costId, { picture: req.body?.picture, actor }), 201));
+  api.delete(`${TC}/photos/:photoId`, route('bills', ({ db, req, companyId, actor }) => trips.deleteCostPhoto(db, companyId, req.params.costId, req.params.photoId, { actor })));
+
   for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {

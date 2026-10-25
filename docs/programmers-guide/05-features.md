@@ -71,6 +71,14 @@ lines, customers, employees, timesheets) and line memos are not in it. Alpha use
   - Billed once: `cleanLines` checks first (clear message); trigger `zacc_bill_once` is the backstop, with an advisory
     lock on the source so two invoices saved together take turns. Voiding the invoice frees the source; Edit's copy
     carries the same links (the old invoice is voided first in the same transaction).
+  - **Trips (migration 024, `src/services/tripService.js`, Trips tab, permission `bills`; edit/void `post`):** a trip
+    lists projects with a share in hundredths of a percent (`share_bp`, total ≤ 100%; the rest is not billed). A trip
+    cost posts its own entry (source `trip`: Dr expense, Cr bank / credit card / owner equity "paid personally") and is
+    edited by void + corrected copy (`replaced_by_id`, photos copied). Kinds: airfare, rental car, lodging, meals,
+    tolls, mileage, other; mileage = miles × a typed rate per mile (`mileageAmount`, never a built-in IRS number).
+    Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tripCosts` (quantity = share,
+    `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share, `sharedHoursQuantity`). Those invoice
+    lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
   - Billed time can't be changed, deleted or sent back (`zacc_time_billed_final`, and the service says which invoice);
     a bill with a billed cost can't be voided or edited (`zacc_bill_cost_billed`) until that invoice is.
 

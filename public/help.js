@@ -75,6 +75,20 @@ under <em>Add projects from your folder names</em>. "2601 Smith Residence" becom
 that invoice is edited or voided.</p>`,
   },
   {
+    id: 'trips', tab: 'trips', title: 'Trips: shared travel costs',
+    words: 'trip travel airfare rental car lodging hotel meals tolls mileage miles receipt photo share percent split project',
+    html: `
+<ol>
+  <li><strong>+ New trip</strong>: name, dates, and the projects it was for, each with its share in percent (80% for the major
+      client, 10% for a small job). <em>Split evenly</em> fills equal shares. Shares can add up to less than 100%; the rest isn't billed.</li>
+  <li><strong>+ Add cost</strong>: Airfare, Rental car, Lodging, Meals, Tolls, Mileage or Other, the amount, and what you paid
+      with. Mileage is miles × your rate per mile (the IRS standard rate from irs.gov, or your own). <strong>📷 Take photo</strong> keeps the receipt.</li>
+  <li><strong>+ Add travel time</strong> for the hours on the road.</li>
+</ol>
+<p>Late costs (tolls) can be added any time. On each project's invoice, <strong>⏱ Pull in unbilled time and costs</strong> adds
+its share of every cost; type another quantity on a line to bill a different share.</p>`,
+  },
+  {
     id: 'invoice-setup', tab: null, title: 'Invoice rates, letterhead and logo',
     words: 'invoice rate hourly engineering drafting overtime equipment rental lodging motel airfare logo letterhead tax id firm sales tax default project',
     html: `

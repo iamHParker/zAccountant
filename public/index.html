@@ -601,15 +601,16 @@
               <label>From <input type="date" v-model="ar.pull.from" @change="loadPull"></label>
               <label>To <input type="date" v-model="ar.pull.to" @change="loadPull"></label>
             </div>
-            <p class="hint" v-if="ar.pull.loaded && !ar.pull.time.length && !ar.pull.costs.length">Nothing unbilled{{ ar.pull.from || ar.pull.to ? ' in those dates' : '' }}.
+            <p class="hint" v-if="ar.pull.loaded && !ar.pull.time.length && !ar.pull.costs.length && !ar.pull.tripCosts.length">Nothing unbilled{{ ar.pull.from || ar.pull.to ? ' in those dates' : '' }}.
               Time counts when it's marked billable and has this project; a cost counts when its bill line names the project and “bill to client” is ticked.</p>
             <template v-if="ar.pull.time.length">
               <label>Rate for the hours <select v-model="ar.pull.serviceItemId" class="auto"><option value="">(type the rate on each line)</option>
                 <option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></select></label>
               <table class="data">
                 <thead><tr><th></th><th>Date</th><th>Who</th><th>Project</th><th>Task / notes</th><th class="num">Hours</th><th>Status</th></tr></thead>
-                <tr v-for="x in ar.pull.time"><td><input type="checkbox" v-model="ar.pull.pick['t' + x.id]" class="auto-w"></td><td>{{ usDate(x.date) }}</td><td>{{ x.userName }}</td>
-                  <td>{{ x.jobCode || x.jobName }}</td><td>{{ x.notes }}</td><td class="num">{{ x.hours }}</td><td class="small" :class="{ muted: x.status === 'approved' }">{{ x.status }}</td></tr>
+                <tr v-for="x in ar.pull.time"><td><input type="checkbox" v-model="ar.pull.pick[pullKey('t', x)]" class="auto-w"></td><td>{{ usDate(x.date) }}</td><td>{{ x.userName }}</td>
+                  <td>{{ x.jobCode || x.jobName }}</td><td><template v-if="x.tripName">Travel, {{ x.tripName }} <span class="muted small">{{ x.share }}% of {{ x.fullHours }} h</span><template v-if="x.notes"> · </template></template>{{ x.notes }}</td>
+                  <td class="num">{{ x.hours }}</td><td class="small" :class="{ muted: x.status === 'approved' }">{{ x.status }}</td></tr>
               </table>
             </template>
             <template v-if="ar.pull.costs.length">
@@ -621,9 +622,19 @@
                   <td>{{ x.jobCode || x.jobName }}</td><td>{{ x.description }}</td><td class="num">{{ money(x.amountCents) }}</td></tr>
               </table>
             </template>
-            <label v-if="(ar.pull.time.length && !ar.pull.serviceItemId) || (ar.pull.costs.length && !ar.pull.expenseItemId)">Income account for lines without a saved rate
+            <template v-if="ar.pull.tripCosts.length">
+              <label v-if="!ar.pull.costs.length">Item for the costs <select v-model="ar.pull.expenseItemId" class="auto"><option value="">(use the account below)</option>
+                <option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></select></label>
+              <table class="data">
+                <thead><tr><th></th><th>Date</th><th>Trip</th><th>Project</th><th>Cost</th><th class="num">Share</th><th class="num">Billed</th></tr></thead>
+                <tr v-for="x in ar.pull.tripCosts"><td><input type="checkbox" v-model="ar.pull.pick[pullKey('p', x)]" class="auto-w"></td><td>{{ usDate(x.date) }}</td><td>{{ x.tripName }}</td>
+                  <td>{{ x.jobCode || x.jobName }}</td><td>{{ x.description }} <span class="muted small">{{ money(x.amountCents) }}</span></td><td class="num">{{ x.share }}%</td><td class="num">{{ money(x.shareCents) }}</td></tr>
+              </table>
+              <p class="muted small">Each line bills the full cost × the project's share (quantity 0.8 for 80%). Type a different quantity on the line to override it.</p>
+            </template>
+            <label v-if="(ar.pull.time.length && !ar.pull.serviceItemId) || ((ar.pull.costs.length || ar.pull.tripCosts.length) && !ar.pull.expenseItemId)">Income account for lines without a saved rate
               <select v-model="ar.pull.accountId" class="auto"><option value="">Choose…</option><option v-for="a in incomeAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
-            <div><button type="button" class="primary" v-if="ar.pull.time.length || ar.pull.costs.length" :disabled="!pullCount()" @click="addPulled">Add {{ pullCount() }} line{{ pullCount() === 1 ? '' : 's' }} to the invoice</button>
+            <div><button type="button" class="primary" v-if="ar.pull.time.length || ar.pull.costs.length || ar.pull.tripCosts.length" :disabled="!pullCount()" @click="addPulled">Add {{ pullCount() }} line{{ pullCount() === 1 ? '' : 's' }} to the invoice</button>
               <button type="button" @click="ar.pull = null">Close</button></div>
           </div>
           <label v-if="S.kind === 'invoice'">Project block (optional: name and site address, printed on the invoice)
@@ -963,6 +974,153 @@
             : `${S.control} in the books is ${money(ar.aging.glBalanceCents)}; off by ${money(ar.aging.differenceCents)}. Please tell support.` }}</p>
         </template>
       </div>
+    </section>
+
+    <!-- TRIPS: what a trip cost and the projects it served, each with its share. Laid out for a phone too. -->
+    <section v-if="tab === 'trips'" class="trips">
+      <div class="row wrap"><h1>Trips</h1>
+        <button class="primary" v-if="can('bills') && !trip.form" @click="newTrip">+ New trip</button>
+        <button v-if="trip.cur || trip.form" @click="closeTripView">← All trips</button></div>
+      <p class="muted">Keep what a trip cost (airfare, rental car, lodging, tolls, mileage) and the travel time, and which projects it was for.
+        Each project's invoice bills its share: Sales → New invoice → ⏱ Pull in unbilled time and costs.</p>
+
+      <div class="card" v-if="trip.form">
+        <h2>{{ trip.editing ? 'Edit trip' : 'New trip' }}</h2>
+        <form @submit.prevent="saveTrip">
+          <label>Name <input v-model="trip.form.name" maxlength="120" required placeholder="Dallas, Oct 4-6"></label>
+          <div class="grid2">
+            <label>First day <input type="date" v-model="trip.form.startDate" required></label>
+            <label>Last day (optional) <input type="date" v-model="trip.form.endDate"></label>
+          </div>
+          <h3>Projects and their share of the trip</h3>
+          <div class="share-row" v-for="(j, i) in trip.form.jobs">
+            <select v-model="j.jobId" aria-label="Project"><option value="">Choose a project…</option>
+              <option v-for="p in ar.jobs.filter(p => p.isActive || p.id === j.jobId)" :value="p.id">{{ jobLabel(p) }}</option></select>
+            <input v-model="j.share" inputmode="decimal" class="num" placeholder="%" aria-label="Share in percent"><span>%</span>
+            <button type="button" class="link" @click="trip.form.jobs.splice(i, 1)" v-if="trip.form.jobs.length > 1">remove</button>
+          </div>
+          <div class="row wrap">
+            <button type="button" class="small" @click="trip.form.jobs.push({ jobId: '', share: '' })">+ Add project</button>
+            <button type="button" class="small" @click="evenShares" title="100% split evenly across the projects listed">Split evenly</button>
+            <span :class="tripShareTotal() > 100 ? 'bad' : 'muted'">Total {{ Number(tripShareTotal().toFixed(2)) }}%<template v-if="tripShareTotal() < 100 && tripShareTotal() > 0">
+              · {{ Number((100 - tripShareTotal()).toFixed(2)) }}% is not billed to anyone</template></span>
+          </div>
+          <p class="muted small">A project not on the list? Add it in Sales → Projects. You can change the shares later; what's already billed stays as billed.</p>
+          <label>Notes (optional) <textarea v-model="trip.form.notes" rows="2" maxlength="500"></textarea></label>
+          <button class="primary">{{ trip.editing ? 'Save trip' : 'Add trip' }}</button>
+          <button type="button" @click="trip.form = null; trip.editing = false">Cancel</button>
+        </form>
+      </div>
+
+      <template v-if="!trip.cur && !trip.form">
+        <p class="hint" v-if="!trip.list.length">No trips yet.</p>
+        <button v-for="t in trip.list" class="trip-card" :class="{ muted: !t.isActive }" @click="openTrip(t.id)">
+          <span class="row"><strong>{{ t.name }}</strong><span class="num">{{ money(t.totalCents) }}</span></span>
+          <span class="muted small">{{ usDate(t.startDate) }}{{ t.endDate && t.endDate !== t.startDate ? ' – ' + usDate(t.endDate) : '' }} · {{ t.costCount }} cost{{ t.costCount === 1 ? '' : 's' }}{{ t.isActive ? '' : ' · closed' }}</span>
+          <span class="small" v-if="t.projectsText">{{ t.projectsText }}</span>
+        </button>
+      </template>
+
+      <template v-if="trip.cur && !trip.form">
+        <div class="card">
+          <div class="row wrap"><h2>{{ trip.cur.name }}</h2>
+            <span class="muted">{{ usDate(trip.cur.startDate) }}{{ trip.cur.endDate && trip.cur.endDate !== trip.cur.startDate ? ' – ' + usDate(trip.cur.endDate) : '' }}</span>
+            <template v-if="can('bills')"><button class="link" @click="editTrip">edit</button>
+              <button class="link" @click="toggleTripOpen">{{ trip.cur.isActive ? 'close trip' : 'reopen' }}</button></template></div>
+          <p v-if="trip.cur.notes" class="pre-line small">{{ trip.cur.notes }}</p>
+          <table class="data">
+            <thead><tr><th>Project</th><th class="num">Share</th><th class="num">of {{ money(trip.cur.totalCents) }}</th></tr></thead>
+            <tr v-for="j in trip.cur.jobs"><td>{{ jobLabel({ name: j.jobName, code: j.jobCode }) }}<span v-if="j.customerName" class="muted small"> · {{ j.customerName }}</span></td>
+              <td class="num">{{ j.share }}%</td><td class="num">{{ money(Math.floor((trip.cur.totalCents * j.shareBp * 2 + 10000) / 20000)) }}</td></tr>
+            <tr v-if="!trip.cur.jobs.length"><td colspan="3" class="hint">No projects yet: press edit to add them and their shares.</td></tr>
+            <tr v-else-if="Number(trip.cur.sharePercent) < 100" class="muted"><td>Not billed</td><td class="num">{{ Number((100 - Number(trip.cur.sharePercent)).toFixed(2)) }}%</td><td></td></tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <div class="row wrap"><h2>Costs</h2><button class="primary" v-if="can('bills') && !trip.cost" @click="newTripCost">+ Add cost</button></div>
+          <form v-if="trip.cost" @submit.prevent="saveTripCost" class="trip-cost-form">
+            <h3>{{ trip.editCostId ? 'Correct this cost' : 'New cost' }}</h3>
+            <p class="muted small" v-if="trip.editCostId">Saving voids the old one and records the corrected one; its receipt photos move with it.</p>
+            <div class="chips">
+              <button type="button" v-for="(label, k) in { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' }"
+                :class="{ active: (trip.cost.kind || 'other') === k }" @click="trip.cost.kind = k">{{ label }}</button>
+            </div>
+            <div class="grid2">
+              <label>Date <input type="date" v-model="trip.cost.date" required></label>
+              <label>{{ trip.cost.kind === 'mileage' ? 'Vehicle (optional)' : 'Paid to (optional)' }} <input v-model="trip.cost.vendor" maxlength="120" :placeholder="trip.cost.kind === 'mileage' ? 'my truck' : 'Southwest, Avis, NTTA…'"></label>
+              <label>What it was <input v-model="trip.cost.description" maxlength="300" :placeholder="{ airfare: 'Airfare SAT-DAL', rental_car: 'Rental car', lodging: 'Hotel, 2 nights', tolls: 'Tolls', mileage: 'SAT to site and back' }[trip.cost.kind] || 'Description'"></label>
+              <template v-if="trip.cost.kind === 'mileage'">
+                <label>Miles <input v-model="trip.cost.miles" inputmode="decimal" class="num" placeholder="212.4" required></label>
+                <label>Rate per mile ($) <input v-model="trip.cost.mileRate" inputmode="decimal" class="num" placeholder="e.g. 0.70" required>
+                  <span class="muted small">The IRS standard mileage rate for the year (irs.gov), or your own.</span></label>
+                <p class="num">= {{ money(mileageCents(trip.cost)) }}</p>
+              </template>
+              <label v-else>Amount ($) <input v-model="trip.cost.amount" inputmode="decimal" class="num" placeholder="0.00" required></label>
+              <label>Expense account <select v-model="trip.cost.expenseAccountId" required><option value="">Choose…</option>
+                <option v-for="a in tripExpenseAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+              <label>Paid with <select v-model="trip.cost.paidFromAccountId" required><option value="">Choose…</option>
+                <option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}{{ a.type === 'equity' ? ' (paid personally)' : '' }}</option></select></label>
+            </div>
+            <div class="photo-pick">
+              <strong>Receipt photos</strong> <span class="muted small">(optional)</span>
+              <p class="muted small" v-if="trip.cost.keptPhotos">{{ trip.cost.keptPhotos }} photo{{ trip.cost.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected cost.</p>
+              <div class="row wrap">
+                <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addTripCostPhotos"></label>
+                <label class="button">Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addTripCostPhotos"></label>
+                <span class="muted small" v-if="trip.cost.photoBusy">Preparing photo…</span>
+              </div>
+              <div class="row wrap" v-if="trip.cost.photos.length">
+                <span class="thumb" v-for="(ph, i) in trip.cost.photos"><img :src="ph" alt="Receipt to save with this cost"><button type="button" class="link" @click="trip.cost.photos.splice(i, 1)">remove</button></span>
+              </div>
+            </div>
+            <button class="primary">{{ trip.editCostId ? 'Save correction' : 'Save cost' }}</button>
+            <button type="button" @click="trip.cost = null; trip.editCostId = null">Cancel</button>
+          </form>
+          <p class="hint" v-if="!trip.cur.costs.length && !trip.cost">No costs yet.</p>
+          <div v-for="x in trip.cur.costs" class="cost-row" :class="{ muted: x.status === 'void' }">
+            <div class="row"><strong>{{ x.description }}</strong><span class="num">{{ money(x.amountCents) }}</span></div>
+            <div class="small muted">{{ usDate(x.date) }}{{ x.vendor ? ' · ' + x.vendor : '' }}{{ x.kind === 'mileage' ? ' · ' + x.miles + ' mi × ' + x.mileRateCents + '¢' : '' }}
+              · {{ x.expenseAccountName }} · paid with {{ x.paidFromName }}<template v-if="x.status === 'void'"> · {{ x.replacedById ? 'corrected' : 'void' }}</template></div>
+            <div class="small" v-if="x.billed.length">Billed: {{ billedText(x) }}</div>
+            <div class="actions" v-if="x.status === 'posted'">
+              <button class="link" @click="openTripPhotos(x)">{{ x.photoCount ? '📷 ' + x.photoCount + ' photo' + (x.photoCount === 1 ? '' : 's') : '📷 add photo' }}</button>
+              <template v-if="can('post') && !x.billed.length"><button class="link" @click="editTripCost(x)">edit</button> <button class="link" @click="voidTripCost(x)">void</button></template>
+            </div>
+          </div>
+          <div class="photo-view" v-if="trip.photoView">
+            <div class="row"><h3>Receipts: {{ trip.photoView.cost.description }}</h3><button class="link" @click="trip.photoView = null">close</button></div>
+            <p class="hint" v-if="!trip.photoView.photos.length">No photos yet.</p>
+            <div class="row wrap">
+              <span class="thumb" v-for="ph in trip.photoView.photos">
+                <a :href="tripPhotoUrl(trip.photoView.cost, ph)" target="_blank" rel="noopener"><img :src="tripPhotoUrl(trip.photoView.cost, ph)" alt="Receipt photo"></a>
+                <button class="link" v-if="can('bills')" @click="removeTripPhoto(ph)">remove</button></span>
+            </div>
+            <div class="row wrap" v-if="can('bills')">
+              <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="uploadTripPhotos"></label>
+              <label class="button">Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="uploadTripPhotos"></label>
+              <span class="muted small" v-if="trip.photoView.busy">Saving photo…</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row wrap"><h2>Travel time</h2><button v-if="can('bills') && !trip.travel" @click="newTravel">+ Add travel time</button></div>
+          <form v-if="trip.travel" @submit.prevent="saveTravel" class="grid2">
+            <label>Date <input type="date" v-model="trip.travel.date" required></label>
+            <label>Hours <input v-model="trip.travel.hours" inputmode="decimal" class="num" placeholder="6 or 5:30" required></label>
+            <label>Notes (optional) <input v-model="trip.travel.notes" maxlength="500" placeholder="Drive SAT to Dallas"></label>
+            <div><button class="primary">Save</button> <button type="button" @click="trip.travel = null">Cancel</button></div>
+          </form>
+          <p class="hint" v-if="!trip.cur.time.length && !trip.travel">No travel time. It's billed by the same shares, at the hourly rate you pick on the invoice.</p>
+          <div v-for="x in trip.cur.time" class="cost-row">
+            <div class="row"><strong>{{ x.notes || 'Travel' }}</strong><span class="num">{{ x.hours }} h</span></div>
+            <div class="small muted">{{ usDate(x.date) }} · {{ x.userName }}{{ x.billable ? '' : ' · not billable' }}</div>
+            <div class="small" v-if="x.billed.length">Billed: {{ billedText(x) }}</div>
+            <div class="actions" v-else-if="can('bills')"><button class="link" @click="removeTravel(x)">delete</button></div>
+          </div>
+        </div>
+      </template>
     </section>
 
     <section v-if="tab === 'bank'">

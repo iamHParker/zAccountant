@@ -54,8 +54,14 @@ const ENTITY_TYPES = [
 const blankCompany = () => ({ name: '', homeState: 'TX', fiscalYearStartMonth: 1, entityType: '', booksStartDate: `${today().slice(0, 4)}-01-01` });
 // A bill line can name its project and be billed to that client; an invoice line can come from a time entry or such a cost.
 const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false,
-  jobId: '', billable: false, timeEntryId: '', billedLineId: '', from: '' });
+  jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '' });
 const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
+const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', jobs: [{ jobId: '', share: '' }] });
+const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
+  expenseAccountId: '', paidFromAccountId: '', photos: [], photoBusy: false, key: newKey() });
+// The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
+const lastMileRate = () => { try { return localStorage.getItem('zacc.mileRate') ?? ''; } catch { return ''; } };
+const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } catch { /* private window: not kept */ } };
 const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', jobId: '', attention: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, groupName: '', people: [] });
@@ -114,7 +120,7 @@ async function api(method, url, body, headers = {}) {
 // Which tabs need which permission (any of). The server is the real gatekeeper; this just hides
 // screens someone can't use.
 const TAB_PERMS = {
-  home: ['view_books'], journal: ['view_books'], sales: ['view_books', 'invoices'], bills: ['view_books', 'bills'], bank: ['view_books'],
+  home: ['view_books'], journal: ['view_books'], sales: ['view_books', 'invoices'], bills: ['view_books', 'bills'], trips: ['view_books', 'bills'], bank: ['view_books'],
   reports: ['view_books', 'payroll'], accounts: ['view_books'], payroll: ['view_books', 'payroll'], time: ['time_own', 'time_approve', 'time_all'],
   setup: ['admin'],
 };
@@ -152,7 +158,7 @@ createApp({
       roleLabels: { owner: 'Owner', accountant: 'Accountant', bookkeeper: 'Bookkeeper', viewer: 'Viewer (read only)' },
       months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       tabs: [
-        { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'sales', label: 'Sales' }, { id: 'bills', label: 'Bills' }, { id: 'bank', label: 'Banking' },
+        { id: 'home', label: 'Home' }, { id: 'journal', label: 'Transactions' }, { id: 'sales', label: 'Sales' }, { id: 'bills', label: 'Bills' }, { id: 'trips', label: 'Trips' }, { id: 'bank', label: 'Banking' },
         { id: 'reports', label: 'Reports' }, { id: 'time', label: 'Time' },
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
@@ -210,6 +216,8 @@ createApp({
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null,
         showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
+      // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
+      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
@@ -276,6 +284,7 @@ createApp({
       if (t === 'home') this.loadDash();
       if (t === 'setup') this.loadSetup();
       if (t === 'bank') this.loadBank();
+      if (t === 'trips') this.loadTrips();
       if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
       if (t === 'accounts') this.loadImports();
       if (t === 'time') this.loadTime(true);
@@ -1010,12 +1019,139 @@ createApp({
       if (!d.project.trim()) d.project = [j.name, j.address].filter(Boolean).join('\n');
       if (!d.number && !d.editId && j.code) d.number = j.code;
     },
+    // ---------------------------------------------------------------- Trips
+    tripBase() { return `/companies/${this.companyId}`; },
+    async loadTrips() {
+      const tr = this.trip;
+      tr.list = (await this.run(() => api('GET', `${this.tripBase()}/trips`))) ?? [];
+      if (!this.ar.jobs.length) this.ar.jobs = (await this.run(() => api('GET', `${this.tripBase()}/jobs?inactive=1`))) ?? [];
+      if (tr.cur) await this.openTrip(tr.cur.id);
+    },
+    async openTrip(id) {
+      const t = await this.run(() => api('GET', `${this.tripBase()}/trips/${id}`));
+      if (t) { this.trip.cur = t; this.trip.photoView = null; }
+    },
+    closeTripView() { Object.assign(this.trip, { cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null }); this.loadTrips(); },
+    newTrip() { Object.assign(this.trip, { cur: null, form: blankTrip(), editing: false }); },
+    editTrip() {
+      const t = this.trip.cur;
+      this.trip.form = { name: t.name, startDate: t.startDate, endDate: t.endDate ?? '', notes: t.notes ?? '',
+        jobs: t.jobs.length ? t.jobs.map((j) => ({ jobId: j.jobId, share: j.share })) : [{ jobId: '', share: '' }] };
+      this.trip.editing = true;
+    },
+    /** Shares typed so far, in percent (for the running total under the table). */
+    tripShareTotal() { return (this.trip.form?.jobs ?? []).reduce((s, j) => s + (Number(j.share) || 0), 0); },
+    /** Split the trip evenly across the projects listed (100 / N, the last one taking the rounding). */
+    evenShares() {
+      const rows = this.trip.form.jobs.filter((j) => j.jobId);
+      if (!rows.length) return;
+      const each = Math.floor(10000 / rows.length);
+      rows.forEach((j, i) => { const bp = i === rows.length - 1 ? 10000 - each * (rows.length - 1) : each; j.share = (bp / 100).toFixed(2).replace(/\.?0+$/, ''); });
+    },
+    async saveTrip() {
+      const tr = this.trip; const f = tr.form;
+      const body = { ...f, endDate: f.endDate || null, jobs: f.jobs.filter((j) => j.jobId || j.share) };
+      const r = tr.editing
+        ? await this.run(() => api('PATCH', `${this.tripBase()}/trips/${tr.cur.id}`, body), 'Trip saved.')
+        : await this.run(() => api('POST', `${this.tripBase()}/trips`, body), 'Trip added. Now add its costs.');
+      if (r) { tr.cur = r; tr.form = null; tr.editing = false; }
+    },
+    async toggleTripOpen() {
+      const t = this.trip.cur;
+      const r = await this.run(() => api('PATCH', `${this.tripBase()}/trips/${t.id}`, { isActive: !t.isActive }), t.isActive ? 'Trip closed.' : 'Trip reopened.');
+      if (r) this.trip.cur = r;
+    },
+    /** Miles × rate per mile → cents, half-up, exactly like the server (BigInt). */
+    mileageCents(c) {
+      const m = /^\s*(\d{1,6})(?:\.(\d{1,2}))?\s*$/.exec(c.miles ?? ''); const r = /^\s*\$?(\d{0,2})(?:\.(\d{1,4}))?\s*$/.exec(c.mileRate ?? '');
+      if (!m || !r || (!r[1] && !r[2])) return null;
+      const n = (BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'))) * (BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0')));
+      return Number((n * 2n + 10000n) / 20000n);
+    },
+    tripPaidFromAccounts() { return this.accounts.filter((a) => a.isActive && (a.cashFlow === 'cash' || a.subtype === 'credit_card' || (a.type === 'equity' && a.key !== 'retained_earnings'))); },
+    tripExpenseAccounts() { return this.accounts.filter((a) => a.isActive && a.type === 'expense'); },
+    newTripCost() {
+      const last = this.trip.cur.costs.filter((x) => x.status === 'posted').at(-1);
+      const c = blankTripCost(last?.date ?? this.trip.cur.startDate);
+      c.expenseAccountId = last?.expenseAccountId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
+      c.paidFromAccountId = last?.paidFromAccountId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? '';
+      c.mileRate = lastMileRate();
+      Object.assign(this.trip, { cost: c, editCostId: null, travel: null });
+    },
+    editTripCost(x) {
+      Object.assign(this.trip, { editCostId: x.id, travel: null, cost: { ...blankTripCost(x.date), kind: x.kind, vendor: x.vendor ?? '', description: x.description,
+        miles: x.miles ?? '', mileRate: x.mileRateCents != null ? String(Number(x.mileRateCents) / 100) : '',
+        amount: (x.amountCents / 100).toFixed(2), expenseAccountId: x.expenseAccountId, paidFromAccountId: x.paidFromAccountId, keptPhotos: x.photoCount } });
+    },
+    async addTripCostPhotos(e) {
+      const files = [...(e.target.files ?? [])]; e.target.value = '';
+      const c = this.trip.cost; c.photoBusy = true;
+      try { for (const f of files) if (c.photos.length + (c.keptPhotos ?? 0) < 6) c.photos.push(await pictureFromFile(f, { maxSide: PHOTO_SIDE })); }
+      catch (err) { this.flash(err.message, 'bad'); } finally { c.photoBusy = false; }
+    },
+    async saveTripCost() {
+      const tr = this.trip; const c = tr.cost;
+      const body = { date: c.date, kind: c.kind, vendor: c.vendor, description: c.description, amount: c.amount, miles: c.miles, mileRate: c.mileRate,
+        expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId };
+      if (c.kind === 'mileage') keepMileRate(c.mileRate);
+      const r = tr.editCostId
+        ? await this.run(() => api('PUT', `${this.tripBase()}/trip-costs/${tr.editCostId}`, body, { 'Idempotency-Key': c.key }), 'Cost corrected.')
+        : await this.run(() => api('POST', `${this.tripBase()}/trips/${tr.cur.id}/costs`, body, { 'Idempotency-Key': c.key }), 'Cost saved.');
+      if (!r) return;
+      // The receipt photos go up after the cost is saved (each is up to 3 MB).
+      const costId = r.costId ?? r.costs.filter((x) => x.status === 'posted').find((x) => x.description === body.description && x.date === body.date)?.id;
+      let failed = 0;
+      for (const picture of c.photos) if (!costId || !(await this.run(() => api('POST', `${this.tripBase()}/trip-costs/${costId}/photos`, { picture })))) failed++;
+      if (failed) this.flash(`The cost is saved, but ${failed} receipt photo${failed === 1 ? '' : 's'} could not be. Add ${failed === 1 ? 'it' : 'them'} from the cost's photos.`, 'bad');
+      tr.cost = null; tr.editCostId = null;
+      await this.openTrip(tr.cur.id);
+    },
+    async voidTripCost(x) {
+      if (!confirm(`Void ${x.description} (${money(x.amountCents)})? Its entry in your books is reversed; it stays on record, marked void.`)) return;
+      const r = await this.run(() => api('POST', `${this.tripBase()}/trip-costs/${x.id}/void`, {}), 'Cost voided.');
+      if (r) this.trip.cur = r;
+    },
+    async openTripPhotos(x) {
+      const photos = (await this.run(() => api('GET', `${this.tripBase()}/trip-costs/${x.id}/photos`))) ?? [];
+      this.trip.photoView = { cost: x, photos, busy: false };
+    },
+    tripPhotoUrl(x, ph) { return `/api${this.tripBase()}/trip-costs/${x.id}/photos/${ph.id}`; },
+    async uploadTripPhotos(e) {
+      const files = [...(e.target.files ?? [])]; e.target.value = '';
+      const v = this.trip.photoView; v.busy = true;
+      try {
+        for (const f of files) {
+          const picture = await pictureFromFile(f, { maxSide: PHOTO_SIDE });
+          if (!(await this.run(() => api('POST', `${this.tripBase()}/trip-costs/${v.cost.id}/photos`, { picture }), 'Photo saved.'))) break;
+        }
+      } catch (err) { this.flash(err.message, 'bad'); } finally { v.busy = false; }
+      await this.openTripPhotos(v.cost); await this.openTrip(this.trip.cur.id); this.trip.photoView = this.trip.photoView ?? v;
+    },
+    async removeTripPhoto(ph) {
+      if (!confirm('Remove this photo?')) return;
+      const v = this.trip.photoView;
+      if (await this.run(() => api('DELETE', `${this.tripBase()}/trip-costs/${v.cost.id}/photos/${ph.id}`), 'Photo removed.')) await this.openTripPhotos(v.cost);
+    },
+    newTravel() { Object.assign(this.trip, { travel: { date: this.trip.cur.startDate, hours: '', notes: '' }, cost: null }); },
+    async saveTravel() {
+      const r = await this.run(() => api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, this.trip.travel), 'Travel time saved.');
+      if (r) { this.trip.cur = r; this.trip.travel = null; }
+    },
+    async removeTravel(x) {
+      if (!confirm(`Delete ${x.hours} h of travel time on ${x.date}?`)) return;
+      const r = await this.run(() => api('DELETE', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time/${x.id}`), 'Travel time deleted.');
+      if (r) this.trip.cur = r;
+    },
+    /** Which invoices have billed a trip cost or hour, by project: "2601 on invoice 2601A". */
+    billedText(x) {
+      return (x.billed ?? []).map((b) => `${this.ar.jobs.find((j) => j.id === b.jobId)?.code ?? 'project'} on invoice ${b.number}`).join(', ');
+    },
     // ---------------------------------------------------------------- Pull in unbilled time and costs
     async openPull() {
       const d = this.ar.doc;
       if (!d.jobId && !d.contactId) { this.flash('Choose the project (or the customer) first.', 'bad'); return; }
       const service = this.items.find((x) => x.kind === 'service'); const expense = this.items.find((x) => x.kind === 'expense');
-      this.ar.pull = { from: '', to: '', time: [], costs: [], pick: {}, loaded: false,
+      this.ar.pull = { from: '', to: '', time: [], costs: [], tripCosts: [], pick: {}, loaded: false,
         serviceItemId: service?.id ?? '', expenseItemId: expense?.id ?? '', accountId: service?.accountId ?? this.incomeAccounts()[0]?.id ?? '' };
       await this.loadPull();
     },
@@ -1027,23 +1163,34 @@ createApp({
       const r = await this.run(() => api('GET', `${this.arBase()}/unbilled?${q}`));
       if (!r) return;
       // Anything already on this form (pulled earlier, or kept from the invoice being edited) is left out.
-      const onForm = new Set(d.lines.flatMap((l) => [l.timeEntryId && `t${l.timeEntryId}`, l.billedLineId && `c${l.billedLineId}`]).filter(Boolean));
-      pl.time = r.time.filter((x) => !onForm.has(`t${x.id}`)); pl.costs = r.costs.filter((x) => !onForm.has(`c${x.id}`));
-      pl.pick = Object.fromEntries([...pl.time.map((x) => [`t${x.id}`, true]), ...pl.costs.map((x) => [`c${x.id}`, true])]);
+      // A trip's time or cost is keyed with its project too (each project bills its own share).
+      const onForm = new Set(d.lines.flatMap((l) => [l.timeEntryId && `t${l.timeEntryId}${l.jobId || ''}`, l.billedLineId && `c${l.billedLineId}`,
+        l.tripCostId && `p${l.tripCostId}${l.jobId}`]).filter(Boolean));
+      pl.time = r.time.filter((x) => !onForm.has(this.pullKey('t', x))); pl.costs = r.costs.filter((x) => !onForm.has(`c${x.id}`));
+      pl.tripCosts = r.tripCosts.filter((x) => !onForm.has(this.pullKey('p', x)));
+      pl.pick = Object.fromEntries([...pl.time.map((x) => [this.pullKey('t', x), true]), ...pl.costs.map((x) => [`c${x.id}`, true]),
+        ...pl.tripCosts.map((x) => [this.pullKey('p', x), true])]);
       pl.loaded = true;
     },
+    pullKey(kind, x) { return kind === 't' ? `t${x.id}${x.lineJobId || ''}` : `p${x.id}${x.jobId}`; },
     pullCount() { return Object.values(this.ar.pull?.pick ?? {}).filter(Boolean).length; },
     addPulled() {
       const d = this.ar.doc; const pl = this.ar.pull;
       const svc = this.items.find((x) => x.id === pl.serviceItemId); const exp = this.items.find((x) => x.id === pl.expenseItemId);
-      const people = new Set(pl.time.filter((x) => pl.pick[`t${x.id}`]).map((x) => x.userName));
+      const people = new Set(pl.time.filter((x) => pl.pick[this.pullKey('t', x)]).map((x) => x.userName));
       const manyJobs = !d.jobId;
       const tag = (x) => (manyJobs && x.jobCode ? ` (${x.jobCode})` : '');
       const lines = [
-        ...pl.time.filter((x) => pl.pick[`t${x.id}`]).map((x) => ({ ...blankLine(), itemId: svc?.id ?? '', serviceDate: x.date,
-          description: `${people.size > 1 ? `${x.userName}: ` : ''}${x.notes || x.jobName}${tag(x)}`.slice(0, 300), quantity: x.quantity, qtyTyped: true,
+        ...pl.time.filter((x) => pl.pick[this.pullKey('t', x)]).map((x) => ({ ...blankLine(), itemId: svc?.id ?? '', serviceDate: x.date,
+          description: (x.tripName ? `Travel, ${x.tripName}${x.notes ? `: ${x.notes}` : ''} (${x.share}% of ${x.fullHours} h)${tag(x)}`
+            : `${people.size > 1 ? `${x.userName}: ` : ''}${x.notes || x.jobName}${tag(x)}`).slice(0, 300), quantity: x.quantity, qtyTyped: true,
           unitPrice: svc?.rateCents != null ? (svc.rateCents / 100).toFixed(2) : '', taxable: !!svc?.taxable, accountId: svc?.accountId ?? pl.accountId,
-          timeEntryId: x.id, from: `timesheet, ${x.hours} h` })),
+          timeEntryId: x.id, jobId: x.lineJobId || '', from: x.tripName ? `trip ${x.tripName}, ${x.share}%` : `timesheet, ${x.hours} h` })),
+        // A trip cost: the full cost as the price, the project's share as the quantity (type a different share to override).
+        ...pl.tripCosts.filter((x) => pl.pick[this.pullKey('p', x)]).map((x) => ({ ...blankLine(), itemId: exp?.id ?? '', serviceDate: x.date,
+          description: `${x.description} (${x.share}% of trip ${x.tripName})${tag(x)}`.slice(0, 300), quantity: x.quantity, qtyTyped: true,
+          unitPrice: (x.amountCents / 100).toFixed(2), taxable: !!exp?.taxable, accountId: exp?.accountId ?? pl.accountId,
+          tripCostId: x.id, jobId: x.jobId, from: `trip ${x.tripName}, ${x.share}%` })),
         ...pl.costs.filter((x) => pl.pick[`c${x.id}`]).map((x) => ({ ...blankLine(), itemId: exp?.id ?? '', serviceDate: x.date,
           description: `${x.description || x.vendorName}${tag(x)}`.slice(0, 300), quantity: '1', qtyTyped: true, unitPrice: (x.amountCents / 100).toFixed(2),
           taxable: !!exp?.taxable, accountId: exp?.accountId ?? pl.accountId, billedLineId: x.id, from: `bill ${x.billNumber} · ${x.vendorName}` })),
@@ -1175,8 +1322,8 @@ createApp({
         attention: doc.attention ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
           description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true,
-          jobId: l.jobId ?? '', billable: !!l.billable, timeEntryId: l.timeEntryId ?? '', billedLineId: l.billedLineId ?? '',
-          from: l.timeEntryId ? 'timesheet' : l.billedLineId ? 'a bill' : '' })) };
+          jobId: l.jobId ?? '', billable: !!l.billable, timeEntryId: l.timeEntryId ?? '', billedLineId: l.billedLineId ?? '', tripCostId: l.tripCostId ?? '',
+          from: l.tripCostId || (l.timeEntryId && l.jobId) ? 'a trip' : l.timeEntryId ? 'timesheet' : l.billedLineId ? 'a bill' : '' })) };
       this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
       if (invoice) this.loadItems();
       this.ar.pull = null;
@@ -1186,7 +1333,8 @@ createApp({
       const d = this.ar.doc;
       const lines = d.lines.filter((l) => l.accountId || l.unitPrice).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
         unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined,
-        jobId: l.jobId || undefined, billable: !!l.jobId && l.billable, timeEntryId: l.timeEntryId || undefined, billedLineId: l.billedLineId || undefined }));
+        jobId: l.jobId || undefined, billable: !!l.jobId && l.billable, timeEntryId: l.timeEntryId || undefined, billedLineId: l.billedLineId || undefined,
+        tripCostId: l.tripCostId || undefined }));
       const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
         project: this.S.kind === 'invoice' ? d.project : undefined, jobId: this.S.kind === 'invoice' ? d.jobId || undefined : undefined,
         taxRate: d.taxRate || undefined, lines };
