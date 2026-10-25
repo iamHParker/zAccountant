@@ -237,7 +237,8 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '',
-      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null, ENTRY_OWNER,
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null, ENTRY_OWNER, profile: null,
+      MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
       statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
       fb: { open: false, note: '', picture: null, pictureSource: null, busy: false, error: '' },
@@ -267,7 +268,7 @@ createApp({
       taxCats: null,
       showNewAcct: false, newAcct: { code: '', name: '', type: 'expense', subtype: 'operating' }, register: null,
       subtypeChoices: {
-        asset: [['current', 'Current asset (prepaid, deposits…)'], ['bank', 'Bank or cash account'], ['receivable', 'Money owed to you'], ['fixed', 'Equipment, vehicle, building'], ['contra', 'Accumulated depreciation'], ['investment', 'Long-term investment']],
+        asset: [['current', 'Current asset (prepaid, deposits…)'], ['bank', 'Bank or cash account'], ['cash', 'Cash on hand (petty cash)'], ['receivable', 'Money owed to you'], ['fixed', 'Equipment, vehicle, building'], ['contra', 'Accumulated depreciation'], ['investment', 'Long-term investment']],
         liability: [['current', 'Due within a year'], ['payable', 'Bills you owe'], ['credit_card', 'Credit card'], ['long_term', 'Long-term loan']],
         equity: [['capital', 'Owner contribution'], ['draws', 'Owner draws / distributions']],
         revenue: [['operating', 'Sales or services'], ['other', 'Other income (interest…)']],
@@ -361,7 +362,7 @@ createApp({
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if ((t === 'payroll' || t === 'settings') && this.has('payroll') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
-      if (t === 'settings') { if (this.passkeys.supported) this.loadPasskeys(); this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
+      if (t === 'settings') { this.editProfile(); if (this.passkeys.supported) this.loadPasskeys(); this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'setup') this.loadSetup();
       if (t === 'bank') this.loadBank();
@@ -883,6 +884,18 @@ createApp({
       this.flash(r.problems.length ? `${msg} ${r.problems.length} could not be posted — see the list.` : msg, r.problems.length ? 'bad' : 'ok');
       this.loadRecurring(); this.loadEntries();
     },
+    /** Open a recurring entry in the journal-entry form to change its amount, accounts, memo, name or end date. */
+    editRecurring(r) {
+      const d = (c) => (c ? (c / 100).toFixed(2) : '');
+      this.je = { date: r.nextDate ?? r.startDate, memo: r.memo ?? '', key: newKey(), editId: r.id,
+        repeat: { on: true, name: r.name, frequency: r.frequency, endDate: r.endDate ?? '' },
+        lines: r.lines.map((l) => ({ accountId: l.accountId, debit: d(l.debitCents), credit: d(l.creditCents) })) };
+      this.showJE = true;
+      this.$nextTick(() => document.querySelector('.je-card')?.scrollIntoView({ behavior: 'smooth' }));
+    },
+    async restartRecurring(r) {
+      if (await this.run(() => api('PUT', `/companies/${this.companyId}/recurring/${r.id}`, { restart: true }), 'Restarted.')) this.loadRecurring();
+    },
     async stopRecurring(r) {
       if (!confirm(`Stop "${r.name}"? Entries already posted stay on the books.`)) return;
       if (await this.run(() => api('POST', `/companies/${this.companyId}/recurring/${r.id}/stop`, {}), 'Stopped.')) this.loadRecurring();
@@ -1066,6 +1079,13 @@ createApp({
       const lines = this.je.lines.map((l) => ({ accountId: l.accountId, debit: l.debit || null, credit: l.credit || null }));
       const je = this.je;
       let ok;
+      if (je.editId) {
+        // Changing a recurring entry: from its next date on (start date and frequency stay).
+        ok = await this.run(() => api('PUT', `/companies/${this.companyId}/recurring/${je.editId}`, {
+          name: je.repeat.name || je.memo, memo: je.memo, lines, endDate: je.repeat.endDate || null }), 'Recurring entry changed. Entries already posted stay as they were.');
+        if (ok) { this.je = { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] }; this.showJE = false; this.loadRecurring(); }
+        return;
+      }
       if (je.repeat.on) {
         // A repeating entry is saved as a template; the ones already due are posted right away.
         ok = await this.run(() => api('POST', `/companies/${this.companyId}/recurring`, {
@@ -1106,6 +1126,16 @@ createApp({
       if (a) { this.accounts = await api('GET', `/companies/${this.companyId}/accounts`); this.newAcct = { code: '', name: '', type: 'expense', subtype: 'operating' }; this.showNewAcct = false; }
     },
     async openRegister(a) { this.register = await this.run(() => api('GET', `/companies/${this.companyId}/accounts/${a.id}/register`)); this.renaming = null; },
+    /** Change the open account's kind, or turn it off/on (the server explains why when it can't). */
+    async changeAccount(patch) {
+      const a = this.register?.account;
+      if (!a) return;
+      if (patch.isActive === false && !confirm(`Turn off ${a.code} · ${a.name}? Its history stays; it just won't be offered for new entries.`)) return;
+      const r = await this.run(() => api('PATCH', `/companies/${this.companyId}/accounts/${a.id}`, patch), patch.isActive === undefined ? 'Kind changed.' : (patch.isActive ? 'Account turned back on.' : 'Account turned off.'));
+      this.accounts = await api('GET', `/companies/${this.companyId}/accounts`);
+      if (r) Object.assign(a, { subtype: r.subtype, cashFlow: r.cashFlow, isActive: r.isActive });
+      else this.register = { ...this.register, account: { ...a } }; // put the select back
+    },
     /** Rename the account open on the right (only the name; the number and kind stay). */
     async renameAccount() {
       const a = this.register?.account;
@@ -1168,6 +1198,15 @@ createApp({
       if (c) this.company = { ...this.company, ...c };
     },
     payrollStates() { return [...new Set([this.company?.home_state, ...this.employees.map((e) => e.workState)].filter(Boolean))].sort(); },
+    editProfile() { const c = this.company; this.profile = c ? { name: c.name, homeState: c.home_state, fiscalYearStartMonth: c.fiscal_year_start_month } : null; },
+    async saveProfile() {
+      const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/profile`, this.profile), 'Company saved.');
+      if (!c) return;
+      this.company = { ...this.company, ...c };
+      const row = this.companies.find((x) => x.id === this.companyId);
+      if (row) row.name = c.name;
+      this.editProfile();
+    },
     editFutaCr() { this.futaCr = { ...(this.company?.futa_credit_reduction ?? {}) }; },
     async saveFutaCr() {
       const c = await this.run(() => api('PATCH', `/companies/${this.companyId}/settings`, { futaCreditReduction: this.futaCr }), 'Saved.');
@@ -1885,7 +1924,16 @@ createApp({
       if (!confirm(what)) return;
       if (await this.run(() => api('POST', `/companies/${this.companyId}/bank-transactions/${t.id}/undo`, {}), 'Moved back to review.')) this.loadBank();
     },
+    editRule(r) { this.bank.newRule = { id: r.id, matchText: r.matchText, direction: r.direction, accountId: r.accountId, min: r.minCents != null ? (Number(r.minCents) / 100).toFixed(2) : '', max: r.maxCents != null ? (Number(r.maxCents) / 100).toFixed(2) : '', priority: r.priority }; },
     async addRule() {
+      const nr = this.bank.newRule;
+      if (nr.id) {
+        const { id, ...body } = nr;
+        if (await this.run(() => api('PUT', `/companies/${this.companyId}/bank-rules/${id}`, body), 'Rule saved. It changes suggestions from now on.')) {
+          this.bank.newRule = { matchText: '', direction: 'out', accountId: '' }; this.loadBank();
+        }
+        return;
+      }
       const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-rules`, this.bank.newRule));
       if (!r) return;
       this.flash(r.applied ? `Rule saved. It suggested an account for ${r.applied} waiting transaction${r.applied === 1 ? '' : 's'}.` : 'Rule saved.');

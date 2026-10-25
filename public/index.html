@@ -574,7 +574,7 @@
           <h2>Recurring entries</h2>
           <button v-if="can('post')" @click="postDueRecurring">Post due entries now</button>
         </div>
-        <p class="hint">These post automatically each night on their dates. To set one up, use <em>Advanced journal entry</em> and tick “Repeat this entry”.</p>
+        <p class="hint">These post automatically each night on their dates. To set one up, use <em>Advanced journal entry</em> and tick “Repeat this entry”. <em>edit</em> changes the amount, accounts or end date from the next date on.</p>
         <table class="data" v-if="recurring.length">
           <thead><tr><th>Name</th><th>How often</th><th class="num">Amount</th><th>Next date</th><th>Posted</th><th></th></tr></thead>
           <tbody>
@@ -584,18 +584,21 @@
               <td class="num">{{ money(r.amountCents) }}</td>
               <td>{{ !r.isActive ? 'stopped' : (r.nextDate ?? 'finished') }}</td>
               <td>{{ r.postedCount }}</td>
-              <td><button v-if="r.isActive && can('post')" class="link" @click="stopRecurring(r)">stop</button></td>
+              <td class="actions" v-if="can('post')"><button v-if="r.isActive || r.nextDate" class="link" @click="editRecurring(r)">edit</button>
+                <button v-if="r.isActive" class="link" @click="stopRecurring(r)">stop</button>
+                <button v-else-if="r.nextDate" class="link" @click="restartRecurring(r)">restart</button></td>
             </tr>
           </tbody>
         </table>
         <p class="hint" v-else>No recurring entries yet.</p>
       </div>
-      <div class="card" v-if="showJE">
-        <h2>Journal entry</h2>
+      <div class="card je-card" v-if="showJE">
+        <h2>{{ je.editId ? 'Change recurring entry' : 'Journal entry' }}</h2>
+        <p class="hint" v-if="je.editId">Changes apply from the next date ({{ usDate(je.date) }}) on. Entries already posted stay as they were. The start date and how often can't change: stop this one and start a new one for that.</p>
         <p class="hint">Debits must equal credits. Difference: <strong :class="{ bad: jeDiff !== 0, ok: jeDiff === 0 }">{{ money(jeDiff) }}</strong></p>
         <form @submit.prevent="postJE">
           <div class="grid2">
-            <label>Date <input type="date" v-model="je.date" required></label>
+            <label>{{ je.editId ? 'Next date' : 'Date' }} <input type="date" v-model="je.date" required :disabled="!!je.editId"></label>
             <label>Memo <input v-model.trim="je.memo"></label>
           </div>
           <table class="lines">
@@ -610,16 +613,16 @@
             </tbody>
           </table>
           <button type="button" @click="je.lines.push({ accountId: '', debit: '', credit: '' })">Add line</button>
-          <label class="check"><input type="checkbox" v-model="je.repeat.on"> Repeat this entry (rent, loan payment, depreciation…)</label>
+          <label class="check"><input type="checkbox" v-model="je.repeat.on" :disabled="!!je.editId"> Repeat this entry (rent, loan payment, depreciation…)</label>
           <div class="grid2" v-if="je.repeat.on">
             <label>How often
-              <select v-model="je.repeat.frequency"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select>
+              <select v-model="je.repeat.frequency" :disabled="!!je.editId"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select>
             </label>
             <label>Stop after (optional) <input type="date" v-model="je.repeat.endDate"></label>
             <label>Name <input v-model.trim="je.repeat.name" :placeholder="je.memo || 'e.g. Office rent'"></label>
           </div>
-          <p class="hint" v-if="je.repeat.on">The date above is the first one. Entries on the 29th–31st post on the last day of shorter months.</p>
-          <button class="primary" :disabled="jeDiff !== 0">{{ je.repeat.on ? 'Save recurring entry' : 'Post entry' }}</button>
+          <p class="hint" v-if="je.repeat.on && !je.editId">The date above is the first one. Entries on the 29th–31st post on the last day of shorter months.</p>
+          <button class="primary" :disabled="jeDiff !== 0">{{ je.editId ? 'Save changes' : je.repeat.on ? 'Save recurring entry' : 'Post entry' }}</button>
         </form>
       </div>
       <form class="card search" @submit.prevent="loadEntries()">
@@ -1483,7 +1486,7 @@
         <p class="hint">A rule suggests an account when a bank description contains certain words. You still confirm each one.</p>
         <table class="data" v-if="bank.rules.length">
           <tbody><tr v-for="r in bank.rules"><td>“{{ r.matchText }}”</td><td>{{ { in: 'money in', out: 'money out', any: 'in or out' }[r.direction] }}</td><td>→ {{ acctName(r.accountId) }}</td>
-            <td><button v-if="can('post')" class="link" @click="deleteRule(r)">remove</button></td></tr></tbody>
+            <td class="actions"><button v-if="can('post')" class="link" @click="editRule(r)">edit</button> <button v-if="can('post')" class="link" @click="deleteRule(r)">remove</button></td></tr></tbody>
         </table>
         <form v-if="can('post')" @submit.prevent="addRule">
           <label>When the description contains <input v-model.trim="bank.newRule.matchText" placeholder="e.g. home depot" required></label>
@@ -1491,7 +1494,8 @@
             <label>For <select v-model="bank.newRule.direction"><option value="out">money out</option><option value="in">money in</option><option value="any">either</option></select></label>
             <label>Suggest <select v-model="bank.newRule.accountId" required><option v-for="a in categoryChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
           </div>
-          <button class="primary">Add rule</button>
+          <button class="primary">{{ bank.newRule.id ? 'Save rule' : 'Add rule' }}</button>
+          <button v-if="bank.newRule.id" type="button" @click="bank.newRule = { matchText: '', direction: 'out', accountId: '' }">Cancel</button>
         </form>
       </div>
       </template>
@@ -1778,11 +1782,17 @@
       <div class="split">
         <table class="data">
           <thead><tr><th>#</th><th>Name</th><th>Type</th></tr></thead>
-          <tr v-for="a in accounts" @click="openRegister(a)" class="click" :class="{ sel: register && register.account.id === a.id }"><td>{{ a.code }}</td><td>{{ a.name }}</td><td class="muted">{{ typeLabel[a.type] }}</td></tr>
+          <tr v-for="a in accounts" @click="openRegister(a)" class="click" :class="{ sel: register && register.account.id === a.id, muted: !a.isActive }"><td>{{ a.code }}</td><td>{{ a.name }}<span class="tag" v-if="!a.isActive"> off</span></td><td class="muted">{{ typeLabel[a.type] }}</td></tr>
         </table>
         <div class="card" v-if="register">
           <div class="row wrap" v-if="renaming === null"><h2>{{ register.account.code }} · {{ register.account.name }}</h2>
-            <button v-if="can('accounts')" type="button" class="small" @click="renaming = register.account.name">Rename</button></div>
+            <button v-if="can('accounts')" type="button" class="small" @click="renaming = register.account.name">Rename</button>
+            <template v-if="can('accounts') && !register.account.key">
+              <label class="inline small">Kind <select :value="register.account.subtype" @change="changeAccount({ subtype: $event.target.value })">
+                <option v-for="[v, l] in subtypeChoices[register.account.type]" :value="v">{{ l }}</option></select></label>
+              <button type="button" class="small" @click="changeAccount({ isActive: !register.account.isActive })">{{ register.account.isActive ? 'Turn off' : 'Turn back on' }}</button>
+            </template>
+            <span class="tag" v-if="!register.account.isActive">off</span></div>
           <form v-else class="row wrap" @submit.prevent="renameAccount">
             <label>New name for {{ register.account.code }} <input v-model.trim="renaming" maxlength="100" required></label>
             <button class="primary">Save</button> <button type="button" @click="renaming = null">Cancel</button>
@@ -2165,6 +2175,19 @@
 
     <!-- SETTINGS -->
     <section v-if="tab === 'settings'">
+      <form class="card" v-if="can('admin') && profile" @submit.prevent="saveProfile">
+        <h2>Company</h2>
+        <div class="grid4">
+          <label>Name <input v-model.trim="profile.name" maxlength="100" required></label>
+          <label>Home state
+            <select v-model="profile.homeState"><option v-for="s in ['TX', 'CO', 'CA', 'DC']" :value="s">{{ s }}</option></select></label>
+          <label>Fiscal year starts in
+            <select v-model.number="profile.fiscalYearStartMonth"><option v-for="(m, i) in MONTHS" :value="i + 1">{{ m }}</option></select></label>
+          <label class="end"><button class="primary">Save</button></label>
+        </div>
+        <p class="hint">The home state can't change once payroll has run, and the fiscal-year start can't change while any
+          period is closed. Every change is kept in the audit trail.</p>
+      </form>
       <div class="card" v-if="passkeys.supported">
         <h2>Sign in with Face ID, Touch ID or Windows Hello</h2>
         <p class="hint">A passkey lets this phone or computer sign you in with your face, fingerprint or device PIN: no password

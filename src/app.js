@@ -388,6 +388,11 @@ export function createApp(pool, { log } = {}) {
     const { entityType, booksStartDate, setupDone } = req.body ?? {};
     return ledger.updateSetup(db, companyId, { entityType, booksStartDate, setupDone, actor });
   }));
+  // Company name, home state, fiscal-year start (CPA review G4/G5; limits in ledgerService.updateCompanyProfile).
+  api.patch('/companies/:companyId/profile', route('admin', ({ db, req, companyId, actor }) => {
+    const { name, homeState, fiscalYearStartMonth } = req.body ?? {};
+    return ledger.updateCompanyProfile(db, companyId, { name, homeState, fiscalYearStartMonth, actor });
+  }));
   api.get('/companies/:companyId/setup', route('member', ({ db, companyId }) => ledger.setupStatus(db, companyId)));
   api.get('/companies/:companyId', route('member', async ({ db, companyId, access }) => ({
     ...(await ledger.getCompany(db, companyId)), role: access.role, roleName: access.roleName, permissions: [...access.permissions], departmentId: access.departmentId,
@@ -465,6 +470,8 @@ export function createApp(pool, { log } = {}) {
   }, 201));
   api.put('/companies/:companyId/accounts/:accountId/name', route('accounts', ({ db, req, companyId, actor }) =>
     ledger.renameAccount(db, companyId, req.params.accountId, { name: req.body?.name, actor })));
+  api.patch('/companies/:companyId/accounts/:accountId', route('accounts', ({ db, req, companyId, actor }) =>
+    ledger.updateAccount(db, companyId, req.params.accountId, { subtype: req.body?.subtype, isActive: req.body?.isActive, actor })));
   api.get('/companies/:companyId/accounts/:accountId/register', route('view_books', ({ db, req, companyId }) =>
     reports.getAccountRegister(db, companyId, req.params.accountId, { from: q(req.query.from), to: q(req.query.to) })));
 
@@ -488,6 +495,10 @@ export function createApp(pool, { log } = {}) {
     const { name, frequency, startDate, endDate, memo, lines } = req.body ?? {};
     return ledger.createRecurring(db, companyId, { name, frequency, startDate, endDate, memo, lines, actor });
   }, 201));
+  api.put('/companies/:companyId/recurring/:recurringId', route('post', ({ db, req, companyId, actor }) => {
+    const { name, memo, lines, endDate, restart } = req.body ?? {};
+    return ledger.updateRecurring(db, companyId, req.params.recurringId, { name, memo, lines, endDate, restart: restart === true, actor });
+  }));
   api.post('/companies/:companyId/recurring/:recurringId/stop', route('post', ({ db, req, companyId, actor }) =>
     ledger.stopRecurring(db, companyId, req.params.recurringId, { actor })));
   api.post('/companies/:companyId/recurring/post-due', route('post', ({ db, companyId, actor }) =>
@@ -513,6 +524,10 @@ export function createApp(pool, { log } = {}) {
     const { matchText, direction, min, max, accountId, priority } = req.body ?? {};
     return bank.createRule(db, companyId, { matchText, direction, min, max, accountId, priority: priority ?? 100, actor });
   }, 201));
+  api.put('/companies/:companyId/bank-rules/:ruleId', route('post', ({ db, req, companyId, actor }) => {
+    const { matchText, direction, min, max, accountId, priority } = req.body ?? {};
+    return bank.updateRule(db, companyId, req.params.ruleId, { matchText, direction, min, max, accountId, priority: priority ?? 100, actor });
+  }));
   api.delete('/companies/:companyId/bank-rules/:ruleId', route('post', ({ db, req, companyId, actor }) => bank.deleteRule(db, companyId, req.params.ruleId, { actor })));
   const R = '/companies/:companyId/reconciliations/:reconId';
   api.get(R, route('view_books', ({ db, req, companyId }) => bank.getReconciliation(db, companyId, req.params.reconId)));
