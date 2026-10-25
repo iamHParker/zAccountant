@@ -87,7 +87,9 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   to edit; mileage = miles × typed rate); travel time = time entry with `trip_id`; billed once per project.
 - Passkeys (migration 025, `src/security/webauthn.js`): Face ID / Windows Hello sign-in = both steps; adding one needs a
   fresh authenticator code. Settings card + sign-in button.
-- Queued (Homer 2026-10-25): **Road** page (/road, limited phone key, offline batch, review on return); **.zacc book file** (zip of CSVs + manifest/SHA-256, optional password; also the nightly
+- Road page `/road` (migration 026, `src/services/roadService.js`, `public/road.*`): phone key (Bearer, hash only,
+  90 days) → inbox `road_items`; Trips → From the road accepts into the books. Offline via IndexedDB + service worker.
+- Queued (Homer 2026-10-25): **.zacc book file** (zip of CSVs + manifest/SHA-256, optional password; also the nightly
   backup) plus an "Export for QuickBooks"; MileIQ import (needs a sample CSV).
 - New-company setup wizard (migration 017): `entity_type`, `books_start_date`, `setup_done`; `GET/PUT …/setup`;
   the `setup` tab; Home's "Finish setting up" list. Entity type feeds Tax-ready (`src/core/entityTypes.js`).

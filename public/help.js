@@ -89,6 +89,21 @@ that invoice is edited or voided.</p>`,
 its share of every cost; type another quantity on a line to bill a different share.</p>`,
   },
   {
+    id: 'road', tab: 'trips', title: 'Your phone on the road',
+    words: 'road phone iphone mobile offline no signal qr code key receipt photo travel away from desk home screen',
+    html: `
+<p>Jot down trip costs, receipt photos, travel time and new project numbers on your phone, even with no signal.
+The phone never signs in to your books: it gets a <strong>road key</strong> that can only add to a <em>From the road</em> box.</p>
+<ol>
+  <li><strong>Trips → Your phone on the road → Make a road key</strong>, then scan the QR code with the phone's camera.
+      On an iPhone: Share → <strong>Add to Home Screen</strong>.</li>
+  <li>On the road: <strong>+ New trip</strong>, <strong>+ Cost or receipt</strong>, <strong>+ Travel time</strong>. Items wait on the phone and go when there is signal.</li>
+  <li>At the desk: <strong>Trips → From the road</strong>: choose the expense account and what you paid with, <strong>Accept</strong>
+      the trip first, then its costs and time. <strong>Dismiss</strong> what doesn't belong.</li>
+</ol>
+<p>Lost the phone? <strong>turn off</strong> its key in the same place. Keys last 90 days.</p>`,
+  },
+  {
     id: 'invoice-setup', tab: null, title: 'Invoice rates, letterhead and logo',
     words: 'invoice rate hourly engineering drafting overtime equipment rental lodging motel airfare logo letterhead tax id firm sales tax default project',
     html: `

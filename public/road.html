@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="zAcc Road">
+  <meta name="theme-color" content="#1f6f5c">
+  <title>zAccountant Road</title>
+  <link rel="manifest" href="/road.webmanifest">
+  <link rel="apple-touch-icon" href="/img/road-icon.png">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/road.js"></script>
+</head>
+<body class="road">
+<div id="road" v-cloak>
+  <header class="top">
+    <div class="brand">z<span>Accountant</span> <span class="muted small">Road</span></div>
+    <div class="road-status" v-if="key">
+      <span class="pill" :class="online ? 'ok' : 'warn'">{{ online ? 'Online' : 'No signal' }}</span>
+      <button class="small" v-if="waiting" :disabled="syncing || !online" @click="sync">{{ syncing ? 'Sending…' : `Send ${waiting} now` }}</button>
+      <span class="muted small" v-else-if="items.length">All sent</span>
+    </div>
+  </header>
+  <main>
+    <div class="toast" v-if="message" :class="message.kind" @click="message = null">{{ message.text }}</div>
+
+    <!-- No key yet: scan the QR code at the desk, or paste the link -->
+    <section class="card" v-if="!key">
+      <h1>Road page</h1>
+      <p>Jot down trip costs, receipt photos and travel time on the road, even with no signal. They wait in the
+        "From the road" box in zAccountant until you accept them at your desk.</p>
+      <p>At your desk: <strong>Trips → Your phone on the road → Make a road key</strong>, then scan the code with this phone's camera.</p>
+      <form @submit.prevent="useLink">
+        <label>Or paste the road link here <input v-model.trim="pasted" placeholder="https://…/road#key=…" autocomplete="off"></label>
+        <button class="primary">Use this link</button>
+      </form>
+    </section>
+
+    <template v-else>
+      <section class="card" v-if="keyProblem">
+        <p class="bad">{{ keyProblem }}</p>
+        <p class="hint">What's on this phone is kept. Make a new key at your desk and scan it; then press Send.</p>
+        <button @click="forgetKey">Scan a new key</button>
+      </section>
+      <p class="muted small" v-if="summary">{{ summary.company }} · {{ summary.user }} · key works until {{ usDate(summary.expiresOn) }}</p>
+
+      <!-- Which trip -->
+      <section class="card" v-if="!tripForm">
+        <label>Trip
+          <select v-model="tripKey">
+            <option value="">Choose a trip…</option>
+            <optgroup label="Started on this phone" v-if="localTrips.length">
+              <option v-for="t in localTrips" :value="'c:' + t.clientId">{{ t.data.name }}</option></optgroup>
+            <optgroup label="In zAccountant" v-if="serverTrips.length">
+              <option v-for="t in serverTrips" :value="'s:' + t.id">{{ t.name }}</option></optgroup>
+          </select></label>
+        <button class="primary wide" @click="newTrip">+ New trip</button>
+      </section>
+
+      <section class="card" v-if="tripForm">
+        <h2>New trip</h2>
+        <form @submit.prevent="saveTrip">
+          <label>Name <input v-model="tripForm.name" maxlength="120" required placeholder="Dallas, Oct 4-6"></label>
+          <div class="grid2">
+            <label>First day <input type="date" v-model="tripForm.startDate" required></label>
+            <label>Last day <input type="date" v-model="tripForm.endDate"></label>
+          </div>
+          <label>Projects it's for <input v-model="projectSearch" placeholder="Type a number or name" autocomplete="off"></label>
+          <div class="chips" v-if="tripForm.jobIds.length">
+            <button type="button" class="active" v-for="id in tripForm.jobIds" @click="toggleJob(id)">{{ projectLabel(id) }} ✕</button>
+          </div>
+          <div class="pick-list" v-if="projectSearch">
+            <button type="button" v-for="p in projectMatches" @click="toggleJob(p.id); projectSearch = ''">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</button>
+            <p class="muted small" v-if="!projectMatches.length">No project like that. Add it as a new project number below.</p>
+          </div>
+          <label>New project numbers (one per line, like 2610 Garcia Barn)
+            <textarea v-model="tripForm.newProjects" rows="2"></textarea></label>
+          <label>Notes <textarea v-model="tripForm.notes" rows="2" maxlength="500"></textarea></label>
+          <p class="muted small">Shares are set at the desk (they start even).</p>
+          <button class="primary">Save trip</button> <button type="button" @click="tripForm = null">Cancel</button>
+        </form>
+      </section>
+
+      <template v-if="tripKey && !tripForm">
+        <div class="row wrap road-actions" v-if="!costForm && !timeForm">
+          <button class="primary" @click="newCost">+ Cost or receipt</button>
+          <button @click="newTime">+ Travel time</button>
+        </div>
+
+        <section class="card" v-if="costForm">
+          <h2>Cost</h2>
+          <form @submit.prevent="saveCost">
+            <div class="chips">
+              <button type="button" v-for="(label, k) in kinds" :class="{ active: costForm.kind === k }" @click="costForm.kind = k">{{ label }}</button>
+            </div>
+            <label>Date <input type="date" v-model="costForm.date" required></label>
+            <template v-if="costForm.kind === 'mileage'">
+              <div class="grid2">
+                <label>Miles <input v-model.trim="costForm.miles" inputmode="decimal" placeholder="212.4" required></label>
+                <label>Rate per mile ($) <input v-model.trim="costForm.mileRate" inputmode="decimal" placeholder="e.g. 0.70" required></label>
+              </div>
+              <p class="muted small" v-if="mileageText">{{ mileageText }}</p>
+            </template>
+            <label v-else>Amount ($) <input v-model.trim="costForm.amount" inputmode="decimal" placeholder="0.00" required></label>
+            <label>Paid to (optional) <input v-model="costForm.vendor" maxlength="120" placeholder="Southwest, Avis, NTTA…"></label>
+            <label>What it was <input v-model="costForm.description" maxlength="300" :placeholder="kinds[costForm.kind]"></label>
+            <label class="photo-btn">📷 Receipt photo
+              <input type="file" accept="image/*" capture="environment" multiple @change="addPhotos"></label>
+            <div class="photo-strip" v-if="costForm.photos.length">
+              <span v-for="(p, i) in costForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Receipt"><button type="button" class="link" @click="costForm.photos.splice(i, 1)">remove</button></span>
+            </div>
+            <button class="primary" :disabled="busy">Save</button> <button type="button" @click="costForm = null">Cancel</button>
+          </form>
+        </section>
+
+        <section class="card" v-if="timeForm">
+          <h2>Travel time</h2>
+          <form @submit.prevent="saveTime">
+            <div class="grid2">
+              <label>Date <input type="date" v-model="timeForm.date" required></label>
+              <label>Hours <input v-model.trim="timeForm.hours" inputmode="decimal" placeholder="3.5 or 3:30" required></label>
+            </div>
+            <label>Notes <input v-model="timeForm.notes" maxlength="300" placeholder="Drive SAT to DAL"></label>
+            <button class="primary">Save</button> <button type="button" @click="timeForm = null">Cancel</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <h2>On this trip, from this phone</h2>
+          <p class="hint" v-if="!tripItems.length">Nothing yet.</p>
+          <div class="road-item" v-for="i in tripItems">
+            <div class="row wrap">
+              <span><span class="muted small">{{ usDate(i.data.date ?? i.data.startDate) }}</span> {{ itemText(i) }}</span>
+              <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
+            </div>
+            <p class="bad small" v-if="i.error">{{ i.error }}</p>
+            <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button>
+          </div>
+        </section>
+      </template>
+
+      <p class="center"><button class="link small" v-if="items.some(i => ['accepted', 'dismissed'].includes(i.status))" @click="clearDone">Clear items already in the books</button></p>
+    </template>
+  </main>
+</div>
+</body>
+</html>

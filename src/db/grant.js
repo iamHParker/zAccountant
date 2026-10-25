@@ -15,7 +15,7 @@ export async function grantRuntimeRole(pool, role) {
                     contacts, documents, document_lines, payments, payment_applications, payroll_runs, company_roles, departments, jobs, time_entries, payroll_deposits,
                     users, sessions, memberships, feedback_reports, company_plans, plan_changes,
                     company_logos, invoice_items, account_tax_categories, payment_photos, trips, trip_jobs, trip_costs, trip_cost_photos,
-                    passkeys, auth_challenges TO ${role};
+                    passkeys, auth_challenges, road_keys, road_items, road_photos TO ${role};
     GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount, futa_credit_reduction, default_sales_tax_rate,
                   invoice_address, invoice_note, invoice_footer, entity_type, books_start_date, setup_done) ON companies TO ${role};
     GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash) ON users TO ${role};
@@ -31,6 +31,8 @@ export async function grantRuntimeRole(pool, role) {
     GRANT DELETE ON sessions TO ${role};
     GRANT UPDATE (sign_count, last_used_at, name) ON passkeys TO ${role};
     GRANT DELETE ON passkeys, auth_challenges TO ${role};
+    GRANT UPDATE (last_used_at, revoked_at) ON road_keys TO ${role};
+    GRANT UPDATE (status, reviewed_by, reviewed_at, trip_id, trip_cost_id, time_entry_id) ON road_items TO ${role};
     GRANT UPDATE (role, custom_role_id, department_id) ON memberships TO ${role};
     GRANT UPDATE (name, permissions) ON company_roles TO ${role};
     GRANT DELETE ON company_roles, departments TO ${role};
