@@ -10,6 +10,13 @@ The security is built in layers, like redundant load paths. If one layer fails, 
 - **Rate limits:** sign-in attempts per 5 minutes and API requests per minute, per address (`AUTH_RATE_LIMIT`, `API_RATE_LIMIT`).
 - **Sessions:** an HTTP-only cookie. A session counts only after two-step sign-in (`mfa_passed`). An account locks
   after 10 wrong passwords.
+- **Passkeys** (`src/security/webauthn.js`, migration 025): Face ID, Touch ID, Windows Hello or the device PIN. The
+  device keeps the private key; we store only the public key (`passkeys`) and one-time challenges
+  (`auth_challenges`, hashed, 5 minutes). A passkey sign-in counts as both steps (the device, plus the face/finger/PIN
+  the browser requires with `userVerification: 'required'`), so it starts a session with `mfa_passed`. Adding one
+  needs a full sign-in **and** a fresh authenticator code. We check the challenge, the origin, the site's hash, the
+  user-verified flag, the signature (ES256, RS256, EdDSA) and that the counter never goes backwards (a copied key).
+  No attestation: we ask for `'none'`. Tests use a pretend device (`test/fakeAuthenticator.js`).
 - **Secrets at rest:** Social Security numbers and authenticator secrets are encrypted with AES-256-GCM
   (`FIELD_ENCRYPTION_KEY`). Passwords are hashed (scrypt).
 

@@ -198,6 +198,32 @@ export function createApp(pool, { log } = {}) {
     setSessionCookie(res, r.token);
     res.json({ ok: true });
   });
+  // Passkeys (Face ID, Touch ID, Windows Hello). The site's name for them is its host name; the browser checks it.
+  const relyingParty = (req) => ({ rpId: (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, ''), origin: `${req.protocol}://${(req.headers.host ?? '').toLowerCase()}` });
+  const fullSession = async (req) => {
+    const s = await session(req);
+    if (!s?.session.mfa_passed) throw new AuthError('Please sign in', 401);
+    return s;
+  };
+  authApi.post('/passkey/options', async (req, res) => res.json(await auth.passkeyLoginOptions(pool, relyingParty(req))));
+  authApi.post('/passkey/login', async (req, res) => {
+    const r = await auth.passkeyLogin(pool, { credential: req.body?.credential }, relyingParty(req));
+    setSessionCookie(res, r.token);
+    res.json({ user: { ...r.user, platformRole: platformRole(r.user.email) }, next: null, version: appVersion() });
+  });
+  authApi.get('/passkeys', async (req, res) => res.json(await auth.listPasskeys(pool, (await fullSession(req)).user.id)));
+  authApi.post('/passkeys/options', async (req, res) => {
+    const s = await fullSession(req);
+    res.json(await auth.passkeyRegisterOptions(pool, s.user.id, { mfaCode: req.body?.mfaCode }, relyingParty(req)));
+  });
+  authApi.post('/passkeys', async (req, res) => {
+    const s = await fullSession(req);
+    res.status(201).json(await auth.passkeyRegister(pool, s.user.id, { credential: req.body?.credential, name: req.body?.name }, relyingParty(req)));
+  });
+  authApi.delete('/passkeys/:id', async (req, res) => {
+    await auth.removePasskey(pool, (await fullSession(req)).user.id, req.params.id);
+    res.json({ ok: true });
+  });
   app.use('/api/auth', authApi);
 
   // The front page lists the plans and their prices from the same catalog the Admin dashboard uses, so a price

@@ -40,6 +40,28 @@ function taxCents(taxable, pct) {
   return Number((BigInt(taxable) * ppm * 2n + 1000000n) / 2000000n);
 }
 
+// Passkeys (Face ID, Touch ID, Windows Hello): the browser works in raw bytes; the server takes base64url text.
+const toBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const toB64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const canPasskey = () => typeof window !== 'undefined' && Boolean(window.PublicKeyCredential && navigator.credentials);
+/** A friendly name for this device, to start the passkey's name with. */
+function deviceName() {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android phone';
+  if (/Windows/.test(ua)) return 'Windows PC';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  return 'computer';
+}
+/** What the browser says when a passkey step doesn't finish, in plain words. */
+function passkeyProblem(e) {
+  if (e?.name === 'NotAllowedError') return 'The passkey step was cancelled or timed out. Try again when ready.';
+  if (e?.name === 'InvalidStateError') return 'This device already has a passkey for your account.';
+  if (e?.name === 'SecurityError') return 'Passkeys work only on the real zAccountant address (https).';
+  return 'This browser could not use a passkey here.';
+}
+
 // Sales (invoices to customers) and Bills (from vendors) share one screen; these are the differences.
 const SIDES = {
   sales: { kind: 'invoice', perm: 'invoices', Doc: 'Invoice', docs: 'Invoices', who: 'customer', Who: 'Customer', Whos: 'Customers', contacts: 'customers', docPath: 'invoices',
@@ -154,6 +176,7 @@ createApp({
     return {
       companies: [], companyId: null, company: null, tab: 'home', message: null,
       auth: { screen: 'loading', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
+      passkeys: { list: [], name: '', code: '', busy: false, supported: canPasskey() },
       members: [], newMember: { email: '', role: 'bookkeeper', departmentId: '' },
       roleLabels: { owner: 'Owner', accountant: 'Accountant', bookkeeper: 'Bookkeeper', viewer: 'Viewer (read only)' },
       months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
@@ -280,7 +303,7 @@ createApp({
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if ((t === 'payroll' || t === 'settings') && this.has('payroll') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
-      if (t === 'settings') { this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
+      if (t === 'settings') { if (this.passkeys.supported) this.loadPasskeys(); this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'setup') this.loadSetup();
       if (t === 'bank') this.loadBank();
@@ -348,6 +371,56 @@ createApp({
       const a = this.auth;
       const body = a.useRecovery ? { recoveryCode: a.code } : { code: a.code };
       if (await this.run(() => api('POST', '/auth/mfa/verify', body))) await this.enterApp();
+    },
+    /** Sign in with Face ID / Touch ID / Windows Hello: the device signs the server's challenge; no password typed. */
+    async signInPasskey() {
+      const o = await this.run(() => api('POST', '/auth/passkey/options', {}));
+      if (!o) return;
+      let cred;
+      try {
+        cred = await navigator.credentials.get({ publicKey: { challenge: toBytes(o.challenge), rpId: o.rpId, userVerification: 'required', timeout: o.timeout } });
+      } catch (e) { this.flash(passkeyProblem(e), 'bad'); return; }
+      const r = cred.response;
+      const credential = { id: cred.id, rawId: toB64url(cred.rawId), type: cred.type, response: {
+        clientDataJSON: toB64url(r.clientDataJSON), authenticatorData: toB64url(r.authenticatorData), signature: toB64url(r.signature),
+        userHandle: r.userHandle ? toB64url(r.userHandle) : null } };
+      const res = await this.run(() => api('POST', '/auth/passkey/login', { credential }));
+      if (!res) return;
+      this.auth.user = res.user; this.version = res.version ?? '';
+      await this.enterApp();
+    },
+    async loadPasskeys() {
+      this.passkeys.list = (await this.run(() => api('GET', '/auth/passkeys'))) ?? [];
+      if (!this.passkeys.name) this.passkeys.name = `${this.auth.user?.name?.split(' ')[0] ?? 'My'}'s ${deviceName()}`.slice(0, 60);
+    },
+    async addPasskey() {
+      const p = this.passkeys;
+      p.busy = true;
+      try {
+        const o = await this.run(() => api('POST', '/auth/passkeys/options', { mfaCode: p.code }));
+        if (!o) return;
+        p.code = '';
+        let cred;
+        try {
+          cred = await navigator.credentials.create({ publicKey: {
+            challenge: toBytes(o.challenge), rp: o.rp, user: { id: toBytes(o.user.id), name: o.user.name, displayName: o.user.displayName },
+            pubKeyCredParams: o.algorithms.map((alg) => ({ type: 'public-key', alg })), timeout: o.timeout, attestation: 'none',
+            authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
+            excludeCredentials: o.excludeCredentials.map((k) => ({ type: 'public-key', id: toBytes(k.id), transports: k.transports })),
+          } });
+        } catch (e) { this.flash(passkeyProblem(e), 'bad'); return; }
+        const r = cred.response;
+        const credential = { id: cred.id, rawId: toB64url(cred.rawId), type: cred.type, response: {
+          clientDataJSON: toB64url(r.clientDataJSON), attestationObject: toB64url(r.attestationObject),
+          transports: typeof r.getTransports === 'function' ? r.getTransports() : [] } };
+        if (await this.run(() => api('POST', '/auth/passkeys', { credential, name: p.name }), 'Passkey added. Next time, choose "Sign in with Face ID or a passkey".')) {
+          p.name = ''; await this.loadPasskeys();
+        }
+      } finally { p.busy = false; }
+    },
+    async removePasskey(k) {
+      if (!confirm(`Remove the passkey "${k.name}"? That device will need your password and code again.`)) return;
+      if (await this.run(() => api('DELETE', `/auth/passkeys/${k.id}`), 'Passkey removed.')) await this.loadPasskeys();
     },
     async signOut() {
       await api('POST', '/auth/logout', {}).catch(() => {});
