@@ -2,12 +2,12 @@
   --bg: #f6f7f9; --card: #fff; --ink: #1d2433; --muted: #6b7385; --line: #e3e6ec;
   --brand: #1f6f5c; --brand-ink: #fff; --ok: #1f7a3a; --bad: #b42318; --warn-bg: #fff7e6;
   --chip-bg: #e3f1ec; --chip-ink: #14513f;
-  /* Home cards: a slight tint so they stand apart from the page; chart series (validated: colour-blind safe). */
-  --tint: #eef4f8; --tint-line: #d3e1ea; --series-1: #2a78d6; --series-2: #eb6834;
+  /* Home cards: a tint a few shades off the page so they stand apart (Homer asked for more contrast); muted text darker to keep 4.5:1; chart series (validated: colour-blind safe). */
+  --tint: #e3edf5; --tint-line: #bfd3e2; --tint-muted: #576074; --series-1: #2a78d6; --series-2: #eb6834;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #14171c; --card: #1d2128; --ink: #e8eaee; --muted: #9aa3b2; --line: #2d333d; --brand: #3fa58a; --ok: #5cc27a; --bad: #ff7a6b; --warn-bg: #3a3020; --chip-bg: #1f3a33; --chip-ink: #a6e3cf;
-    --tint: #222a33; --tint-line: #34404d; --series-1: #3987e5; --series-2: #d95926; }
+    --tint: #2a3440; --tint-line: #465567; --tint-muted: #a3acba; --series-1: #3987e5; --series-2: #d95926; }
 }
 * { box-sizing: border-box; }
 [v-cloak] { display: none; }
@@ -262,6 +262,7 @@ button.wide { width: 100%; margin-top: 8px; }
 .home-card-body > .mini-bars, .home-card-body > .small { grid-column: 1 / -1; }
 .home-card-icon { font-size: 22px; line-height: 1.2; }
 .home-card-hint { display: block; }
+.home-card .muted { color: var(--tint-muted); }
 .home-card-tools { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 10px 8px; }
 .home-card-tools button { margin: 0; padding: 2px 8px; }
 .home-drop { border: 1px dashed var(--line); border-radius: 10px; padding: 12px; text-align: center; margin: 0; }
