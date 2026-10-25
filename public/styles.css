@@ -1,9 +1,10 @@
 :root {
   --bg: #f6f7f9; --card: #fff; --ink: #1d2433; --muted: #6b7385; --line: #e3e6ec;
   --brand: #1f6f5c; --brand-ink: #fff; --ok: #1f7a3a; --bad: #b42318; --warn-bg: #fff7e6;
+  --chip-bg: #e3f1ec; --chip-ink: #14513f;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #14171c; --card: #1d2128; --ink: #e8eaee; --muted: #9aa3b2; --line: #2d333d; --brand: #3fa58a; --ok: #5cc27a; --bad: #ff7a6b; --warn-bg: #3a3020; }
+  :root { --bg: #14171c; --card: #1d2128; --ink: #e8eaee; --muted: #9aa3b2; --line: #2d333d; --brand: #3fa58a; --ok: #5cc27a; --bad: #ff7a6b; --warn-bg: #3a3020; --chip-bg: #1f3a33; --chip-ink: #a6e3cf; }
 }
 * { box-sizing: border-box; }
 [v-cloak] { display: none; }
@@ -95,6 +96,9 @@ table.register th { white-space: normal; min-width: 70px; }
 table.register td.er, table.register th.er { background: var(--bg); }
 .top select { width: auto; max-width: 320px; margin: 0; }
 .who { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.user-chip { white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--chip-bg); color: var(--chip-ink); }
+.user-name { font-weight: 600; }
+.role-pill { padding: 1px 8px; border-radius: 999px; background: var(--card); color: var(--chip-ink); font-size: 12px; font-weight: 600; }
 .secret { font: 600 20px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; background: var(--bg); padding: 10px 14px; border-radius: 8px; word-break: break-all; }
 ul.codes { columns: 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0 12px; }

@@ -24,7 +24,7 @@
         <button v-if="company" class="help-btn" :class="{ active: tab === 'help' }" @click="openHelp" :title="tab === 'help' ? 'Back' : 'Help for this screen'" >? Help</button>
         <button v-if="['admin', 'developer'].includes(auth.user.platformRole)" class="help-btn" :class="{ active: tab === 'admin' }" @click="openAdmin" :title="tab === 'admin' ? 'Back' : 'Admin dashboard: plans'">Admin</button>
         <button v-if="auth.user.platformRole === 'developer'" class="help-btn" :class="{ active: tab === 'developer' }" @click="openDeveloper" :title="tab === 'developer' ? 'Back' : 'Developer dashboard'">Developer</button>
-        <span class="muted">{{ auth.user.name }}<template v-if="company"> · {{ company.roleName }}</template></span>
+        <span class="user-chip"><span class="user-name">{{ auth.user.name }}</span><span class="role-pill" v-if="company">{{ company.roleName }}</span></span>
         <button class="link" @click="signOut">Sign out</button>
       </div>
     </template>
