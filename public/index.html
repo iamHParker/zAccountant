@@ -17,7 +17,6 @@
       </select>
       <nav v-if="company">
         <button v-for="t in tabs.filter(t => canTab(t.id))" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
-        <span class="build" v-if="version" :title="'Build ' + version + ' (name this in a beta report)'">Build {{ version }}</span>
       </nav>
       <div class="who" v-if="auth.user">
         <button class="help-btn beta-btn" @click="openFeedback" title="Something wrong or confusing? Tell the zAccountant team">🐞 Beta feedback</button>
@@ -2352,6 +2351,7 @@
   </main>
   <footer class="status-bar" v-if="auth.user && !auth.screen" aria-label="Status bar">
     <span class="status-left muted">{{ company?.name }}</span>
+    <span class="build muted" v-if="version" :title="'Build ' + version + ' (name this in a beta report)'"><span class="build-word">Build </span>{{ version }}</span>
     <span class="zoom" role="group" aria-label="Zoom">
       <button type="button" class="zoom-step" @click="setZoom(zoom - 10)" :disabled="zoom <= ZOOM_MIN" title="Zoom out" aria-label="Zoom out">−</button>
       <input type="range" :min="ZOOM_MIN" :max="ZOOM_MAX" step="10" :value="zoom" @input="setZoom(+$event.target.value)" aria-label="Zoom level">

@@ -33,8 +33,8 @@ that shows it redraws by itself. You never write "find this element and change i
   as text (`"531.25"`), and the server parses them.
 - **Dates:** ISO `'YYYY-MM-DD'` everywhere. `usDate()` shows MM/DD/YYYY on printed documents.
 - **Build number:** `GET /api/auth/me` (and sign-in) return `version` from `appVersion()` in `src/core/platform.js`:
-  `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The top nav shows
-  it after Settings as `Build …`, and beta reports record the same string.
+  `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The status bar at the
+  bottom shows it after the company name as `Build …`, and beta reports record the same string.
 
 Zoom: the status bar's slider sets the CSS variable `--zoom` on `<html>` (CSSOM, allowed by the CSP), and
 `.top, main { zoom: var(--zoom) }` scales the header and page, never the status bar. The choice is kept in

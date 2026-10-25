@@ -39,7 +39,7 @@ choice (Pro, or our own backup job); he chose to decide later, reminder set for 
    and **Admin** and **Developer** buttons appear next to ? Help. (`ADMIN_EMAILS` gives someone the Admin dashboard only.)
 10. **Updates reach the site on their own.** Every PR merged into `main` should start a new deploy (Settings →
     Source: repo `iamHParker/zAccountant`, branch **main**, automatic deploys on). Check it took: the build at the
-    top of the app (next to Settings) reads `0.1.0+<first 7 characters of the newest main commit>`. Database
+    bottom bar of the app (after the company name) reads `0.1.0+<first 7 characters of the newest main commit>`. Database
     updates (new migrations) run by themselves at start-up.
     If the build number is old (2026-10-25: the site was still on #34 after #35–#43 merged):
     - Deployments shows a red **Failed** deploy → open it, copy the end of **Build Logs** or **Deploy Logs** to Claude.
