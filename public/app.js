@@ -153,6 +153,28 @@ const TAB_PERMS = {
 // Tabs that need a feature of the company's plan (src/core/plans.js on the server).
 const TAB_FEATURE = { payroll: 'payroll', time: 'timesheets' };
 
+// Home page cards (Homer, 2026-10-25): shortcuts to the common jobs, next to "Record a transaction", that each person
+// adds, removes and moves (kept per person per company: /home-layout). `perms`: any one of them shows the card;
+// `feature`: the plan must include it. `go` runs on a press. The server keeps only the ids; an unknown id is skipped.
+const HOME_CARDS = [
+  { id: 'stats', icon: '📊', title: 'Statistics', hint: 'Income, expenses and cash, month by month', perms: ['view_books'] },
+  { id: 'invoice', icon: '🧾', title: 'New invoice', hint: 'Bill a customer', perms: ['invoices'], go: { tab: 'sales', then: 'newDoc' } },
+  { id: 'paid', icon: '💵', title: 'Customer paid', hint: 'Record a payment received', perms: ['invoices'], go: { tab: 'sales', then: 'startPay' } },
+  { id: 'bill', icon: '📄', title: 'Enter a bill', hint: 'Something you owe a vendor', perms: ['bills'], go: { tab: 'bills', then: 'newDoc' } },
+  { id: 'paybill', icon: '💸', title: 'Pay a bill', hint: 'Record a bill payment', perms: ['bills'], go: { tab: 'bills', then: 'startPay' } },
+  { id: 'bank', icon: '🏦', title: 'Banking', hint: 'Review imported bank transactions', perms: ['view_books'], go: { tab: 'bank' } },
+  { id: 'trip', icon: '✈️', title: 'New trip', hint: 'Costs and travel time for a trip', perms: ['bills'], go: { tab: 'trips', then: 'newTrip' } },
+  { id: 'mileiq', icon: '🚗', title: 'Import from MileIQ', hint: "Your monthly drive report", perms: ['bills'], go: { tab: 'trips', then: 'openMileIq' } },
+  { id: 'time', icon: '⏱️', title: 'Timesheet', hint: 'Enter or approve hours', perms: ['time_own', 'time_approve', 'time_all'], feature: 'timesheets', go: { tab: 'time' } },
+  { id: 'payroll', icon: '💼', title: 'Payroll', hint: 'Run paychecks', perms: ['payroll'], feature: 'payroll', go: { tab: 'payroll' } },
+  { id: 'pnl', icon: '📈', title: 'Profit & Loss', hint: 'This year so far', perms: ['view_books'], go: { tab: 'reports', report: 'income-statement' } },
+  { id: 'balance', icon: '⚖️', title: 'Balance Sheet', hint: 'What you own and owe today', perms: ['view_books'], go: { tab: 'reports', report: 'balance-sheet' } },
+  { id: 'journal', icon: '📒', title: 'Transactions', hint: 'Search everything recorded', perms: ['view_books'], go: { tab: 'journal' } },
+  { id: 'entry', icon: '✍️', title: 'Journal entry', hint: 'Debits and credits by hand', perms: ['post'], go: { tab: 'journal', then: 'openJE' } },
+  { id: 'backup', icon: '💾', title: 'Back up your books', hint: 'Download the .zacc book file', perms: ['admin'], go: { tab: 'settings', then: 'scrollToBackup' } },
+];
+const DEFAULT_HOME = { left: ['stats'], right: ['invoice', 'paid', 'bill', 'bank', 'trip', 'pnl'] };
+
 /** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
 function weekStartOf(iso) {
   const d = new Date(`${iso}T00:00:00Z`);
@@ -201,6 +223,7 @@ createApp({
       setup: { step: 1, status: null, entityType: '', booksStartDate: '', books: 'fresh', fromImport: false,
         newAcct: { name: '', kind: 'bank' }, balances: {}, busy: false },
       entityTypes: ENTITY_TYPES,
+      home: { layout: null, editing: false, view: 'cards', stats: null, adding: '' },
       accounts: [], dash: null, entries: [], entriesTotal: 0, search: blankSearch(), recurring: [], showRecurring: false, booksCheck: null,
       quick: { kind: 'out', date: today(), memo: '', amount: '', bank: '', other: '', key: newKey() },
       showJE: false, je: { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] },
@@ -620,7 +643,80 @@ createApp({
     async loadDash() {
       if (!this.companyId) return;
       this.dash = await this.run(() => api('GET', `/companies/${this.companyId}/reports/dashboard?asOf=${today()}`));
+      const saved = await api('GET', `/companies/${this.companyId}/home-layout`).catch(() => null);
+      this.home.layout = saved?.layout ?? structuredClone(DEFAULT_HOME);
+      this.home.view = 'cards';
+      if (this.homeCards('left').concat(this.homeCards('right')).some((c) => c.id === 'stats')) this.loadStats();
       if (this.can('admin')) this.setup.status = await api('GET', `/companies/${this.companyId}/setup`).catch(() => null);
+    },
+    // ---------------------------------------------------------------- Home cards and Statistics
+    homeCardOk(c) { return c && c.perms.some((p) => this.can(p)) && (!c.feature || this.has(c.feature)); },
+    /** The cards in one column (left: under Record a transaction; right: beside it) this person can use. */
+    homeCards(side) { return (this.home.layout?.[side] ?? []).map((id) => HOME_CARDS.find((c) => c.id === id)).filter((c) => this.homeCardOk(c)); },
+    homeUnused() {
+      const used = new Set([...(this.home.layout?.left ?? []), ...(this.home.layout?.right ?? [])]);
+      return HOME_CARDS.filter((c) => !used.has(c.id) && this.homeCardOk(c));
+    },
+    async saveHome() {
+      await this.run(() => api('PUT', `/companies/${this.companyId}/home-layout`, this.home.layout));
+    },
+    /** Move a card: dir -1 up/left in its list, +1 down/right; 'other' to the other column. */
+    moveHomeCard(side, id, dir) {
+      const L = this.home.layout;
+      const list = L[side];
+      const i = list.indexOf(id);
+      if (i < 0) return;
+      if (dir === 'other') { list.splice(i, 1); L[side === 'left' ? 'right' : 'left'].push(id); }
+      else {
+        const j = i + dir;
+        if (j < 0 || j >= list.length) return;
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      this.saveHome();
+    },
+    removeHomeCard(side, id) { this.home.layout[side] = this.home.layout[side].filter((x) => x !== id); this.saveHome(); },
+    addHomeCard() {
+      const id = this.home.adding;
+      if (!id) return;
+      this.home.layout.right.push(id); this.home.adding = '';
+      if (id === 'stats') this.loadStats();
+      this.saveHome();
+    },
+    resetHome() { this.home.layout = structuredClone(DEFAULT_HOME); this.loadStats(); this.saveHome(); },
+    // Drag and drop on a desk computer (the arrows do the same on a phone).
+    homeDragStart(ev, side, id) { ev.dataTransfer.setData('text/plain', JSON.stringify({ side, id })); ev.dataTransfer.effectAllowed = 'move'; },
+    homeDrop(ev, side, beforeId = null) {
+      let from;
+      try { from = JSON.parse(ev.dataTransfer.getData('text/plain')); } catch { return; }
+      const L = this.home.layout;
+      if (!from?.id || !L[from.side]?.includes(from.id) || from.id === beforeId) return;
+      L[from.side] = L[from.side].filter((x) => x !== from.id);
+      const at = beforeId ? L[side].indexOf(beforeId) : -1;
+      if (at < 0) L[side].push(from.id); else L[side].splice(at, 0, from.id);
+      this.saveHome();
+    },
+    async pressHomeCard(c) {
+      if (this.home.editing) return;
+      if (c.id === 'stats') { this.home.view = 'stats'; if (!this.home.stats) await this.loadStats(); return; }
+      const g = c.go;
+      if (g.report) { this.report.type = g.report; this.report.data = null; }
+      this.tab = g.tab;
+      await this.$nextTick();
+      if (g.then) await this[g.then]();
+    },
+    openJE() { this.showJE = true; },
+    openMileIq() { this.$nextTick(() => { const d = document.querySelector('details.mileiq'); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth' }); } }); },
+    scrollToBackup() { this.$nextTick(() => document.querySelector('.backup-card')?.scrollIntoView({ behavior: 'smooth' })); },
+    async loadStats() { this.home.stats = await this.run(() => api('GET', `/companies/${this.companyId}/reports/statistics?asOf=${today()}`)); },
+    /** "2026-10" → "Oct" (or "Oct 2026" with year). */
+    monthLabel(ym, year = false) {
+      const d = new Date(`${ym}-15T12:00:00`);
+      return d.toLocaleString('en-US', year ? { month: 'short', year: 'numeric' } : { month: 'short' });
+    },
+    /** Bar height in percent of the tallest value in the list (0 stays 0; anything above 0 shows at least a sliver). */
+    barPct(v, list) {
+      const max = Math.max(1, ...list.map((x) => Math.abs(x)));
+      return v ? Math.max(2, Math.round((Math.abs(v) / max) * 100)) : 0;
     },
     // ---------------------------------------------------------------- New-company setup wizard
     async loadSetup() {

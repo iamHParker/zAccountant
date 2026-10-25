@@ -22,7 +22,7 @@ import { chartRows, journalRows } from './backupService.js';
 
 export const FORMAT_VERSION = 1;
 // Not company records, or secrets: left out of the book file.
-const SKIP_TABLES = new Set(['road_keys', 'road_items', 'road_photos', 'feedback_reports', 'company_plans', 'plan_changes']);
+const SKIP_TABLES = new Set(['road_keys', 'road_items', 'road_photos', 'feedback_reports', 'company_plans', 'plan_changes', 'home_layouts']);
 const SKIP_COLUMNS = new Set(['ssn_enc', 'token_hash', 'totp_secret_enc', 'recovery_codes', 'password_hash']);
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const usDate = (iso) => { const [y, m, d] = String(iso).slice(0, 10).split('-'); return `${m}/${d}/${y}`; };

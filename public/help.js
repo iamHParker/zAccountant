@@ -22,6 +22,19 @@ so the books always balance. You don't need to know debits and credits for every
 "✓ Your books are in balance" is checked every time the page loads, and the full books check runs every night.</p>`,
   },
   {
+    id: 'home-cards', tab: 'home', title: 'Home cards and Statistics',
+    words: 'home cards shortcuts arrange move add remove drag statistics chart graph month income expenses cash dashboard',
+    html: `
+<p>The cards beside <em>Record a transaction</em> are shortcuts: press one to go straight to that job.</p>
+<ol>
+  <li><strong>Arrange cards</strong>, then <strong>Add a card</strong> from the list, or press <strong>✕</strong> on one to remove it.</li>
+  <li>Drag a card to move it, or use its arrows; <strong>→ column</strong> / <strong>← column</strong> moves it to the other side.</li>
+  <li><strong>Done arranging</strong>. Your cards are yours alone and follow you to your phone.</li>
+</ol>
+<p>The <strong>Statistics</strong> card opens 12 months of income and expenses, cash at each month's end, this year's largest expenses,
+and what customers owe you and you owe vendors. <strong>Show the numbers</strong> gives the table.</p>`,
+  },
+  {
     id: 'journal', tab: 'journal', title: 'Recording transactions',
     words: 'money in money out transfer journal entry debit credit reverse recurring search',
     html: `
