@@ -17,8 +17,8 @@ The ledger design itself is sound: nothing that holds posted history is changed 
 | Batch | Items | CPA: before alpha? |
 |---|---|---|
 | 1 (small fixes) ✓ PR 52 | B1-B4, B6; rename departments; rename passkeys | yes |
-| 2 (master data) | company name, fiscal-year start (state: block once payroll ran); account deactivate/delete-if-unused and re-classify; recurring entry edit + restart; bank rule edit; employee address | yes (except state, re-classify, bank rule) |
-| 3 (employees) | store details on each paycheck (B5), then edit employee (pay rate, W-4, state elections, name), terminate/rehire | yes |
+| 2 (master data) ✓ PR 53 | company name, fiscal-year start (state: block once payroll ran); account turn off (no delete: history must keep adding up) and re-classify; recurring entry edit + restart; bank rule edit (employee address moved to batch 3) | yes (except state, re-classify, bank rule) |
+| 3 (employees) | employee address; store details on each paycheck (B5), then edit employee (pay rate, W-4, state elections, name), terminate/rehire | yes |
 | 4 (ledger corrections) | journal entry Edit = reverse + corrected copy; fix memo/due date/PO on a paid invoice; void a whole payroll run and re-run the period; undo the latest reconciliation; undo a bank statement import | yes |
 | 5 (security) | change password (current password + 2FA), password reset, change name/email | password change yes |
 | Later | prior-year paycheck correction (W-2c), one-click bank re-categorize, deposit edit, restore dismissed road item, withdraw feedback | nice to have |

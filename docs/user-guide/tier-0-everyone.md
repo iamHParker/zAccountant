@@ -51,7 +51,7 @@ company**.
 | Accounts | chart of accounts, account registers, importing from QuickBooks or Excel | 1 |
 | Payroll | employees, payroll runs, pay stubs, payroll taxes | 2 |
 | Time | timesheets and approvals | 3 |
-| Settings | people and roles, invoice letterhead and rates, closing the books, audit trail, payroll settings | 1, 2 |
+| Settings | company name and fiscal year, people and roles, invoice letterhead and rates, closing the books, audit trail, payroll settings | 1, 2 |
 
 You see only the tabs your role and your company's plan include.
 

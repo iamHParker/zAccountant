@@ -17,17 +17,17 @@ export async function grantRuntimeRole(pool, role) {
                     company_logos, invoice_items, account_tax_categories, payment_photos, trips, trip_jobs, trip_costs, trip_cost_photos,
                     passkeys, auth_challenges, road_keys, road_items, road_photos, mileage_drives, home_layouts TO ${role};
     GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount, futa_credit_reduction, default_sales_tax_rate,
-                  invoice_address, invoice_note, invoice_footer, entity_type, books_start_date, setup_done) ON companies TO ${role};
+                  invoice_address, invoice_note, invoice_footer, entity_type, books_start_date, setup_done, name, home_state, fiscal_year_start_month) ON companies TO ${role};
     GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash) ON users TO ${role};
     GRANT UPDATE (mfa_passed, last_seen_at, expires_at) ON sessions TO ${role};
-    GRANT UPDATE (posted_count, next_date, is_active, last_error) ON recurring_entries TO ${role};
+    GRANT UPDATE (posted_count, next_date, is_active, last_error, name, memo, lines, end_date) ON recurring_entries TO ${role};
     GRANT UPDATE (status, suggested_account_id, rule_id, journal_entry_id, note, reviewed_by, reviewed_at) ON bank_transactions TO ${role};
-    GRANT UPDATE (is_active) ON bank_rules TO ${role};
+    GRANT UPDATE (is_active, match_text, direction, min_cents, max_cents, account_id, priority) ON bank_rules TO ${role};
     GRANT UPDATE (status, completed_by, completed_at) ON reconciliations TO ${role};
     GRANT DELETE ON reconciliations, reconciliation_lines TO ${role};
     GRANT UPDATE (status, undone_by, undone_at) ON import_batches TO ${role};
     GRANT UPDATE (name, email, phone, address, terms_days, is_1099, is_active, group_name, people) ON contacts TO ${role};
-    GRANT UPDATE (name) ON accounts TO ${role};
+    GRANT UPDATE (name, subtype, cash_flow, is_active) ON accounts TO ${role};
     GRANT UPDATE (name) ON departments TO ${role};
     GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at, replaced_by_id) ON documents, payments TO ${role};
     GRANT DELETE ON sessions TO ${role};

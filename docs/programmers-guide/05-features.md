@@ -172,3 +172,14 @@ reversal or void + corrected copy, master data is edited in place with an audit 
 posted or matched to (Banking's Undo passes `bankLineOk`). `reverseEntry` calls it; paycheck and deposit voids call it
 directly. A trip project that has billed keeps its share (`tripService.updateTrip`).
 
+Batch 2 (master data, all audited from/to, all through column grants in `src/db/grant.js`):
+- `ledgerService.updateCompanyProfile` (`PATCH …/profile`, admin): name; home state refused once any paycheck exists;
+  fiscal-year start refused while `locked_through` is set.
+- `ledgerService.updateAccount` (`PATCH …/accounts/:id`, accounts): `subtype` within the type, never on system accounts,
+  never from bank-like to not once bank lines or reconciliations exist; `isActive: false` needs a $0 balance and no
+  bank rule, recurring entry (`lines @>` the account id) or invoice item using it. No hard delete, by design.
+- `ledgerService.updateRecurring` (`PUT …/recurring/:id`, post): name, memo, lines, end date, `restart`. Start date and
+  frequency are fixed, so `next_date` is recomputed with `nextOccurrence(…, posted_count)`; nothing posted changes.
+- `bankService.updateRule` (`PUT …/bank-rules/:id`, post): same checks as `createRule`.
+Tests: `test/edits.db.test.js` (HTTP, restricted runtime role).
+

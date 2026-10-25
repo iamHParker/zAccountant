@@ -63,7 +63,9 @@ change anything yet.
   An entry the bank already agrees with (posted or matched in Banking, or ticked in a reconciliation) can't be reversed
   here: undo it in Banking first; a reconciled one stays as it is.
 - **Recurring entries** (rent, a loan payment): tick "repeat" on a journal entry. Entries that are due post each
-  night, or press **Post due entries now**.
+  night, or press **Post due entries now**. **edit** changes the name, memo, accounts, amounts or end date from the next
+  date on (rent went up in July: change it in June); entries already posted stay as they were. **stop** ends it;
+  **restart** picks it up again at its next date. To change the start date or how often, stop it and start a new one.
 - **Search** by words, dates, account, an amount range, or where the entry came from (bank, invoice, payroll…).
 
 ## 4. Sales: invoices and getting paid
@@ -262,7 +264,8 @@ address. **+ New project** adds one. To add many at once from your project folde
      counted twice.
    - **exclude**: not a real transaction. **undo** puts a line back.
 3. **Rules** suggest an account when the description contains certain words ("home depot" → Materials). You still
-   confirm each one.
+   confirm each one. **edit** changes a rule's words, direction, amount range or account; it affects suggestions from
+   then on, never lines already added.
 4. **Reconcile monthly:** enter the statement date and ending balance, tick every item on the statement, and press
    finish when the difference is $0.00. Reconciled items are locked.
 
@@ -298,6 +301,9 @@ report ties out" when its own check passes. If you ever see ⚠, please send a �
 
 ## 8. Settings
 
+- **Company** (owner): the company's name, home state and the month its fiscal year starts. The home state can't change
+  once a paycheck has been run (the payroll taxes already filed depend on it), and the fiscal-year start can't change
+  while any period is closed (reopen first). Each change is kept in the audit trail.
 - **People with access:** the person creates a zAccountant account first. Then add them by email and choose a
   role. **change** or **remove** them later.
 - **Roles:** five are built in. **+ New role** makes a custom mix, for example a project manager who sees reports and
@@ -329,7 +335,13 @@ report ties out" when its own check passes. If you ever see ⚠, please send a �
 - **Chart of accounts:** the list of buckets. **Add account** for a new bank account, credit card, vehicle, or an
   expense you want tracked separately. The type decides where it appears on the reports. Click an account to see
   its **register**: every transaction with a running balance. **Rename** (beside the account's name in the register)
-  changes only the name, e.g. *1000 Checking* → *Chase Checking 4321*; past transactions follow it.
+  changes only the name, e.g. *1000 Checking* → *Chase Checking 4321*; past transactions follow it. **Kind** moves it
+  within its type (an expense to *Cost of goods sold*, an asset to *Bank or cash account*); reports regroup at once.
+  Built-in accounts (Accounts Receivable, payroll liabilities…) keep their kind. An account with bank activity stays a
+  bank account.
+- **Turn off** an account you no longer use (a closed bank account): it leaves the pick lists but keeps its history in
+  every report. It must be at $0.00 first, and no bank rule, recurring entry or invoice item may still use it (the
+  message says which). **Turn back on** reverses it. Accounts are never deleted, so old reports always add up.
 - **More than one checking or savings account:** the standard chart has 1000 Checking and 1010 Savings. Rename those to
   your bank names, then **Add account** for each other one: number 1020, 1030… (any free number from 1010 to 1099),
   type *Asset*, kind *Bank or cash account*. Each then appears in Banking, Record a transaction and the "paid from" lists.

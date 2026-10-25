@@ -162,6 +162,63 @@ export async function renameAccount(pool, companyId, accountId, { name, actor = 
   });
 }
 
+const BANKLIKE = new Set(['bank', 'cash', 'credit_card']);
+
+/**
+ * Change an account's kind (subtype, within its type) or turn it off / back on (CPA review G6/G7).
+ * - Kind: changes how reports group it (and its cash-flow section), never a balance. Not for the built-in accounts, and an
+ *   account with bank statements or reconciliations stays a bank/card account.
+ * - Off: only at a $0.00 balance, never a built-in account, and not while a bank rule, an active recurring entry or an
+ *   invoice item still uses it. Its history stays; it just isn't offered for new entries.
+ * The number and type never change once created.
+ */
+export async function updateAccount(pool, companyId, accountId, { subtype, isActive, actor = null }) {
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows: [a] } = await c.query('SELECT * FROM accounts WHERE company_id = $1 AND id::text = $2 FOR UPDATE', [companyId, String(accountId)]);
+    if (!a) throw new LedgerError('Account not found');
+    const errors = [];
+    const change = {};
+    if (subtype !== undefined && subtype !== a.subtype) {
+      const allowed = ACCOUNT_SUBTYPES[a.type] ?? {};
+      if (!Object.hasOwn(allowed, subtype)) errors.push(`kind for ${a.type} must be one of ${Object.keys(allowed).join(', ')}`);
+      else if (a.system_key) errors.push(`${a.name} is a built-in account; its kind can't change`);
+      else {
+        if (BANKLIKE.has(a.subtype) !== BANKLIKE.has(subtype)) {
+          const { rows: [used] } = await c.query(
+            `SELECT EXISTS (SELECT 1 FROM bank_transactions WHERE company_id = $1 AND bank_account_id = $2)
+                 OR EXISTS (SELECT 1 FROM reconciliations WHERE company_id = $1 AND bank_account_id = $2) AS used`, [companyId, a.id]);
+          if (used.used) errors.push('this account has bank statements or reconciliations, so it stays a bank or card account');
+        }
+        change.subtype = subtype; change.cash_flow = allowed[subtype];
+      }
+    }
+    if (isActive !== undefined && typeof isActive !== 'boolean') errors.push('isActive must be true or false');
+    else if (isActive === false && a.is_active) {
+      if (a.system_key) errors.push(`${a.name} is a built-in account and can't be turned off`);
+      const { rows: [bal] } = await c.query('SELECT coalesce(sum(debit_cents - credit_cents), 0)::bigint AS cents FROM journal_lines WHERE company_id = $1 AND account_id = $2', [companyId, a.id]);
+      if (Number(bal.cents) !== 0) errors.push(`the balance is ${Number(bal.cents) < 0 ? '-' : ''}$${(Math.abs(Number(bal.cents)) / 100).toFixed(2)}; move it to another account first (a journal entry), then turn this one off`);
+      const { rows: [use] } = await c.query(
+        `SELECT (SELECT count(*)::int FROM bank_rules WHERE company_id = $1 AND account_id = $2 AND is_active) AS rules,
+                (SELECT count(*)::int FROM recurring_entries WHERE company_id = $1 AND is_active AND next_date IS NOT NULL AND lines @> jsonb_build_array(jsonb_build_object('accountId', $2::text))) AS recurring,
+                (SELECT count(*)::int FROM invoice_items WHERE company_id = $1 AND account_id = $2 AND is_active) AS items`, [companyId, a.id]);
+      if (use.rules) errors.push(`${use.rules} bank rule(s) suggest this account; change or remove them first (Banking → Rules)`);
+      if (use.recurring) errors.push(`${use.recurring} recurring entr${use.recurring === 1 ? 'y uses' : 'ies use'} this account; change or stop them first (Transactions)`);
+      if (use.items) errors.push(`${use.items} invoice item(s) post to this account; change or hide them first (Settings)`);
+      change.is_active = false;
+    } else if (isActive === true && !a.is_active) change.is_active = true;
+    if (errors.length) throw new LedgerError('Account is not valid', errors);
+    if (!Object.keys(change).length) return accountOut(a);
+    const cols = Object.keys(change);
+    const { rows: [out] } = await c.query(
+      `UPDATE accounts SET ${cols.map((k, i) => `${k} = $${i + 3}`).join(', ')} WHERE company_id = $1 AND id = $2 RETURNING *`, [companyId, a.id, ...cols.map((k) => change[k])]);
+    await appendAudit(c, companyId, { action: 'update', entity: 'account', entityId: a.id, actor,
+      payload: { code: a.code, ...Object.fromEntries(cols.map((k) => [k, { from: a[k], to: change[k] }])) } });
+    return accountOut(out);
+  });
+}
+const accountOut = (a) => ({ id: a.id, code: a.code, name: a.name, type: a.type, subtype: a.subtype, cashFlow: a.cash_flow, key: a.system_key, isActive: a.is_active });
+
 const addDays = (date, n) => {
   const d = new Date(date + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
@@ -373,8 +430,18 @@ const recurringOut = (r) => ({
 /**
  * Save a recurring entry template. It is checked exactly like a real entry (balanced, real accounts),
  * and posts automatically each night on its dates — or right away with "Post due entries".
- * Templates can't be edited (that would blur the audit trail): stop one and create a new one.
+ * Later changes (amount, accounts, memo, name, end date) apply to the next occurrences only: updateRecurring.
  */
+async function checkRecurringAccounts(c, companyId, entry) {
+  const ids = [...new Set(entry.lines.map((l) => l.accountId))];
+  const { rows: accts } = await c.query(
+    `SELECT id, system_key, is_active FROM accounts
+      WHERE company_id = $1 AND id = ANY(SELECT x::uuid FROM unnest($2::text[]) x WHERE x ~* '^[0-9a-f-]{36}$')`, [companyId, ids]);
+  if (accts.length !== ids.length || accts.some((a) => !a.is_active)) throw new LedgerError('Recurring entry is not valid', ['every line needs an active account of this company']);
+  if (accts.some((a) => a.system_key === 'retained_earnings')) throw new LedgerError('Recurring entry is not valid', ['Retained Earnings is calculated automatically']);
+  if (accts.some((a) => CONTROL_KEYS[a.system_key])) throw new LedgerError('Recurring entry is not valid', [controlMessage(accts)]);
+}
+
 export async function createRecurring(pool, companyId, { name, frequency, startDate, endDate = null, memo, lines, actor = null }) {
   const errors = [];
   if (typeof name !== 'string' || !name.trim() || name.trim().length > 100) errors.push('name is required (up to 100 characters)');
@@ -386,13 +453,7 @@ export async function createRecurring(pool, companyId, { name, frequency, startD
   return withTransaction(pool, async (c) => {
     const co = await lockCompany(c, companyId);
     if (co.locked_through && startDate <= co.locked_through) throw new LedgerError('Recurring entry is not valid', [`start date must be after ${co.locked_through} (books are closed through then)`]);
-    const ids = [...new Set(entry.lines.map((l) => l.accountId))];
-    const { rows: accts } = await c.query(
-      `SELECT id, system_key, is_active FROM accounts
-        WHERE company_id = $1 AND id = ANY(SELECT x::uuid FROM unnest($2::text[]) x WHERE x ~* '^[0-9a-f-]{36}$')`, [companyId, ids]);
-    if (accts.length !== ids.length || accts.some((a) => !a.is_active)) throw new LedgerError('Recurring entry is not valid', ['every line needs an active account of this company']);
-    if (accts.some((a) => a.system_key === 'retained_earnings')) throw new LedgerError('Recurring entry is not valid', ['Retained Earnings is calculated automatically']);
-    if (accts.some((a) => CONTROL_KEYS[a.system_key])) throw new LedgerError('Recurring entry is not valid', [controlMessage(accts)]);
+    await checkRecurringAccounts(c, companyId, entry);
     const { rows: [r] } = await c.query(
       `INSERT INTO recurring_entries (company_id, name, frequency, start_date, end_date, memo, lines, next_date, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$4,$8) RETURNING *`,
@@ -416,6 +477,37 @@ export async function stopRecurring(pool, companyId, recurringId, { actor = null
     if (!r) throw new LedgerError('Recurring entry not found');
     await appendAudit(c, companyId, { action: 'stop', entity: 'recurring_entry', entityId: r.id, actor, payload: { name: r.name } });
     return recurringOut(r);
+  });
+}
+
+/**
+ * Change a recurring entry from its next occurrence on (CPA review G9: rent goes up). Entries already posted stay as they
+ * are. The start date and how often stay fixed: the occurrence numbers (and so the keys that stop double posting) follow
+ * them. A new end date can finish the template early. `restart: true` turns a stopped one back on.
+ */
+export async function updateRecurring(pool, companyId, recurringId, { name, memo, lines, endDate, restart = false, actor = null }) {
+  return withTransaction(pool, async (c) => {
+    const co = await lockCompany(c, companyId);
+    const { rows: [r] } = await c.query('SELECT * FROM recurring_entries WHERE company_id = $1 AND id::text = $2 FOR UPDATE', [companyId, String(recurringId)]);
+    if (!r) throw new LedgerError('Recurring entry not found');
+    const errors = [];
+    if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 100)) errors.push('name is required (up to 100 characters)');
+    const end = endDate === undefined ? r.end_date : (endDate || null);
+    if (end && (!isIsoDate(end) || end < r.start_date)) errors.push(`end date must be a real date on or after the start date (${r.start_date})`);
+    if (errors.length) throw new LedgerError('Recurring entry is not valid', errors);
+    const entry = validateEntry({ date: r.next_date ?? r.start_date, memo: memo === undefined ? r.memo : memo, lines: lines === undefined ? r.lines : lines });
+    if (lines !== undefined) await checkRecurringAccounts(c, companyId, entry);
+    const next = nextOccurrence({ startDate: r.start_date, frequency: r.frequency, endDate: end }, r.posted_count);
+    const active = restart ? true : r.is_active;
+    if (restart && !next) throw new LedgerError('Recurring entry is not valid', ['it has no dates left; choose a later end date to restart it']);
+    if (restart && next && co.locked_through && next <= co.locked_through) throw new LedgerError('Recurring entry is not valid', [`its next date ${next} is in closed books (through ${co.locked_through})`]);
+    const { rows: [out] } = await c.query(
+      `UPDATE recurring_entries SET name = $3, memo = $4, lines = $5, end_date = $6, next_date = $7, is_active = $8, last_error = CASE WHEN $8 THEN NULL ELSE last_error END
+        WHERE company_id = $1 AND id = $2 RETURNING *`,
+      [companyId, r.id, name === undefined ? r.name : name.trim(), entry.memo, JSON.stringify(entry.lines), end, next, active]);
+    await appendAudit(c, companyId, { action: restart ? 'restart' : 'update', entity: 'recurring_entry', entityId: r.id, actor,
+      payload: { from: { name: r.name, memo: r.memo, lines: r.lines, endDate: r.end_date, isActive: r.is_active }, to: { name: out.name, memo: out.memo, lines: entry.lines, endDate: end, isActive: active } } });
+    return recurringOut(out);
   });
 }
 
@@ -481,6 +573,41 @@ export async function lockPeriod(pool, companyId, { through, reason = null, acto
     await c.query('UPDATE companies SET locked_through = $2 WHERE id = $1', [companyId, through]);
     await appendAudit(c, companyId, { action: reopening ? 'reopen_period' : 'lock_period', entity: 'company', entityId: companyId, actor, payload: { from: co.locked_through, to: through, reason: reason ?? null } });
     return { lockedThrough: through };
+  });
+}
+
+/**
+ * Company name, home state and fiscal-year start (CPA review G4/G5). Audited with old and new values.
+ * The home state can't change once payroll has run (state unemployment and withholding were set up for it);
+ * the fiscal-year start can't change while any period is closed (closed years would be cut differently).
+ */
+export async function updateCompanyProfile(pool, companyId, { name, homeState, fiscalYearStartMonth, actor = null }) {
+  const errors = [];
+  if (name !== undefined && (typeof name !== 'string' || !name.trim() || name.trim().length > 100)) errors.push('name is required (up to 100 characters)');
+  if (homeState !== undefined && !['TX', 'CO', 'CA', 'DC'].includes(homeState)) errors.push('home state must be TX, CO, CA or DC');
+  const month = fiscalYearStartMonth === undefined ? undefined : Number(fiscalYearStartMonth);
+  if (month !== undefined && !(Number.isInteger(month) && month >= 1 && month <= 12)) errors.push('the fiscal year must start in a month from 1 to 12');
+  if (errors.length) throw new LedgerError('Company is not valid', errors);
+  return withTransaction(pool, async (c) => {
+    const co = await lockCompany(c, companyId);
+    const change = {};
+    if (name !== undefined && name.trim() !== co.name) change.name = name.trim();
+    if (homeState !== undefined && homeState !== co.home_state) {
+      const { rows: [pc] } = await c.query('SELECT 1 FROM paychecks WHERE company_id = $1 LIMIT 1', [companyId]);
+      if (pc) throw new LedgerError('Company is not valid', [`payroll has already run with ${co.home_state} as the home state, so it stays ${co.home_state}; ask us if the business really moved`]);
+      change.home_state = homeState;
+    }
+    if (month !== undefined && month !== co.fiscal_year_start_month) {
+      if (co.locked_through) throw new LedgerError('Company is not valid', [`the books are closed through ${co.locked_through}; reopen them before changing when the fiscal year starts`]);
+      change.fiscal_year_start_month = month;
+    }
+    if (!Object.keys(change).length) return getCompany(c, companyId);
+    const cols = Object.keys(change);
+    const { rows: [out] } = await c.query(
+      `UPDATE companies SET ${cols.map((k, i) => `${k} = $${i + 2}`).join(', ')} WHERE id = $1 RETURNING *`, [companyId, ...cols.map((k) => change[k])]);
+    await appendAudit(c, companyId, { action: 'update_profile', entity: 'company', entityId: companyId, actor,
+      payload: Object.fromEntries(cols.map((k) => [k, { from: co[k], to: change[k] }])) });
+    return out;
   });
 }
 

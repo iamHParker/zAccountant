@@ -245,6 +245,33 @@ export async function createRule(pool, companyId, { matchText, direction = 'any'
   });
 }
 
+/** Change a rule (CPA review G16). It only affects suggestions from now on; nothing already posted changes. */
+export async function updateRule(pool, companyId, ruleId, { matchText, direction = 'any', min, max, accountId, priority = 100, actor = null }) {
+  const errors = [];
+  if (typeof matchText !== 'string' || matchText.trim().length < 2 || matchText.trim().length > 100) errors.push('text to look for must be 2-100 characters');
+  if (!['in', 'out', 'any'].includes(direction)) errors.push('direction must be in, out or any');
+  const cents = (v, label) => {
+    if (v == null || v === '') return null;
+    try { const n = toCents(String(v)); if (n < 0) throw new Error(); return n; } catch { errors.push(`${label} must be a dollar amount`); return null; }
+  };
+  const minCents = cents(min, 'minimum');
+  const maxCents = cents(max, 'maximum');
+  if (!Number.isInteger(priority) || priority < 0 || priority > 10000) errors.push('priority must be a whole number');
+  if (errors.length) throw new LedgerError('Rule is not valid', errors);
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows: [old] } = await c.query('SELECT * FROM bank_rules WHERE company_id = $1 AND id::text = $2 AND is_active FOR UPDATE', [companyId, String(ruleId)]);
+    if (!old) throw new LedgerError('Rule not found');
+    const { rows: [a] } = await c.query('SELECT id, system_key, is_active FROM accounts WHERE company_id = $1 AND id::text = $2', [companyId, String(accountId)]);
+    if (!a || !a.is_active || a.system_key === 'retained_earnings') throw new LedgerError('Rule is not valid', ['choose an active account']);
+    const { rows: [r] } = await c.query(
+      `UPDATE bank_rules SET match_text = $3, direction = $4, min_cents = $5, max_cents = $6, account_id = $7, priority = $8
+        WHERE company_id = $1 AND id = $2 RETURNING *`, [companyId, old.id, matchText.trim(), direction, minCents, maxCents, a.id, priority]);
+    await appendAudit(c, companyId, { action: 'update', entity: 'bank_rule', entityId: r.id, actor, payload: { from: ruleOut(old), to: ruleOut(r) } });
+    return ruleOut(r);
+  });
+}
+
 export async function deleteRule(pool, companyId, ruleId, { actor = null } = {}) {
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
