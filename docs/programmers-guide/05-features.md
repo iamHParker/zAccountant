@@ -35,6 +35,11 @@ lines, customers, employees, timesheets) and line memos are not in it. Alpha use
   `PUT …/payments/:id`, permission `post`) does both in one transaction: `replaceDocument` / `replacePayment` void the
   old record with `replaced_by_id` set to the new id, then post the copy (an invoice keeps its number; the number index
   skips replaced invoices). Migration 020.
+- Divisions and adjusters (migration 022): `contacts.group_name` ("Part of"; `getAging` returns `groups` totals) and
+  `contacts.people` (jsonb `[{name,email,phone}]`, ≤ 50, checked by `cleanPeople`). Invoices carry `attention`,
+  `send_to`, `client_ref` (claim/job number), set at save like every document field. A typed invoice number already in
+  use becomes the next lettered one (`nextLetteredNumber`: 2601 → 2601A … Z, AA …), returned as `numberWasTaken`; an
+  automatic number never gets a letter. The ✉ Email button is a `mailto:` link built in the browser.
 - Payment photos (migration 021, `src/services/paymentPhotoService.js`): `payment_photos` (bytea ≤ 3 MB, JPEG/PNG,
   6 per payment), routes `…/payments/:id/photos[/:photoId]` (add/remove: the side's permission; view: view_books or the
   side). The browser shrinks each photo to 2000 px (`pictureFromFile`); the form's file inputs use

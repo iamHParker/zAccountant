@@ -87,6 +87,10 @@ export function agingRows(d, { company, title }) {
     }
   }
   rows.push(['Total', '', '', '', '', ...d.buckets.map((b) => amt(d.totals[b.id])), amt(d.totals.totalCents)]);
+  if (d.groups?.length) {
+    rows.push([], ['Totals by group (Part of)']);
+    for (const g of d.groups) rows.push([g.name, '', '', '', '', ...d.buckets.map((b) => amt(g[b.id])), amt(g.totalCents)]);
+  }
   return rows;
 }
 

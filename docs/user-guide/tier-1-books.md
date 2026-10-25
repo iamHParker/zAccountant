@@ -56,11 +56,23 @@ To change a customer's details, open the **Customers** tab and press **edit** on
 filled in; change what you need and press **Save changes**. Invoices already written keep their numbers and amounts,
 but they show the new name and address when you open or print them. Vendors work the same way under Bills → Vendors.
 
+**A customer with divisions** (for example DWH in San Antonio and Austin): add one customer per division, such as
+"DWH - SATX" and "DWH - AUS", each with its own address. Type the same name in **Part of** (DWH) on each. The aging
+report then shows each division and also a DWH total.
+
+**People** on a customer: the claims adjusters (or other contacts) you send invoices to, each with a name, email and
+phone. Press **+ Add person** to add one.
+
 ### Writing an invoice
 
 1. **+ New invoice**: choose the customer. Type an invoice number (your job number, such as 26-134), or leave it
    empty to get the next number automatically. Set the date.
-2. **Project** (optional): the project name and site address. They print beside Bill To.
+   If that number is already used, the invoice gets the next letter: typing 2601 a second time saves **2601A**,
+   then 2601B, and after 2601Z comes 2601AA. A message tells you the number it was saved under.
+2. **Attention**: pick the adjuster from the customer's people, and **Send to** fills in with their email. A name
+   you type that isn't saved yet gets a tick box, "Save … to DWH - SATX for next time". **Claim / job number** is
+   the client's own number; it prints in the box with the invoice number.
+   **Project** (optional): the project name and site address. They print beside Bill To.
 3. For each line:
    - **Rate or item:** pick one, and the rate, tax and income account fill in.
    - **Date:** the day the work was done or the cost was incurred.
@@ -80,6 +92,10 @@ but they show the new name and address when you open or print them. Vendors work
 **Print / Save PDF** prints the invoice with your logo, letterhead, Bill To, Project, invoice number, date, due
 date, terms, the lines (Hours, Date, Description, Rate, Tax, Amount), sales tax, total, payments and balance due.
 In the print window, choose "Save as PDF" to email it.
+
+**✉ Email** opens your computer's email program (Outlook, Mail…) with the Send to address, a subject (invoice
+number, claim number and project) and a short note filled in. Attach the PDF yourself; zAccountant doesn't send email
+itself yet. On Windows, the button opens whichever program is set under Settings → Apps → Default apps → "mailto".
 
 ### Getting paid
 

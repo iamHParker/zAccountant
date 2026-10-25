@@ -72,7 +72,32 @@ export function lineAmount(quantity, unitPriceCents) {
 const contactOut = (r) => ({
   id: r.id, kind: r.kind, name: r.name, email: r.email, phone: r.phone, address: r.address, termsDays: r.terms_days,
   is1099: r.is_1099, isActive: r.is_active, openCents: r.open_cents ?? 0, overdueCents: r.overdue_cents ?? 0,
+  groupName: r.group_name ?? null, people: r.people ?? [],
 });
+
+const MAX_PEOPLE = 50;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** A customer's people (claims adjusters and other contacts): [{ name, email, phone }], names unique. */
+function cleanPeople(raw, errors) {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) { errors.push('people must be a list'); return []; }
+  if (raw.length > MAX_PEOPLE) { errors.push(`at most ${MAX_PEOPLE} people`); return []; }
+  const seen = new Set();
+  const out = [];
+  raw.forEach((p, i) => {
+    const name = text(p?.name, 200);
+    const email = text(p?.email, 200);
+    const phone = text(p?.phone, 40);
+    if (!name && !email && !phone) return; // an empty row is ignored
+    if (!name || name.length > 120) { errors.push(`person ${i + 1}: a name is required (up to 120 characters)`); return; }
+    if (email && !EMAIL.test(email)) errors.push(`${name}: email address is not valid`);
+    if (seen.has(name.toLowerCase())) errors.push(`${name} is listed twice`);
+    seen.add(name.toLowerCase());
+    out.push({ name, email, phone });
+  });
+  return out;
+}
 
 function cleanContact(input, errors, partial = false) {
   const out = {};
@@ -81,7 +106,9 @@ function cleanContact(input, errors, partial = false) {
     if (!out.name || out.name.length > 120) errors.push('name is required (up to 120 characters)');
   }
   for (const [k, max] of [['email', 200], ['phone', 40], ['address', 500]]) if (!partial || input[k] !== undefined) out[k] = text(input[k], max);
-  if (out.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(out.email)) errors.push('email address is not valid');
+  if (out.email && !EMAIL.test(out.email)) errors.push('email address is not valid');
+  if (!partial || input.groupName !== undefined) out.groupName = text(input.groupName, 120);
+  if (!partial || input.people !== undefined) out.people = cleanPeople(input.people, errors);
   if (!partial || input.termsDays !== undefined) {
     out.termsDays = input.termsDays == null || input.termsDays === '' ? 30 : Number(input.termsDays);
     if (!Number.isInteger(out.termsDays) || out.termsDays < 0 || out.termsDays > 365) errors.push('payment terms must be 0-365 days');
@@ -107,9 +134,9 @@ export async function createContact(pool, companyId, { kind, actor = null, ...in
     await lockCompany(c, companyId);
     if (await nameTaken(c, companyId, kind, v.name)) throw new LedgerError(`There is already a ${kind} named "${v.name}"`);
     const { rows: [r] } = await c.query(
-      `INSERT INTO contacts (company_id, kind, name, email, phone, address, terms_days, is_1099, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [companyId, kind, v.name, v.email, v.phone, v.address, v.termsDays, v.is1099, actor]);
+      `INSERT INTO contacts (company_id, kind, name, email, phone, address, terms_days, is_1099, group_name, people, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [companyId, kind, v.name, v.email, v.phone, v.address, v.termsDays, v.is1099, v.groupName, JSON.stringify(v.people), actor]);
     await appendAudit(c, companyId, { action: 'create', entity: kind, entityId: r.id, actor, payload: v });
     return contactOut(r);
   });
@@ -126,9 +153,9 @@ export async function updateContact(pool, companyId, contactId, { actor = null, 
     if (!old) throw new LedgerError('Contact not found');
     if (v.name && await nameTaken(c, companyId, old.kind, v.name, old.id)) throw new LedgerError(`There is already a ${old.kind} named "${v.name}"`);
     if (old.kind === 'customer' && v.is1099) throw new LedgerError('1099 applies to vendors only');
-    const cols = { name: 'name', email: 'email', phone: 'phone', address: 'address', termsDays: 'terms_days', is1099: 'is_1099', isActive: 'is_active' };
+    const cols = { name: 'name', email: 'email', phone: 'phone', address: 'address', termsDays: 'terms_days', is1099: 'is_1099', isActive: 'is_active', groupName: 'group_name', people: 'people' };
     const sets = []; const vals = [companyId, contactId];
-    for (const [k, col] of Object.entries(cols)) if (v[k] !== undefined) { vals.push(v[k]); sets.push(`${col} = $${vals.length}`); }
+    for (const [k, col] of Object.entries(cols)) if (v[k] !== undefined) { vals.push(k === 'people' ? JSON.stringify(v[k]) : v[k]); sets.push(`${col} = $${vals.length}`); }
     if (!sets.length) return contactOut(old);
     const { rows: [r] } = await c.query(`UPDATE contacts SET ${sets.join(', ')} WHERE company_id = $1 AND id = $2 RETURNING *`, vals);
     await appendAudit(c, companyId, { action: 'update', entity: old.kind, entityId: old.id, actor, payload: v });
@@ -174,9 +201,25 @@ const docOut = (d, today) => {
     id: d.id, kind: d.kind, contactId: d.contact_id, contactName: d.contact_name, number: d.number, date: d.doc_date, dueDate: d.due_date,
     memo: d.memo, project: d.project ?? null, subtotalCents: d.subtotal_cents, taxRate: d.tax_rate, taxCents: d.tax_cents, totalCents: d.total_cents,
     paidCents: paid, balanceCents: balance, status, voidDate: d.void_date, journalEntryId: d.journal_entry_id, entryNumber: d.entry_number ?? null,
-    replacedById: d.replaced_by_id ?? null,
+    replacedById: d.replaced_by_id ?? null, attention: d.attention ?? null, sendTo: d.send_to ?? null, clientRef: d.client_ref ?? null,
   };
 };
+
+/**
+ * The invoice number to use when the one typed is already taken: Homer uses a project number as the invoice
+ * number, and a second invoice on the same project becomes 2601A, then 2601B … Z, AA … AZ, BA … (the column
+ * letters of a spreadsheet). taken holds the numbers already used, in lower case.
+ */
+export function nextLetteredNumber(base, taken) {
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let n = 1; n <= 18278; n++) { // up to ZZZ
+    let k = n; let suffix = '';
+    while (k > 0) { k -= 1; suffix = String.fromCharCode(65 + (k % 26)) + suffix; k = Math.floor(k / 26); }
+    const candidate = base + suffix;
+    if (candidate.length <= 40 && !taken.has(candidate.toLowerCase())) return candidate;
+  }
+  return null;
+}
 
 const DOC_SELECT = `
   SELECT d.*, ct.name AS contact_name, e.entry_number,
@@ -222,7 +265,7 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
 }
 
 /** Create and post an invoice (kind 'invoice') or a bill (kind 'bill'). */
-export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
+export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, taxRate, lines, attention, sendTo, clientRef, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
   const side = SIDE[kind];
   if (!side) throw new LedgerError('kind must be invoice or bill');
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
@@ -240,6 +283,11 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     let projectText = null;
     try { projectText = blockText(project, 300, 'project'); } catch (e) { errors.push(e.message.replace(/^Keep/, 'keep')); }
     if (projectText && kind !== 'invoice') errors.push('the project block is for invoices');
+    const attn = text(attention, 120);
+    const sendToText = text(sendTo, 200);
+    const ref = text(clientRef, 60);
+    if (sendToText && !EMAIL.test(sendToText)) errors.push('the send-to email address is not valid');
+    if ((attn || sendToText) && kind !== 'invoice') errors.push('attention and send-to are for invoices');
     const clean = await cleanLines(c, companyId, kind, lines, errors);
     let ppm = 0;
     let rate = null;
@@ -262,12 +310,18 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     if (rate && taxable === 0) throw new LedgerError(`${side.label} is not valid`, ['mark at least one line as taxable, or leave the sales tax rate empty']);
 
     let auto = false;
+    let typedNumber = null;
     if (kind === 'invoice' && num == null) { num = String(co.next_invoice_number); auto = true; }
-    const dup = kind === 'invoice'
-      ? await c.query('SELECT 1 FROM documents WHERE company_id = $1 AND kind = $2 AND lower(number) = lower($3) AND replaced_by_id IS NULL', [companyId, kind, num])
-      : await c.query("SELECT 1 FROM documents WHERE company_id = $1 AND kind = 'bill' AND contact_id = $2 AND lower(number) = lower($3) AND status = 'posted'", [companyId, contact.id, num]);
-    if (dup.rows.length) {
-      throw new LedgerError(kind === 'invoice' ? `Invoice number ${num} is already used` : `Bill ${num} from ${contact.name} is already entered`);
+    if (kind === 'invoice') {
+      // Numbers starting with the one wanted, so a repeat becomes the next lettered number (2601 → 2601A).
+      const like = num.toLowerCase().replace(/[\\%_]/g, (ch) => `\\${ch}`) + '%';
+      const { rows: used } = await c.query("SELECT lower(number) AS n FROM documents WHERE company_id = $1 AND kind = 'invoice' AND lower(number) LIKE $2 AND replaced_by_id IS NULL", [companyId, like]);
+      const next = nextLetteredNumber(num, new Set(used.map((r) => r.n)));
+      if (next == null || (auto && next !== num)) throw new LedgerError(`Invoice number ${num} is already used`);
+      if (next !== num) { typedNumber = num; num = next; }
+    } else {
+      const dup = await c.query("SELECT 1 FROM documents WHERE company_id = $1 AND kind = 'bill' AND contact_id = $2 AND lower(number) = lower($3) AND status = 'posted'", [companyId, contact.id, num]);
+      if (dup.rows.length) throw new LedgerError(`Bill ${num} from ${contact.name} is already entered`);
     }
     if (auto) await c.query('UPDATE companies SET next_invoice_number = next_invoice_number + 1 WHERE id = $1', [companyId]);
     const due = dueDate || addDays(date, contact.terms_days);
@@ -290,9 +344,10 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     const docId = documentId ?? (await c.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     const je = await insertEntry(c, companyId, entry, { source: kind, sourceRef: docId, actor });
     await c.query(
-      `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, project, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor]);
+      `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, project, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by,
+                              attention, send_to, client_ref)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor, attn, sendToText, ref]);
     for (const l of clean) {
       await c.query(
         `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable, service_date, item_id)
@@ -300,8 +355,9 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
         [companyId, docId, l.accountId, l.description, l.quantity, l.unitPriceCents, l.amountCents, l.taxable, l.serviceDate, l.itemId]);
     }
     await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: kind, entityId: docId, actor,
-      payload: { ...(replacesId ? { replacesId } : {}), number: num, contactId: contact.id, date, dueDate: due, subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
-    return getDocument(c, companyId, docId);
+      payload: { ...(replacesId ? { replacesId } : {}), number: num, ...(typedNumber ? { typedNumber } : {}), contactId: contact.id, date, dueDate: due, subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
+    const saved = await getDocument(c, companyId, docId);
+    return typedNumber ? { ...saved, numberWasTaken: typedNumber } : saved;
   });
 }
 
@@ -316,7 +372,7 @@ export async function getDocument(db, companyId, docId, { today = null } = {}) {
   const { rows: pays } = await db.query(
     `SELECT p.id, p.pay_date, p.method, p.reference, p.status, a.amount_cents FROM payment_applications a JOIN payments p ON p.id = a.payment_id
       WHERE a.document_id = $1 ORDER BY p.pay_date, p.created_at`, [d.id]);
-  const { rows: [ct] } = await db.query('SELECT name, email, phone, address, terms_days AS "termsDays" FROM contacts WHERE id = $1', [d.contact_id]);
+  const { rows: [ct] } = await db.query('SELECT name, email, phone, address, terms_days AS "termsDays", group_name AS "groupName" FROM contacts WHERE id = $1', [d.contact_id]);
   return {
     ...docOut(d, today),
     contact: ct,
@@ -559,7 +615,7 @@ export async function getAging(db, companyId, { kind, asOf }) {
   if (!side) throw new LedgerError('kind must be invoice or bill');
   if (!isIsoDate(asOf)) throw new LedgerError('date must be YYYY-MM-DD');
   const { rows: docs } = await db.query(
-    `SELECT d.id, d.number, d.doc_date, d.due_date, d.total_cents, d.contact_id, ct.name AS contact_name,
+    `SELECT d.id, d.number, d.doc_date, d.due_date, d.total_cents, d.contact_id, ct.name AS contact_name, ct.group_name,
             d.total_cents - COALESCE((SELECT sum(a.amount_cents) FROM payment_applications a JOIN payments p ON p.id = a.payment_id
                                        WHERE a.document_id = d.id AND p.pay_date <= $3 AND (p.status = 'posted' OR p.void_date > $3)), 0)::bigint AS balance
        FROM documents d JOIN contacts ct ON ct.id = d.contact_id
@@ -571,7 +627,7 @@ export async function getAging(db, companyId, { kind, asOf }) {
     if (d.balance === 0) continue;
     const bucket = bucketFor(daysBetween(d.due_date, asOf));
     let row = byContact.get(d.contact_id);
-    if (!row) byContact.set(d.contact_id, row = { contactId: d.contact_id, name: d.contact_name, totalCents: 0, documents: [], ...Object.fromEntries(AGING_BUCKETS.map((b) => [b.id, 0])) });
+    if (!row) byContact.set(d.contact_id, row = { contactId: d.contact_id, name: d.contact_name, groupName: d.group_name ?? null, totalCents: 0, documents: [], ...Object.fromEntries(AGING_BUCKETS.map((b) => [b.id, 0])) });
     row[bucket] += d.balance;
     row.totalCents += d.balance;
     totals[bucket] += d.balance;
@@ -580,6 +636,16 @@ export async function getAging(db, companyId, { kind, asOf }) {
   const rows = [...byContact.values()].sort((a, b) => a.name.localeCompare(b.name));
   for (const r of rows) r.documents.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const totalCents = rows.reduce((s, r) => s + r.totalCents, 0);
+  // Totals for each "Part of" group (DWH across its divisions).
+  const byGroup = new Map();
+  for (const r of rows) {
+    if (!r.groupName) continue;
+    let g = byGroup.get(r.groupName.toLowerCase());
+    if (!g) byGroup.set(r.groupName.toLowerCase(), g = { name: r.groupName, count: 0, totalCents: 0, ...Object.fromEntries(AGING_BUCKETS.map((b) => [b.id, 0])) });
+    g.count += 1; g.totalCents += r.totalCents;
+    for (const b of AGING_BUCKETS) g[b.id] += r[b.id];
+  }
+  const groups = [...byGroup.values()].sort((a, b) => a.name.localeCompare(b.name));
   // Control-account balance in the books, split into what invoices/bills/payments posted (must equal
   // the aging total exactly) and anything else, such as opening balances imported from QuickBooks.
   const { rows: [gl] } = await db.query(
@@ -594,7 +660,7 @@ export async function getAging(db, companyId, { kind, asOf }) {
   const otherEntriesCents = sign * gl.other;
   const differenceCents = glBalanceCents - otherEntriesCents - totalCents;
   return {
-    kind, asOf, buckets: AGING_BUCKETS.map(({ id, label }) => ({ id, label })), rows, totals: { ...totals, totalCents },
+    kind, asOf, buckets: AGING_BUCKETS.map(({ id, label }) => ({ id, label })), rows, groups, totals: { ...totals, totalCents },
     glBalanceCents, otherEntriesCents, differenceCents, ties: differenceCents === 0,
   };
 }

@@ -53,9 +53,10 @@ const ENTITY_TYPES = [
 ];
 const blankCompany = () => ({ name: '', homeState: 'TX', fiscalYearStartMonth: 1, entityType: '', booksStartDate: `${today().slice(0, 4)}-01-01` });
 const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false });
-const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
+const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', attention: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
-const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false });
+const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, groupName: '', people: [] });
+const blankPerson = () => ({ name: '', email: '', phone: '' });
 const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', open: [], amounts: {}, photos: [], keptPhotos: 0, photoBusy: false, key: newKey() });
 // Check photos: shrunk in the browser to 2000 pixels on the longer side (enough to read a check), JPEG.
 const PHOTO_SIDE = 2000;
@@ -211,6 +212,8 @@ createApp({
   },
   computed: {
     S() { return SIDES[this.tab] ?? SIDES.sales; },
+    // "Part of" names already used, offered when typing one (DWH for DWH - SATX, DWH - AUS).
+    contactGroups() { return [...new Set(this.ar.contacts.map((c) => c.groupName).filter(Boolean))].sort(); },
     docLineAccounts() {
       const income = this.S.kind === 'invoice';
       return this.accounts.filter((a) => a.isActive && a.cashFlow !== 'cash' && !['accounts_receivable', 'accounts_payable', 'retained_earnings', 'sales_tax_payable'].includes(a.key)
@@ -973,7 +976,8 @@ createApp({
     },
     // Edit a customer or vendor: the same form, filled in; saving sends only the form's fields (PATCH).
     editContact(c) {
-      this.ar.contact = { id: c.id, name: c.name, email: c.email ?? '', phone: c.phone ?? '', address: c.address ?? '', termsDays: c.termsDays, is1099: !!c.is1099 };
+      this.ar.contact = { id: c.id, name: c.name, email: c.email ?? '', phone: c.phone ?? '', address: c.address ?? '', termsDays: c.termsDays, is1099: !!c.is1099,
+        groupName: c.groupName ?? '', people: (c.people ?? []).map((p) => ({ name: p.name, email: p.email ?? '', phone: p.phone ?? '' })) };
       this.ar.showContact = true;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
@@ -987,6 +991,18 @@ createApp({
       this.ar.contact = blankContact(); this.ar.showContact = false;
       if (!id && this.ar.showDoc && !this.ar.doc.contactId) this.ar.doc.contactId = r.id;
       this.loadAr();
+    },
+    addPerson() { this.ar.contact.people.push(blankPerson()); },
+    // The people (claims adjusters) saved on the customer chosen on the invoice form.
+    docPeople() { return this.ar.contacts.find((c) => c.id === this.ar.doc.contactId)?.people ?? []; },
+    docPersonIsNew() {
+      const name = this.ar.doc.attention.trim().toLowerCase();
+      return !!name && !this.docPeople().some((p) => p.name.toLowerCase() === name);
+    },
+    // Picking a saved adjuster fills in where the invoice is sent.
+    pickAttention() {
+      const p = this.docPeople().find((x) => x.name.toLowerCase() === this.ar.doc.attention.trim().toLowerCase());
+      if (p?.email) this.ar.doc.sendTo = p.email;
     },
     async toggleContactActive(c) {
       if (await this.run(() => api('PATCH', `${this.arBase()}/contacts/${c.id}`, { isActive: !c.isActive }))) this.loadAr();
@@ -1071,6 +1087,7 @@ createApp({
       const dollars = (c) => (c / 100).toFixed(2);
       this.ar.doc = { ...blankDoc(doc.taxRate ?? ''), editId: doc.id, editNumber: doc.number, contactId: doc.contactId, number: doc.number,
         date: doc.date, dueDate: doc.dueDate ?? '', memo: doc.memo ?? '', project: doc.project ?? '',
+        attention: doc.attention ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
           description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true })) };
       this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
@@ -1083,14 +1100,33 @@ createApp({
         unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined }));
       const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
         project: this.S.kind === 'invoice' ? d.project : undefined, taxRate: d.taxRate || undefined, lines };
+      if (this.S.kind === 'invoice') Object.assign(body, { attention: d.attention, sendTo: d.sendTo, clientRef: d.clientRef });
+      const newPerson = this.S.kind === 'invoice' && d.savePerson && this.docPersonIsNew()
+        ? { name: d.attention.trim(), email: d.sendTo.trim(), phone: '' } : null;
+      const customer = this.ar.contacts.find((c) => c.id === d.contactId);
       const r = d.editId
         ? await this.run(() => api('PUT', `${this.arBase()}/documents/${d.editId}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} ${d.editNumber} corrected.`)
         : await this.run(() => api('POST', `${this.arBase()}/${this.S.docPath}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} saved.`);
       if (!r) return;
+      if (r.numberWasTaken) this.flash(`Saved as invoice ${r.number} (${r.numberWasTaken} was already used).`);
+      // A new adjuster typed on the invoice is added to the customer, for next time.
+      if (newPerson && customer) {
+        await this.run(() => api('PATCH', `${this.arBase()}/contacts/${customer.id}`, { people: [...(customer.people ?? []), newPerson] }));
+      }
       this.ar.showDoc = false; this.ar.doc = blankDoc(); this.ar.panel = 'docs'; this.ar.view = 'open';
       await this.loadAr();
       this.ar.detail = r;
     },
+    // Opens the computer's email program (Outlook, Mail…) with the invoice's address and subject filled in.
+    // The PDF is attached by hand: print the invoice to PDF first.
+    emailLink(doc) {
+      const subject = [`Invoice ${doc.number}`, doc.clientRef ? `Claim/Job ${doc.clientRef}` : '', doc.project ? doc.project.split('\n')[0] : '']
+        .filter(Boolean).join(' · ');
+      const hello = doc.attention ? `${doc.attention},` : 'Hello,';
+      const body = `${hello}\n\nAttached is invoice ${doc.number} for ${this.money(doc.totalCents)}, due ${doc.dueDate}.\n\nThank you,\n${this.company?.name ?? ''}`;
+      return `mailto:${encodeURIComponent(doc.sendTo ?? '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    },
+    openEmail(doc) { window.location.href = this.emailLink(doc); },
     async openDoc(d) { this.ar.detail = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
     async voidDoc(d) {
       if (!confirm(`Void ${this.S.Doc.toLowerCase()} ${d.number}? Its entry is reversed; this can't be undone.`)) return;
