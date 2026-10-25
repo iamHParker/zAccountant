@@ -80,7 +80,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   the `setup` tab; Home's "Finish setting up" list. Entity type feeds Tax-ready (`src/core/entityTypes.js`).
 - Tax-ready level 1 (plan feature `tax`, migration 018): `src/core/taxLines.js` (categories → form lines, 1099 threshold
   by year), `src/services/taxService.js`; Reports tabs Tax Summary, 1099-NEC, W-2 / W-3.
-- Front page at `/` (`public/welcome.html`, plain HTML, prices from `GET /api/public/plans`); the app is at `/app`.
+- Front page at `/` (`public/welcome.html`, plain HTML); prices on their own page `/prices` (`prices.html`, from
+  `GET /api/public/plans`; Homer 2026-10-25); the app is at `/app`.
   Settings → Back up your books (`src/services/backupService.js`): re-importable CSVs of the chart and journal.
 - Guides: `docs/user-guide/` (chapters by tier: everyone, Basic, Payroll, Timesheets, staff) and
   `docs/programmers-guide/` (architecture, money, security, DB, features, front end, **error handling**, testing,
