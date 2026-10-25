@@ -16,15 +16,24 @@ a.button.primary { background: var(--brand); color: var(--brand-ink); border-col
 .cards3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 16px; }
 .cards2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 16px; }
 .cards3 h3, .cards2 h3 { margin-top: 0; }
-.price { font-size: 18px; font-weight: 700; margin: 4px 0; }
-.price-annual { font-size: 15px; font-weight: 600; margin: 2px 0 8px; color: var(--brand); }
+/* Price cards (prices.html), laid out like Homer's RepairWerks pricing page. */
+.price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 12px 0 24px; }
+.price-card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+.price-card.featured { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
+.price-card h3 { margin: 0 0 10px; font-size: 18px; }
+.price-big { font-size: 32px; font-weight: 800; line-height: 1.15; margin: 0; }
+.price-small { font-size: 14px; font-weight: 400; color: var(--muted); }
+.price-annual { font-size: 14px; color: var(--muted); margin: 4px 0 0; }
+.price-points { margin: 16px 0; padding-left: 20px; color: var(--muted); flex: 1; }
+.price-points li { margin: 6px 0; }
+.price-card .button { display: block; text-align: center; margin: 0; padding: 10px 14px; font-weight: 600; }
 .tag { font-size: 12px; font-weight: 600; color: var(--brand); border: 1px solid var(--brand); border-radius: 999px; padding: 1px 8px; vertical-align: middle; }
 .welcome-foot { display: flex; gap: 16px; max-width: 1080px; margin: 0 auto; padding: 16px; border-top: 1px solid var(--line); color: var(--muted); }
 .welcome-foot a:first-of-type { margin-left: auto; }
 html { scroll-behavior: smooth; }
 section[id] { scroll-margin-top: 70px; }
 @media (max-width: 800px) {
-  .hero, .cards3, .cards2 { grid-template-columns: 1fr; }
+  .hero, .cards3, .cards2, .price-grid { grid-template-columns: 1fr; }
   .hero h1 { font-size: 30px; }
   .welcome-nav { order: 3; width: 100%; }
 }

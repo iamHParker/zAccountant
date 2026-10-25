@@ -16,16 +16,22 @@ export const FEATURES = {
   tax: 'Tax-ready (accounts mapped to return lines, tax summary, 1099-NEC and W-2/W-3 totals)',
 };
 
+// `points` are the short lines on the Prices page cards.
 export const PLANS = {
-  beta: { name: 'Beta tester', features: Object.keys(FEATURES), monthlyCents: 0, annualCents: 0, note: 'Free, everything on, while testing' },
+  beta: { name: 'Beta tester', features: Object.keys(FEATURES), monthlyCents: 0, annualCents: 0, note: 'Free, everything on, while testing',
+    points: ['Every feature and added service', 'Your real books are welcome', 'Feedback channel to the developers'] },
   individual: { name: 'Family and individuals', features: [], monthlyCents: null, annualCents: null,
-    note: 'Household and personal books: accounts, bank imports, bills, reports' },
+    note: 'Household and personal books: accounts, bank imports, bills, reports',
+    points: ['Accounts and bank imports', 'Bills and reports', 'Back up your books anytime'] },
   company: { name: 'Company', features: ['payroll'], monthlyCents: null, annualCents: null,
-    note: 'Books, invoices, bills, banking, reports and payroll' },
+    note: 'Books, invoices, bills, banking, reports and payroll',
+    points: ['Everything in Family and individuals', 'Invoices and payroll', 'Roles and permissions for your staff'] },
 };
 export const ADD_ONS = {
-  tax: { name: 'Tax-ready', features: ['tax'], monthlyCents: null, annualCents: null },
-  timesheets: { name: 'Timesheets', features: ['timesheets'], monthlyCents: null, annualCents: null },
+  tax: { name: 'Tax-ready', features: ['tax'], monthlyCents: null, annualCents: null,
+    points: ['Accounts mapped to tax return lines', 'Tax summary for your preparer', '1099-NEC and W-2 / W-3 totals'] },
+  timesheets: { name: 'Timesheets', features: ['timesheets'], monthlyCents: null, annualCents: null,
+    points: ['Time entry and approvals', 'Jobs and time summaries', 'HoursTracker import, feeding payroll'] },
 };
 
 /** A company with no plan row yet is on this one (every company made during the beta). */

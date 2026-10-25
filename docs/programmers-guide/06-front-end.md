@@ -5,7 +5,7 @@ browser. What is in `public/` is exactly what runs.
 
 | File | What it holds |
 |---|---|
-| `welcome.html`, `welcome.css`, `img/`; `prices.html`, `prices.js` | the public front page at `/` (services, security, sign-in buttons into `/app`) and the Prices page at `/prices` (from `GET /api/public/plans`; Homer 2026-10-25: prices on their own page). Plain HTML, no Vue. ⚠️ The Security section's "Coming" list (encryption on the user's side, Swiss servers) is Homer's plan, not fact yet: move an item to "Today" only when it is built |
+| `welcome.html`, `welcome.css`, `img/`; `prices.html`, `prices.js` | the public front page at `/` (services, security, sign-in buttons into `/app`) and the Prices page at `/prices` (from `GET /api/public/plans`; Homer 2026-10-25: prices on their own page; cards laid out like his RepairWerks pricing page: name, big price or a `[$ / mo]` placeholder, the yearly price, the plan's `points`, a button, Company highlighted). Plain HTML, no Vue. ⚠️ The Security section's "Coming" list (encryption on the user's side, Swiss servers) is Homer's plan, not fact yet: move an item to "Today" only when it is built |
 | `index.html` | the app at `/app`: all the screens' markup: one `<section v-if="tab === '…'">` per tab, plus dialogs |
 | `app.js` | the Vue app: `data()` (the state), `computed` (values worked out from the state), `watch.tab` (loads a tab's data), `methods` (button actions) |
 | `styles.css` | every style, including print rules |
