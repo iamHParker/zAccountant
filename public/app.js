@@ -84,6 +84,9 @@ const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', de
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 const lastMileRate = () => { try { return localStorage.getItem('zacc.mileRate') ?? ''; } catch { return ''; } };
 const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } catch { /* private window: not kept */ } };
+// The accounts last used for costs that came in from the Road page.
+const lastRoadAccounts = () => { try { return JSON.parse(localStorage.getItem('zacc.roadAccounts') ?? '{}') ?? {}; } catch { return {}; } };
+const keepRoadAccounts = (v) => { try { localStorage.setItem('zacc.roadAccounts', JSON.stringify(v)); } catch { /* not kept */ } };
 const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', jobId: '', attention: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, groupName: '', people: [] });
@@ -241,6 +244,7 @@ createApp({
         jobs: [], proj: { form: blankProject(), editId: null, show: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
+      road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
@@ -1099,6 +1103,72 @@ createApp({
       tr.list = (await this.run(() => api('GET', `${this.tripBase()}/trips`))) ?? [];
       if (!this.ar.jobs.length) this.ar.jobs = (await this.run(() => api('GET', `${this.tripBase()}/jobs?inactive=1`))) ?? [];
       if (tr.cur) await this.openTrip(tr.cur.id);
+      await this.loadRoad();
+    },
+    // ---- The Road page: keys for the phone, and the inbox of what it sent (src/services/roadService.js)
+    async loadRoad() {
+      const r = this.road;
+      r.items = (await this.run(() => api('GET', `${this.tripBase()}/road-items`))) ?? [];
+      if (this.can('bills')) r.keys = (await this.run(() => api('GET', `${this.tripBase()}/road-keys`))) ?? [];
+      const last = lastRoadAccounts();
+      if (!r.expenseId) r.expenseId = last.expenseId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
+      if (!r.paidFromId) r.paidFromId = last.paidFromId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? '';
+      if (!r.keyName) r.keyName = `${this.auth.user?.name?.split(' ')[0] ?? 'My'}'s phone`;
+    },
+    async makeRoadKey() {
+      const r = this.road;
+      const k = await this.run(() => api('POST', `${this.tripBase()}/road-keys`, { name: r.keyName }));
+      if (k) { r.made = { ...k, qr: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(k.qrSvg)}` }; r.keys = (await this.run(() => api('GET', `${this.tripBase()}/road-keys`))) ?? []; }
+    },
+    async copyRoadLink() {
+      try { await navigator.clipboard.writeText(this.road.made.url); this.flash('Link copied. Send it to your phone (Messages to yourself works) and open it there.'); }
+      catch { this.flash('The browser would not copy. Select the link and copy it yourself.', 'bad'); }
+    },
+    async revokeRoadKey(k) {
+      if (!confirm(`Turn off the road key "${k.name}"? That phone will no longer be able to send anything.`)) return;
+      if (await this.run(() => api('POST', `${this.tripBase()}/road-keys/${k.id}/revoke`), 'Road key turned off.')) this.loadRoad();
+    },
+    roadGroups() {
+      const groups = new Map();
+      for (const i of this.road.items) {
+        const name = i.trip?.name ?? 'Trip';
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(i);
+      }
+      return [...groups].map(([name, items]) => ({ name, items }));
+    },
+    roadLabel(i) {
+      if (i.kind === 'trip') {
+        const codes = [...(i.data.jobIds ?? []).map((id) => this.jobLabel(this.ar.jobs.find((j) => j.id === id) ?? { name: 'a project' })),
+          ...(i.data.newProjects ?? []).map((p) => `${p.name} (new)`)];
+        return `New trip${i.data.endDate ? ' to ' + this.usDate(i.data.endDate) : ''}${codes.length ? ' · ' + codes.join(', ') : ''}`;
+      }
+      if (i.kind === 'time') return `Travel time ${i.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
+      const what = i.data.kind === 'mileage' ? `${i.data.description} · ${i.data.miles} mi × $${i.data.mileRate}` : i.data.description;
+      return `${what}${i.data.vendor ? ' · ' + i.data.vendor : ''}`;
+    },
+    /** A cost or travel time whose trip isn't in the books yet (or was dismissed) needs a trip chosen here. */
+    roadNeedsTrip(i) { return i.kind !== 'trip' && !i.trip?.tripId && i.trip?.tripStatus !== 'pending'; },
+    roadPhotoUrl(i, id) { return `/api${this.tripBase()}/road-items/${i.id}/photos/${id}`; },
+    async acceptRoad(i) {
+      const r = this.road;
+      const body = {};
+      if (i.kind === 'cost') {
+        if (!r.expenseId || !r.paidFromId) { this.flash('Choose the expense account and what it was paid with (top of this box) first.', 'bad'); return; }
+        Object.assign(body, { expenseAccountId: r.expenseId, paidFromAccountId: r.paidFromId });
+        keepRoadAccounts({ expenseId: r.expenseId, paidFromId: r.paidFromId });
+      }
+      if (i.kind !== 'trip' && r.tripFor[i.id]) body.tripId = r.tripFor[i.id];
+      r.busy = true;
+      try {
+        const ok = await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/accept`, body),
+          i.kind === 'trip' ? 'Trip added, with its projects sharing it evenly. Open it to change the shares.' : 'Added to the trip.');
+        if (ok) await this.loadTrips();
+      } finally { r.busy = false; }
+    },
+    async dismissRoad(i) {
+      if (!confirm('Dismiss this? It will not go into the books.')) return;
+      if (await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/dismiss`), 'Dismissed.')) this.loadRoad();
     },
     async openTrip(id) {
       const t = await this.run(() => api('GET', `${this.tripBase()}/trips/${id}`));

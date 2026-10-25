@@ -166,6 +166,27 @@ On each project's invoice, **⏱ Pull in unbilled time and costs** lists its sha
 Each line bills the full cost × the share (quantity 0.8 for 80%), so the client can see both. To bill a different
 share on one invoice, type another quantity on that line.
 
+### Your phone on the road
+
+The **Road page** lets you jot down trip costs, receipt photos, travel time and new project numbers on your phone
+while you travel, even with no signal, without signing in to your books on the phone.
+
+1. At your desk: **Trips → Your phone on the road**, type the phone's name and press **Make a road key**. A QR code
+   appears (shown once). Point the phone's camera at it and open the link. On an iPhone, press **Share → Add to Home
+   Screen** so it opens like an app. (No camera handy? **Copy link**, send it to yourself, and paste it into the Road
+   page's box.)
+2. On the road: **+ New trip** (name, dates, the projects it's for; type new project numbers like *2610 Garcia Barn*
+   one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other; the amount or
+   the miles and rate; **📷 Receipt photo**) and **+ Travel time**. Everything is saved on the phone first and sent when
+   there is signal. The top of the page says how many are waiting; **Send now** sends them at once.
+3. Back at the desk: **Trips → From the road** lists what arrived. Choose the expense account and what you paid with,
+   then **Accept** the new trip first (its projects share it evenly; open the trip to change the shares), then its
+   costs and travel time. **Dismiss** anything that shouldn't go in the books. On the phone each item then says
+   *In the books*; **Clear items already in the books** tidies the list.
+
+The road key can't see your books or change anything already saved; it can only add to the *From the road* box.
+It works for 90 days. Lost the phone? **Trips → Your phone on the road → turn off**.
+
 ### Projects
 
 **Sales → Projects** lists your projects (the same list as the jobs on the Time tab): number, name, customer and site

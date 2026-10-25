@@ -79,6 +79,13 @@ lines, customers, employees, timesheets) and line memos are not in it. Alpha use
     Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tripCosts` (quantity = share,
     `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share, `sharedHoursQuantity`). Those invoice
     lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
+  - **Road page (migration 026, `src/services/roadService.js`, `public/road.html` + `road.js` + `road-sw.js`):** the phone
+    keeps items in IndexedDB and sends them with its road key (see Security); each item and photo has the phone's own
+    `client_id`, so a resend changes nothing. A service worker keeps a copy of the page for no-signal starts (network
+    first). Trips → From the road accepts an item in one transaction: a trip (new project numbers become jobs unless a
+    job with that name or number exists; even shares via `evenShares`), a cost (`addTripCost` with idempotency key
+    `road-<item id>`, photos copied), or travel time (a time entry for the sender). QR codes come from
+    `qrcode-generator` on the server (SVG).
   - Billed time can't be changed, deleted or sent back (`zacc_time_billed_final`, and the service says which invoice);
     a bill with a billed cost can't be voided or edited (`zacc_bill_cost_billed`) until that invoice is.
 

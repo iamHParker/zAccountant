@@ -1015,6 +1015,36 @@
       </div>
 
       <template v-if="!trip.cur && !trip.form">
+        <!-- FROM THE ROAD: what the phone sent, waiting to be accepted into the books -->
+        <div class="card road-inbox" v-if="road.items.length">
+          <h2>From the road ({{ road.items.length }})</h2>
+          <p class="hint">Sent from your phone's Road page. Nothing is in the books until you accept it. Accept a new trip first, then its costs.</p>
+          <div class="grid2" v-if="road.items.some(i => i.kind === 'cost') && can('bills')">
+            <label>Costs go to (expense)
+              <select v-model="road.expenseId"><option value="">Choose…</option><option v-for="a in tripExpenseAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+            <label>Paid with
+              <select v-model="road.paidFromId"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+          </div>
+          <template v-for="g in roadGroups()">
+            <h3>{{ g.name }}</h3>
+            <div class="road-item" v-for="i in g.items">
+              <div class="row wrap">
+                <span><span class="muted small">{{ usDate(i.kind === 'trip' ? i.data.startDate : i.data.date) }}</span> {{ roadLabel(i) }}</span>
+                <strong class="num" v-if="i.kind === 'cost'">{{ money(i.data.amountCents) }}</strong>
+              </div>
+              <div class="photo-strip" v-if="i.photos.length">
+                <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
+              </div>
+              <label v-if="roadNeedsTrip(i)" class="small">Trip for this
+                <select v-model="road.tripFor[i.id]"><option value="">Choose a trip…</option><option v-for="t in trip.list" :value="t.id">{{ t.name }}</option></select></label>
+              <div class="row wrap" v-if="can('bills')">
+                <span class="muted small">from {{ i.keyName }}</span>
+                <span><button class="primary small" :disabled="road.busy" @click="acceptRoad(i)">Accept</button>
+                  <button class="small" @click="dismissRoad(i)">Dismiss</button></span>
+              </div>
+            </div>
+          </template>
+        </div>
         <p class="hint" v-if="!trip.list.length">No trips yet.</p>
         <button v-for="t in trip.list" class="trip-card" :class="{ muted: !t.isActive }" @click="openTrip(t.id)">
           <span class="row"><strong>{{ t.name }}</strong><span class="num">{{ money(t.totalCents) }}</span></span>
@@ -1022,6 +1052,30 @@
           <span class="small" v-if="t.projectsText">{{ t.projectsText }}</span>
         </button>
       </template>
+
+      <details class="card road-keys" v-if="!trip.cur && !trip.form && can('bills')" :open="Boolean(road.made)">
+        <summary><strong>Your phone on the road</strong> <span class="muted small">· jot down costs, receipts and travel time without signing in</span></summary>
+        <p class="hint">The Road page on your phone can only add trips, costs with receipt photos, travel time and new project numbers,
+          and only into the "From the road" box here. It can't see your books. It works with no signal and sends when it can.
+          Make a key, scan the code with the phone's camera, then on the iPhone choose Share → <strong>Add to Home Screen</strong>.</p>
+        <table class="data" v-if="road.keys.length">
+          <thead><tr><th>Phone</th><th>Made</th><th>Works until</th><th>Last used</th><th></th></tr></thead>
+          <tr v-for="k in road.keys" :class="{ muted: k.expired }"><td>{{ k.name }}</td><td>{{ usDate(k.createdOn) }}</td><td>{{ k.expired ? 'expired' : usDate(k.expiresOn) }}</td>
+            <td>{{ k.lastUsedOn ? usDate(k.lastUsedOn) : 'never' }}</td><td class="actions"><button class="link" @click="revokeRoadKey(k)">turn off</button></td></tr>
+        </table>
+        <form class="row wrap" @submit.prevent="makeRoadKey">
+          <label>Phone's name <input v-model.trim="road.keyName" maxlength="60" required></label>
+          <button class="primary">Make a road key</button>
+        </form>
+        <div class="road-qr" v-if="road.made">
+          <img :src="road.made.qr" alt="QR code: open it with the phone's camera">
+          <div>
+            <p><strong>Scan this with your phone's camera.</strong> It is shown only once; works until {{ usDate(road.made.expiresOn) }}.</p>
+            <p class="small muted break">{{ road.made.url }}</p>
+            <button type="button" @click="copyRoadLink">Copy link</button> <button type="button" @click="road.made = null">Done</button>
+          </div>
+        </div>
+      </details>
 
       <template v-if="trip.cur && !trip.form">
         <div class="card">

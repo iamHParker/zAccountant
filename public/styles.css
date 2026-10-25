@@ -209,3 +209,30 @@ fieldset.people legend { color: var(--muted); font-size: 13px; padding: 0 4px; }
 /* Passkeys: the sign-in button and the Settings form's button lined up with the fields. */
 .passkey-btn { width: 100%; padding: 10px 12px; font-size: 1rem; }
 label.end { display: flex; align-items: flex-end; }
+/* Trips → From the road (the phone's inbox) and Your phone on the road (keys). */
+.road-item { border-top: 1px solid var(--line, #e5e7eb); padding: 8px 0; display: grid; gap: 6px; }
+.photo-strip { display: flex; gap: 6px; flex-wrap: wrap; }
+.photo-strip img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line, #e5e7eb); }
+.road-keys summary { cursor: pointer; }
+.road-qr { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-top: 12px; }
+.road-qr img { width: 200px; height: 200px; background: #fff; }
+.break { word-break: break-all; }
+/* The Road page (/road): one column, big touch targets, 16 px inputs so iPhone Safari doesn't zoom. */
+body.road main { max-width: 560px; padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); }
+body.road input, body.road select, body.road textarea { font-size: 16px; }
+body.road .top { flex-wrap: nowrap; justify-content: space-between; }
+.road-status { display: flex; gap: 8px; align-items: center; }
+.pill { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 13px; background: var(--chip-bg); color: var(--chip-ink); white-space: nowrap; }
+.pill.warn { background: var(--warn-bg); color: var(--ink); }
+.pill.bad { background: var(--bad); color: #fff; }
+button.wide { width: 100%; margin-top: 8px; }
+.road-actions { gap: 8px; margin: 8px 0; }
+.road-actions button { flex: 1; padding: 14px; font-size: 16px; }
+.pick-list { display: grid; gap: 4px; max-height: 240px; overflow-y: auto; margin-bottom: 8px; }
+.pick-list button { text-align: left; }
+.photo-btn { display: inline-block; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+.photo-btn input { display: none; }
+.photo-thumb { display: inline-grid; justify-items: center; gap: 2px; }
+.photo-thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; }
+.center { text-align: center; }
+.road-item > button.link { justify-self: start; }

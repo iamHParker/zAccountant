@@ -65,6 +65,16 @@ server errors, backup). Admins and developers see the Admin dashboard (plans).
 - **SECURITY DEFINER functions** (`zacc_admin_companies`, `zacc_platform_counts`) are the only way to look across
   companies. Each one checks the platform role first and returns no amounts from anyone's books.
 
+## The Road page's key (`src/services/roadService.js`)
+
+The phone page `/road` never holds a session. It sends `Authorization: Bearer zr_…` (a road key; only its SHA-256 is
+stored in `road_keys`) to four routes under `/api/road`: read open trip and project names, send an item, send a photo,
+ask which items were accepted. Each request runs in `withScope` as the key's person and company and needs that
+person's `bills` permission now, so removing the person or changing their role shuts the key. Items land in
+`road_items` (pending); only **Accept** at the desk (permission `bills`) posts them, through the normal Trips code.
+Keys last 90 days, at most 5 per person per company, revocable. The key travels in the link's `#` part, which browsers
+never send to a server, and the page removes it from the address bar.
+
 ## Checklist for anything new
 
 - [ ] The route names the narrowest permission that fits.
