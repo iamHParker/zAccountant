@@ -236,3 +236,8 @@ button.wide { width: 100%; margin-top: 8px; }
 .photo-thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; }
 .center { text-align: center; }
 .road-item > button.link { justify-self: start; }
+/* Trips → Import from MileIQ: the drive list scrolls sideways on a phone instead of squeezing the page. */
+.mileiq summary { cursor: pointer; }
+.table-scroll { overflow-x: auto; margin: 8px 0; }
+.mileiq-drives tr.day-row td { background: var(--bg); padding-top: 10px; }
+.mileiq-drives select { max-width: 220px; }

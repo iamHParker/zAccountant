@@ -24,6 +24,7 @@ import * as projects from './services/projectService.js';
 import * as trips from './services/tripService.js';
 import * as roadSvc from './services/roadService.js';
 import * as bookFiles from './services/bookFileService.js';
+import * as mileIq from './services/mileIqService.js';
 import { AuthError } from './services/authService.js';
 import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
 import * as tax from './services/taxService.js';
@@ -128,6 +129,7 @@ export function createApp(pool, { log } = {}) {
   app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '6mb' }));
   app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
   app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
+  app.use(/^\/api\/companies\/[^/]+\/mileiq\/(preview|import)$/, express.json({ limit: '3mb' })); // a MileIQ report, as text
   app.use(/^\/api\/companies\/[^/]+\/logo$/, express.json({ limit: '2mb' })); // the logo, as base64 (1 MB at most)
   app.use(/^\/api\/companies\/[^/]+\/payments\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a check photo, as base64 (3 MB at most)
   app.use(/^\/api\/companies\/[^/]+\/trip-costs\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a receipt photo, likewise
@@ -586,6 +588,9 @@ export function createApp(pool, { log } = {}) {
     ({ [FILE]: await trips.getCostPhoto(db, companyId, req.params.costId, req.params.photoId) })));
   api.post(`${TC}/photos`, route('bills', ({ db, req, companyId, actor }) => trips.addCostPhoto(db, companyId, req.params.costId, { picture: req.body?.picture, actor }), 201));
   api.delete(`${TC}/photos/:photoId`, route('bills', ({ db, req, companyId, actor }) => trips.deleteCostPhoto(db, companyId, req.params.costId, req.params.photoId, { actor })));
+  // MileIQ's monthly drive report → mileage costs on trips (src/services/mileIqService.js).
+  api.post('/companies/:companyId/mileiq/preview', route('bills', ({ db, req, companyId }) => mileIq.previewMileIq(db, companyId, { content: req.body?.content })));
+  api.post('/companies/:companyId/mileiq/import', route('bills', ({ db, req, companyId, actor }) => mileIq.importMileIq(db, companyId, req.body ?? {}, { actor }), 201));
 
   for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));

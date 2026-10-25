@@ -245,6 +245,7 @@ createApp({
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
+      mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
@@ -1169,6 +1170,64 @@ createApp({
     async dismissRoad(i) {
       if (!confirm('Dismiss this? It will not go into the books.')) return;
       if (await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/dismiss`), 'Dismissed.')) this.loadRoad();
+    },
+    // ---- MileIQ import: the monthly drive report → mileage on trips (src/services/mileIqService.js)
+    async pickMileIq(ev) {
+      const m = this.mileiq;
+      const f = ev.target.files[0];
+      ev.target.value = '';
+      if (!f) return;
+      const content = await f.text();
+      const p = await this.run(() => api('POST', `${this.tripBase()}/mileiq/preview`, { content }));
+      if (!p) return;
+      m.file = { name: f.name, content };
+      m.preview = p;
+      m.pick = {}; m.tripFor = {};
+      for (const d of p.drives) if (d.business && !d.imported) { m.pick[d.key] = true; m.tripFor[d.key] = d.tripId ?? 'new'; }
+      const month = new Date(`${p.from}T12:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' });
+      m.newTripName = `Local driving, ${month}`;
+      m.rate = p.rates.business ?? '';
+      const exp = this.tripExpenseAccounts(); const from = this.tripPaidFromAccounts();
+      if (!m.expenseId) m.expenseId = exp.find((a) => /vehicle|car|auto|mileage/i.test(a.name))?.id ?? exp.find((a) => /travel/i.test(a.name))?.id ?? '';
+      if (!m.paidFromId) m.paidFromId = from.find((a) => a.type === 'equity')?.id ?? '';
+    },
+    /** The file's drives, a day at a time. */
+    mileIqDays() {
+      const days = new Map();
+      for (const d of this.mileiq.preview?.drives ?? []) {
+        if (!days.has(d.date)) days.set(d.date, []);
+        days.get(d.date).push(d);
+      }
+      return [...days].map(([date, drives]) => ({ date, drives }));
+    },
+    mileIqPlace(p) { return String(p ?? '').split(',')[0].trim() || '?'; },
+    mileIqTicked() { return (this.mileiq.preview?.drives ?? []).filter((d) => this.mileiq.pick[d.key]); },
+    mileIqTickedMiles() {
+      const h = this.mileIqTicked().reduce((t, d) => { const [w, f = ''] = d.miles.split('.'); return t + Number(w) * 100 + Number(f.padEnd(2, '0')); }, 0);
+      return (h / 100).toFixed(1);
+    },
+    mileIqAll(on) { for (const d of this.mileiq.preview.drives) if (d.business && !d.imported) this.mileiq.pick[d.key] = on; },
+    mileIqBulk() {
+      const m = this.mileiq;
+      if (!m.bulkTrip) return;
+      for (const d of this.mileIqTicked()) m.tripFor[d.key] = m.bulkTrip;
+    },
+    async importMileIq() {
+      const m = this.mileiq;
+      const drives = this.mileIqTicked().map((d) => ({ key: d.key, tripId: m.tripFor[d.key] || '' }));
+      if (!drives.length) return this.flash('Tick the drives to import first.', 'bad');
+      if (!m.expenseId || !m.paidFromId) return this.flash('Choose the expense account and what paid for the driving first.', 'bad');
+      const rate = m.rate && m.rate !== m.preview.rates.business ? m.rate : undefined;
+      m.busy = true;
+      try {
+        const r = await this.run(() => api('POST', `${this.tripBase()}/mileiq/import`, { content: m.file.content, drives, newTripName: m.newTripName, rate,
+          expenseAccountId: m.expenseId, paidFromAccountId: m.paidFromId }));
+        if (r) {
+          this.flash(`Imported ${r.drives} drive${r.drives === 1 ? '' : 's'} (${r.miles} mi) as ${r.costs} cost${r.costs === 1 ? '' : 's'}, ${money(r.amountCents)} in all.`);
+          Object.assign(m, { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '' });
+          await this.loadTrips();
+        }
+      } finally { m.busy = false; }
     },
     async openTrip(id) {
       const t = await this.run(() => api('GET', `${this.tripBase()}/trips/${id}`));

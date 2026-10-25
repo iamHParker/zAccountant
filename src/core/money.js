@@ -113,3 +113,19 @@ export function allocate(cents, weights) {
 export function sum(list) {
   return list.reduce((a, b) => a + assertCents(b), 0);
 }
+
+/**
+ * Mileage: miles (up to 2 decimals) × a rate in dollars per mile (up to 4 decimals, e.g. "0.70" or "0.725").
+ * Returns { miles, rateCentsText, amountCents } or null if either isn't a number. Exact, rounded half-up once:
+ * 212.4 mi × $0.725 = $153.99 (21240 × 7250 / 10000 = 15399).
+ */
+export function mileageAmount(miles, rate) {
+  const m = /^\s*(\d{1,6})(?:\.(\d{1,2}))?\s*$/.exec(String(miles ?? ''));
+  const r = /^\s*\$?(\d{0,2})(?:\.(\d{1,4}))?\s*$/.exec(String(rate ?? ''));
+  if (!m || !r || (!r[1] && !r[2])) return null;
+  const m100 = BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'));
+  const r4 = BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0'));
+  const cents = Number(divRoundHalfUp(m100 * r4, 10000n));
+  const rc = Number(r4) / 100; // cents per mile, e.g. 72.5
+  return { miles: `${m[1]}${m[2] ? `.${m[2]}` : ''}`, rateCentsText: String(Number(rc.toFixed(2))), amountCents: cents };
+}

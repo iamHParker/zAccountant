@@ -104,6 +104,19 @@ The phone never signs in to your books: it gets a <strong>road key</strong> that
 <p>Lost the phone? <strong>turn off</strong> its key in the same place. Keys last 90 days.</p>`,
   },
   {
+    id: 'mileiq', tab: 'trips', title: 'Mileage from MileIQ',
+    words: 'mileiq mileage miles drive drives car vehicle log irs rate import csv tolls parking local driving',
+    html: `
+<p>In MileIQ's monthly email choose <strong>Download as CSV</strong>, then <strong>Trips → Import from MileIQ</strong> and pick the file.</p>
+<ol>
+  <li>Business drives are ticked; personal and commute drives are never imported.</li>
+  <li>Each drive goes on the trip whose dates cover it, or on a new <em>Local driving</em> trip. Change any of them.</li>
+  <li>Choose the expense account (Vehicle Expense) and what paid (your own car: an owner account), then <strong>Import</strong>.</li>
+</ol>
+<p>You get one mileage cost per trip per day, with MileIQ's own dollar figure, so the total matches its report. Tolls and parking
+come in as their own costs. A drive is never imported twice. Add projects to the local-driving trip so invoices can bill it.</p>`,
+  },
+  {
     id: 'invoice-setup', tab: null, title: 'Invoice rates, letterhead and logo',
     words: 'invoice rate hourly engineering drafting overtime equipment rental lodging motel airfare logo letterhead tax id firm sales tax default project',
     html: `

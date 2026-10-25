@@ -5,7 +5,7 @@
 // A saved cost is never changed: Edit voids it (entry reversed) and posts the corrected copy, photos and all.
 import { withTransaction } from '../db/pool.js';
 import { LedgerError, isIsoDate, validateEntry } from '../core/ledger.js';
-import { toCents, divRoundHalfUp } from '../core/money.js';
+import { toCents, divRoundHalfUp, mileageAmount } from '../core/money.js';
 import { insertEntry, reverseEntry, cleanIdempotencyKey } from './ledgerService.js';
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
@@ -18,23 +18,8 @@ const text = (v, max) => (v == null || v === '' ? null : String(v).replace(/[\u0
 export const MAX_PHOTO_BYTES = 3_145_728;
 export const MAX_PHOTOS_PER_COST = 6;
 const MAX_TRIP_JOBS = 50;
+export { mileageAmount }; // lives in core/money.js (the MileIQ reader uses it too)
 export const COST_KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
-
-/**
- * Mileage: miles (up to 2 decimals) × a rate in dollars per mile (up to 4 decimals, e.g. "0.70" or "0.725").
- * Returns { miles, rateCentsText, amountCents } or null if either isn't a number. Exact, rounded half-up once:
- * 212.4 mi × $0.725 = $153.99 (21240 × 7250 / 10000 = 15399).
- */
-export function mileageAmount(miles, rate) {
-  const m = /^\s*(\d{1,6})(?:\.(\d{1,2}))?\s*$/.exec(String(miles ?? ''));
-  const r = /^\s*\$?(\d{0,2})(?:\.(\d{1,4}))?\s*$/.exec(String(rate ?? ''));
-  if (!m || !r || (!r[1] && !r[2])) return null;
-  const m100 = BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'));
-  const r4 = BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0'));
-  const cents = Number(divRoundHalfUp(m100 * r4, 10000n));
-  const rc = Number(r4) / 100; // cents per mile, e.g. 72.5
-  return { miles: `${m[1]}${m[2] ? `.${m[2]}` : ''}`, rateCentsText: String(Number(rc.toFixed(2))), amountCents: cents };
-}
 
 /** "60", "33.33", "12.5%" → hundredths of a percent (6000, 3333, 1250); null if not a percent from 0 to 100. */
 export function percentToBp(v) {
@@ -201,7 +186,9 @@ export async function getTrip(db, companyId, tripId) {
 const payableFrom = (a) => a.is_active && (a.cash_flow === 'cash' || a.subtype === 'credit_card' || (a.type === 'equity' && a.system_key !== 'retained_earnings'));
 const expenseOk = (a) => a.is_active && (a.type === 'expense' || (a.type === 'asset' && a.cash_flow !== 'cash' && !a.system_key));
 
-export async function addTripCost(pool, companyId, tripId, input, { actor = null, idempotencyKey = null, costId = null, replacesId = null } = {}) {
+// `mileageCents` (server only, never from a request): an imported mileage cost keeps its source's own figure, e.g.
+// MileIQ rounds each drive to the cent and adds them up, so the books tie out to its report to the penny.
+export async function addTripCost(pool, companyId, tripId, input, { actor = null, idempotencyKey = null, costId = null, replacesId = null, mileageCents = null } = {}) {
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
@@ -222,7 +209,7 @@ export async function addTripCost(pool, companyId, tripId, input, { actor = null
     if (kind === 'mileage') {
       mileage = mileageAmount(input?.miles, input?.mileRate);
       if (!mileage) errors.push('enter the miles (like 212.4) and the rate per mile (like 0.70)');
-      else amount = mileage.amountCents;
+      else amount = Number.isSafeInteger(mileageCents) ? mileageCents : mileage.amountCents;
     } else {
       try { amount = toCents(String(input?.amount ?? '')); } catch { errors.push('the amount is not a dollar amount'); }
     }
