@@ -42,9 +42,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   confirmation before the Board certifies DC.
 - **Production has no backups yet** (Railway Hobby plan can't schedule them). Homer decides by mid-Nov: upgrade
   to Pro, or Claude builds a nightly pg_dump to outside storage. Must be in place, with a restore drill, before alpha.
-- **Queued for late next week (Homer, 2026-10-24): "Tax-ready" add-on, level 1 only.** Map accounts to Schedule C /
-  1120-S / 1065 lines, a Tax summary report, 1099-NEC totals per vendor, W-2/W-3 totals. Not printed forms, not e-file
-  (a CPA partner does real preparation through an accountant's role).
+- Tax-ready level 1 is built (see below). Level 2+ (printed forms, e-file) is not planned: a CPA partner does real
+  preparation through an accountant's role. Tax line numbers are `verified: false` until the Board checks them.
 - Front page claims: the Security section's "Coming" list (encryption on the user's side so we can't read the data;
   servers in Switzerland) is Homer's plan, a placeholder during alpha. Never present it as done until it is built.
 - All tax-table blocks are `verified: false` until the Board certifies them; companies run in calculate-only mode.
@@ -79,6 +78,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   Expense split across jobs: quantity `1/N` from the invoice's "Jobs sharing these expenses" box; typed quantities win.
 - New-company setup wizard (migration 017): `entity_type`, `books_start_date`, `setup_done`; `GET/PUT …/setup`;
   the `setup` tab; Home's "Finish setting up" list. Entity type feeds Tax-ready (`src/core/entityTypes.js`).
+- Tax-ready level 1 (plan feature `tax`, migration 018): `src/core/taxLines.js` (categories → form lines, 1099 threshold
+  by year), `src/services/taxService.js`; Reports tabs Tax Summary, 1099-NEC, W-2 / W-3.
 - Front page at `/` (`public/welcome.html`, plain HTML, prices from `GET /api/public/plans`); the app is at `/app`.
   Settings → Back up your books (`src/services/backupService.js`): re-importable CSVs of the chart and journal.
 - Guides: `docs/user-guide/` (chapters by tier: everyone, Basic, Payroll, Timesheets, staff) and

@@ -170,8 +170,12 @@ createApp({
         { id: 'balance-sheet', label: 'Balance Sheet', perm: 'view_books' }, { id: 'income-statement', label: 'Profit & Loss', perm: 'view_books', range: true },
         { id: 'cash-flow', label: 'Cash Flow', perm: 'view_books', range: true }, { id: 'trial-balance', label: 'Trial Balance', perm: 'view_books' },
         { id: 'payroll-register', label: 'Payroll Register', perm: 'payroll', feature: 'payroll', range: true },
+        { id: 'tax-summary', label: 'Tax Summary', perm: 'view_books', feature: 'tax', range: true },
+        { id: 'tax-1099', label: '1099-NEC', perm: 'view_books', feature: 'tax', yearly: true },
+        { id: 'tax-w2', label: 'W-2 / W-3', perm: 'payroll', feature: 'tax', yearly: true },
       ],
-      report: { type: 'balance-sheet', from: yearStart(), to: today(), compare: 'none', data: null },
+      report: { type: 'balance-sheet', from: yearStart(), to: today(), year: Number(today().slice(0, 4)), compare: 'none', data: null },
+      taxCats: null,
       showNewAcct: false, newAcct: { code: '', name: '', type: 'expense', subtype: 'operating' }, register: null,
       subtypeChoices: {
         asset: [['current', 'Current asset (prepaid, deposits…)'], ['bank', 'Bank or cash account'], ['receivable', 'Money owed to you'], ['fixed', 'Equipment, vehicle, building'], ['contra', 'Accumulated depreciation'], ['investment', 'Long-term investment']],
@@ -237,8 +241,11 @@ createApp({
     helpList() { return searchHelp(this.help.q); },
     helpArticle() { return HELP.find((h) => h.id === this.help.id) ?? HELP[0]; },
     reportIsRange() { return Boolean(this.reportTypes.find((x) => x.id === this.report.type)?.range); },
+    reportIsYearly() { return Boolean(this.reportTypes.find((x) => x.id === this.report.type)?.yearly); },
+    reportTies() { return ['balance-sheet', 'income-statement', 'cash-flow', 'trial-balance'].includes(this.report.type); },
     reportQuery() {
       const r = this.report;
+      if (this.reportIsYearly) return `year=${r.year}`;
       const base = this.reportIsRange ? `from=${r.from}&to=${r.to}` : `asOf=${r.to}`;
       return ['balance-sheet', 'income-statement'].includes(r.type) && r.compare !== 'none' ? `${base}&compare=${r.compare}` : base;
     },
@@ -809,6 +816,15 @@ createApp({
       const type = r.type;
       const data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/${type}?${this.reportQuery}`));
       if (r.type === type) r.data = data; // ignore an answer for a report the user has already switched away from
+      if (type === 'tax-summary' && data?.form) this.taxCats = await this.run(() => api('GET', `/companies/${this.companyId}/tax-categories`));
+    },
+    /** Tax-ready: give accounts a tax category (null = back to the suggestion), then refresh the summary. */
+    async saveTaxCategories(items, done) {
+      if (await this.run(() => api('PUT', `/companies/${this.companyId}/tax-categories`, { items }), done)) this.loadReport();
+    },
+    acceptTaxSuggestions() {
+      const items = (this.taxCats?.accounts ?? []).filter((a) => a.suggested).map((a) => ({ accountId: a.id, category: a.category }));
+      if (items.length) this.saveTaxCategories(items, `${items.length} suggestions saved.`);
     },
     async createAccount() {
       const a = await this.run(() => api('POST', `/companies/${this.companyId}/accounts`, this.newAcct), 'Account added.');

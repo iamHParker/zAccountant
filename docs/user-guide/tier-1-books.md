@@ -119,10 +119,26 @@ what's overdue.
 | Cash Flow | why cash went up or down: operations, equipment, loans and owner money |
 | Trial Balance | every account's balance; what your accountant asks for |
 | AR / AP Aging (on the Sales and Bills tabs) | who owes you, whom you owe, and how late |
+| Tax Summary | income and expenses on the lines of your federal return (Schedule C, 1065, 1120-S or 1120) |
+| 1099-NEC | what each vendor marked 1099 was paid in a tax year, and who needs a form |
+| W-2 / W-3 (payroll role) | each employee's W-2 boxes for the year, and the W-3 totals |
 
 **Compare with** "the period before" or "a year earlier" shows both side by side, with the change in dollars and
 percent. **Download CSV** opens in Excel. **Print / Save PDF** prints only the report. Each statement shows "✓ This
 report ties out" when its own check passes. If you ever see ⚠, please send a 🐞 Beta feedback report.
+
+**Tax-ready** (the last three reports) gives your tax preparer totals; nothing is filed or printed as a form.
+- **Tax Summary** uses the type of business you chose at setup to pick the return. Each income and expense account
+  has a *tax category* (advertising, rent, wages…) that puts it on a line. Ones marked *suggested* are our guess from the
+  account's name: check each and change it in the list beside the account, or press **accept all suggestions** to keep
+  them. Some items go elsewhere (interest income to Schedule B or Schedule K, asset sales to Form 4797) and are listed
+  separately. Meals are shown in full; generally half is deductible. Line numbers follow the IRS's 2025 instructions.
+- **1099-NEC**: pick the tax year. A form is needed for each vendor marked 1099 (Bills → Vendors) paid **$600** or more in
+  2025, or **$2,000** or more from 2026, by cash, check or ACH. Card payments are left out: the card company reports them
+  on a 1099-K. You still need each vendor's tax ID from their Form W-9. *Worth a second look* lists vendors not marked
+  1099 who were paid over the amount.
+- **W-2 / W-3**: boxes 1–6, box 12 code D (401(k)) and the state boxes, by pay date. Box 12 DD and box 14 are not
+  tracked yet.
 
 ## 8. Settings
 

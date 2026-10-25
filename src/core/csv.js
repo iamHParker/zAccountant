@@ -102,3 +102,42 @@ export function payrollRegisterRows(d, { company, title }) {
   rows.push(['Total', '', '', d.totals.hours ?? '', ...cells(d.totals), '']);
   return rows;
 }
+
+/** Tax summary → rows: each line of the return with its total, the accounts under it, then items reported elsewhere. */
+export function taxSummaryRows(d, { company, title }) {
+  const rows = [[company], [title], [`${d.from} to ${d.to}`], [d.formName ?? d.message ?? ''], []];
+  if (!d.form) return rows;
+  rows.push(['Line', 'Description', 'Account', 'Amount', 'Category', 'Suggested?']);
+  for (const g of d.lines) {
+    rows.push([g.line, g.title, '', amt(g.cents), '', '']);
+    for (const a of g.accounts) rows.push(['', '', `${a.code} ${a.name}`, amt(a.cents), a.category, a.suggested ? 'suggested' : '']);
+  }
+  if (d.elsewhere.length) {
+    rows.push([], ['Reported elsewhere']);
+    for (const g of d.elsewhere) for (const a of g.accounts) rows.push(['', g.note, `${a.code} ${a.name}`, amt(a.cents), a.category, a.suggested ? 'suggested' : '']);
+  }
+  rows.push([], ['', 'Ordinary business income (before items reported elsewhere)', '', amt(d.ordinaryIncomeCents)]);
+  return rows;
+}
+
+/** 1099-NEC totals → rows: one per vendor marked for a 1099. */
+export function nec1099Rows(d, { company, title }) {
+  const rows = [[company], [title], [`Payments made in ${d.year}`], [`Threshold ${centsToDecimal(d.thresholdCents)}`], []];
+  rows.push(['Vendor', 'Paid (cash, check, ACH)', 'Paid by card (on 1099-K instead)', 'Form needed?', 'Address on file?']);
+  for (const v of d.vendors) rows.push([v.name, amt(v.paidCents), amt(v.byCardCents), v.needsForm ? 'yes' : 'no', v.hasAddress ? 'yes' : 'no']);
+  rows.push(['Total on forms needed', amt(d.totalCents)]);
+  return rows;
+}
+
+/** W-2 / W-3 totals → rows: one per employee, then the W-3 totals. */
+export function w2Rows(d, { company, title }) {
+  const rows = [[company], [title], [`Pay dates in ${d.year}`], []];
+  const states = [...new Set(d.employees.flatMap((e) => Object.keys(e.state)))].sort();
+  rows.push(['Employee', 'Box 1 Wages', 'Box 2 Federal tax withheld', 'Box 3 Social Security wages', 'Box 4 Social Security tax',
+    'Box 5 Medicare wages', 'Box 6 Medicare tax', 'Box 12 D (401k)', ...states.flatMap((s) => [`Box 16 ${s} wages`, `Box 17 ${s} tax`])]);
+  const cells = (e) => [amt(e.box1), amt(e.box2), amt(e.box3), amt(e.box4), amt(e.box5), amt(e.box6), amt(e.box12D),
+    ...states.flatMap((s) => [amt(e.state[s]?.box16 ?? 0), amt(e.state[s]?.box17 ?? 0)])];
+  for (const e of d.employees) rows.push([e.employee, ...cells(e)]);
+  rows.push([`W-3 total (${d.w3.forms} forms)`, ...cells(d.w3)]);
+  return rows;
+}
