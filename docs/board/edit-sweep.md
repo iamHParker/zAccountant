@@ -10,7 +10,7 @@ The ledger design itself is sound: nothing that holds posted history is changed 
 | B2 | Voiding a paycheck, tax deposit, trip cost or journal entry doesn't check bank matches or finished reconciliations (payments already do). | One shared check for all. |
 | B3 | Transactions shows "reverse" on invoice/bill/payment/trip entries that the server always refuses. | Show where to void it instead. |
 | B4 | A trip's project % shares can change after one project has billed, so billing can stop adding up to 100%. | Freeze the share of a project that has billed. |
-| B5 | Old invoices and pay stubs reprint with today's names, addresses and letterhead. | Store a copy on the document when issued. Needed before employee edit. |
+| B5 | Old invoices and pay stubs reprint with today's names, addresses and letterhead. | Store a copy on the document when issued. Pay stubs done (PR 54); invoices still open. |
 | B6 | Cancelling an open reconciliation isn't audited. | Audit it. |
 | B7 | Cancelling an open reconciliation never deleted it (its trigger returned NULL on DELETE), so a new one couldn't start. Found in batch 4. | Trigger fixed (migration 031). |
 
