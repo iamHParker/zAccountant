@@ -683,7 +683,9 @@
         ? 'Send invoices to customers and record their payments. What customers owe shows in Accounts Receivable.'
         : 'Enter bills from vendors when they arrive, then record when you pay them. What you owe shows in Accounts Payable.' }}</p>
 
-      <div class="card narrow" v-if="ar.showContact">
+      <!-- Also opens as a pop-up from the invoice/bill form's "+ Add new customer…" choice (ar.contactPopup). -->
+      <div v-if="ar.showContact" :class="{ overlay: ar.contactPopup }" @click.self="ar.contactPopup && closeContact()">
+      <div class="card narrow" :class="{ dialog: ar.contactPopup }">
         <h2>{{ ar.contact.id ? 'Edit ' + S.who : 'New ' + S.who }}</h2>
         <form @submit.prevent="saveContact">
           <label>Name <input v-model="ar.contact.name" required maxlength="120"></label>
@@ -707,17 +709,19 @@
             </div>
             <button type="button" class="small" @click="addPerson">+ Add person</button>
           </fieldset>
-          <button class="primary">{{ ar.contact.id ? 'Save changes' : 'Save ' + S.who }}</button> <button type="button" @click="ar.showContact = false">Cancel</button>
+          <button class="primary">{{ ar.contact.id ? 'Save changes' : 'Save ' + S.who }}</button> <button type="button" @click="closeContact">Cancel</button>
         </form>
+      </div>
       </div>
 
       <div class="card" v-if="ar.showDoc">
         <h2>{{ ar.doc.editId ? 'Edit ' + S.Doc.toLowerCase() + ' ' + ar.doc.editNumber : 'New ' + S.Doc.toLowerCase() }}</h2>
         <p class="hint" v-if="ar.doc.editId">Saving voids the old {{ S.Doc.toLowerCase() }} and records this corrected one in its place{{ S.kind === 'invoice' ? ', with the same number unless you change it' : '' }}. The old one stays in history, marked replaced.</p>
-        <p class="hint" v-if="!ar.contacts.length">Add a {{ S.who }} first (button above).</p>
+        <p class="hint" v-if="!ar.contacts.length">No {{ S.who }}s yet: choose <strong>+ Add new {{ S.who }}…</strong> in the list below.</p>
         <form @submit.prevent="saveDoc">
           <div class="grid4">
-            <label>{{ S.Who }} <select v-model="ar.doc.contactId" required><option value="">Choose…</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+            <label>{{ S.Who }} <select v-model="ar.doc.contactId" required @change="ar.doc.contactId === NEW_CONTACT && quickAddContact()"><option value="">Choose…</option>
+              <option :value="NEW_CONTACT">+ Add new {{ S.who }}…</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
             <label>{{ S.kind === 'invoice' ? 'Invoice number' : "Vendor's bill number" }}
               <input v-model="ar.doc.number" :placeholder="S.kind === 'invoice' ? 'automatic' : 'from their invoice'" :required="S.kind === 'bill'"></label>
             <label>Date <input type="date" v-model="ar.doc.date" required></label>
