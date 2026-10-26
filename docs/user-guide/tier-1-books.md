@@ -267,6 +267,13 @@ corner, then **Share → Copy** (or press and hold a picture in an email or web 
 **📋 Paste** on the cost; Safari shows a small **Paste** bubble, tap it. Screenshots are also in Photos, so
 **🖼 Choose photo** works too. The same three buttons are on payment photos (checks and remittances).
 
+**Checks received on the road.** Tap **+ Check received** (no trip needed): the date, amount, who paid, the check
+number, the invoice number(s) it pays (like 26-124, 26-130), a note (where you deposited it) and photos of the check
+and the remittance. At your desk, **Sales → Checks from the road** shows it with the invoices it found. Press
+**Record payment**: Receive payment opens with the customer, date, check number and amount filled in and spread over
+those invoices. Choose the deposit account and save; the phone's photos are saved with the payment, and the phone
+shows "In the books".
+
 The road key can't see your books or change anything already saved; it can only add to the *From the road* box.
 It works for 90 days. Lost the phone? **Trips → Your phone on the road → turn off**.
 

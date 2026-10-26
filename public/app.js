@@ -319,7 +319,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
-        pdfOver: false, pdfBusy: false, showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        pdfOver: false, pdfBusy: false, roadChecks: [], showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
@@ -1360,6 +1360,27 @@ createApp({
       if (ar.panel === 'docs') ar.docs = (await this.run(() => api('GET', `${base}/${S.docPath}?status=${ar.view}`))) ?? [];
       if (ar.panel === 'payments') ar.payments = (await this.run(() => api('GET', `${base}/${S.payPath}`))) ?? [];
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
+      if (S.kind === 'invoice') ar.roadChecks = ((await this.run(() => api('GET', `${base}/road-items`))) ?? []).filter((i) => i.kind === 'check');
+    },
+    // ---- Checks received on the road (Road page → "Check received"): each becomes a payment here.
+    roadCheckPhotoUrl(i, id) { return `/api${this.arBase()}/road-items/${i.id}/photos/${id}`; },
+    /** Opens Receive payment filled in from the check: the customer and invoices it names, the amount spread over them. */
+    async recordRoadCheck(i) {
+      await this.startPay(i.invoices[0]?.contactId ?? '');
+      const p = this.ar.pay;
+      Object.assign(p, { date: i.data.date, reference: i.data.checkNumber ?? '', memo: [i.data.from && `From ${i.data.from}`, i.data.notes].filter(Boolean).join(' · ').slice(0, 500),
+        roadItem: i, keptPhotos: i.photos.length });
+      let left = i.data.amountCents;
+      for (const inv of i.invoices.filter((x) => x.contactId === p.contactId)) {
+        const d = p.open.find((x) => x.id === inv.id);
+        if (!d || left <= 0) continue;
+        const c = Math.min(left, d.balanceCents); p.amounts[d.id] = (c / 100).toFixed(2); left -= c;
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    async dismissRoadCheck(i) {
+      if (!confirm('Dismiss this check from the road? It will not go into the books.')) return;
+      if (await this.run(() => api('POST', `${this.arBase()}/road-items/${i.id}/dismiss`), 'Dismissed.')) this.loadAr();
     },
     arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.ar.photoView = null; this.loadAr(); },
     // ---------------------------------------------------------------- Projects (the jobs time is entered against)
@@ -1444,7 +1465,7 @@ createApp({
     // ---- The Road page: keys for the phone, and the inbox of what it sent (src/services/roadService.js)
     async loadRoad() {
       const r = this.road;
-      r.items = (await this.run(() => api('GET', `${this.tripBase()}/road-items`))) ?? [];
+      r.items = ((await this.run(() => api('GET', `${this.tripBase()}/road-items`))) ?? []).filter((i) => i.kind !== 'check'); // checks: on Sales
       if (this.can('bills')) r.keys = (await this.run(() => api('GET', `${this.tripBase()}/road-keys`))) ?? [];
       const last = lastRoadAccounts();
       if (!r.expenseId) r.expenseId = last.expenseId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
@@ -2039,6 +2060,8 @@ createApp({
         if (!(await this.run(() => api('POST', `${this.arBase()}/payments/${r.id}/photos`, { picture })))) failed++;
       }
       if (failed) this.flash(`The payment is saved, but ${failed} photo${failed === 1 ? '' : 's'} could not be. Add ${failed === 1 ? 'it' : 'them'} from the Payments tab.`, 'bad');
+      // A check from the road: mark it done and copy the phone's photos to the payment.
+      if (p.roadItem && !p.editId) await this.run(() => api('POST', `${this.arBase()}/road-items/${p.roadItem.id}/accept-check`, { paymentId: r.id }));
       this.ar.showPay = false; this.ar.pay = blankPay(); this.loadAr();
     },
     /** 📋 Paste beside a photo box: the copied screenshot or photo goes to that box's own handler, as if chosen. */

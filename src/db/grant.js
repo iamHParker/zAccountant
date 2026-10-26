@@ -37,7 +37,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (sign_count, last_used_at, name) ON passkeys TO ${role};
     GRANT DELETE ON passkeys, auth_challenges TO ${role};
     GRANT UPDATE (last_used_at, revoked_at) ON road_keys TO ${role};
-    GRANT UPDATE (status, reviewed_by, reviewed_at, trip_id, trip_cost_id, time_entry_id) ON road_items TO ${role};
+    GRANT UPDATE (status, reviewed_by, reviewed_at, trip_id, trip_cost_id, time_entry_id, payment_id) ON road_items TO ${role};
     GRANT UPDATE (role, custom_role_id, department_id) ON memberships TO ${role};
     GRANT UPDATE (name, permissions) ON company_roles TO ${role};
     GRANT DELETE ON company_roles, departments TO ${role};
