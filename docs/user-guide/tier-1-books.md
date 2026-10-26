@@ -146,6 +146,7 @@ phone. Press **+ Add person** to add one.
 
 **Print / Save PDF** prints the invoice with your logo, letterhead, Bill To, Project, invoice number, date, due
 date, terms, the lines (Hours, Date, Description, Rate, Tax, Amount), sales tax, total, payments and balance due.
+On paper the heading row of the lines is blue with white letters and every other line is shaded light blue.
 In the print window, choose "Save as PDF" to email it.
 
 **✉ Email** opens your computer's email program (Outlook, Mail…) with the Send to address, a subject (invoice

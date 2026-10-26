@@ -186,6 +186,13 @@ table.invoice-box th { color: var(--muted); font-weight: 600; }
 .invoice-note { margin-top: 8px; }
 .invoice-footer { margin-top: 16px; font-style: italic; }
 table.invoice-lines thead th { background: var(--bg); }
+/* Printed invoice, like Homer's Excel one: a blue heading row with white text, light-blue bands on every other line
+   (totals stay plain). print-color-adjust keeps the colours: browsers leave backgrounds out of print otherwise. */
+@media print {
+  table.invoice-lines { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  table.invoice-lines thead th { background: #4f81bd; color: #fff; font-weight: 700; }
+  table.invoice-lines tr.item:nth-child(odd) td { background: #dce6f1; }
+}
 .logo-row { align-items: center; gap: 12px; margin-bottom: 4px; }
 .letterhead .grow { flex: 1; }
 .alpha-note { background: var(--warn-bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
