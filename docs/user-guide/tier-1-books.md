@@ -202,7 +202,10 @@ is already on an invoice can't be edited or voided until that invoice is.
    the year, from irs.gov, or your own); the amount is worked out. **📷 Take photo** keeps the receipt with the cost;
    **🖼 Choose photo** picks one already taken (or a screenshot) from Photos; **📋 Paste** adds a picture you copied
    (see below). Saving records the expense in your books.
-3. **+ Add travel time**: the hours spent travelling. It's billed by the same shares, at the rate you pick on the invoice.
+3. **+ Add travel time**: one entry per day. Type the hours, or the **Start** and **End** times and the **Breaks**
+   (lunch, fuel stops, all added up, like 1:15); the hours are worked out (7:30 AM to 5:45 PM less 1:15 = 9:00). A drive
+   past midnight counts into the next morning. **Save, then next day** keeps the times and moves to the next date, so a
+   three-day trip is three quick entries. It's billed by the same shares, at the rate you pick on the invoice.
 4. A cost that shows up later (tolls two weeks after the trip): open the trip and add it. It waits on each project's
    list until it's billed. To correct a cost, press **edit**; the old one is voided and the corrected one takes its
    place, with its photos. A cost already on an invoice can't be changed until that invoice is edited or voided.
@@ -222,7 +225,7 @@ while you travel, even with no signal, without signing in to your books on the p
    page's box.)
 2. On the road: **+ New trip** (name, dates, the projects it's for; type new project numbers like *2610 Garcia Barn*
    one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other; the amount or
-   the miles and rate; receipt photos: **📷 Take photo**, **🖼 Choose photo** from Photos, or **📋 Paste**) and **+ Travel time**. Everything is saved on the phone first and sent when
+   the miles and rate; receipt photos: **📷 Take photo**, **🖼 Choose photo** from Photos, or **📋 Paste**) and **+ Travel time** (one per day: hours, or start, end and breaks; **Save, then next day**). Everything is saved on the phone first and sent when
    there is signal. The top of the page says how many are waiting; **Send now** sends them at once.
 3. Back at the desk: **Trips → From the road** lists what arrived. Choose the expense account and what you paid with,
    then **Accept** the new trip first (its projects share it evenly; open the trip to change the shares), then its

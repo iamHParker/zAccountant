@@ -1379,16 +1379,25 @@
 
         <div class="card">
           <div class="row wrap"><h2>Travel time</h2><button v-if="can('bills') && !trip.travel" @click="newTravel">+ Add travel time</button></div>
-          <form v-if="trip.travel" @submit.prevent="saveTravel" class="grid2">
+          <form v-if="trip.travel" @submit.prevent="saveTravel()" class="grid2">
+            <p class="hint small span2">One entry per day. Type the hours, or the start and end times and the breaks (lunch, stops); the hours are worked out.</p>
             <label>Date <input type="date" v-model="trip.travel.date" required></label>
-            <label>Hours <input v-model="trip.travel.hours" inputmode="decimal" class="num" placeholder="6 or 5:30" required></label>
+            <label v-if="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)?.hours">Hours
+              <input :value="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).hours" class="num" readonly></label>
+            <label v-else>Hours <input v-model="trip.travel.hours" inputmode="decimal" class="num" placeholder="6 or 5:30" :required="!trip.travel.start && !trip.travel.end"></label>
+            <label>Start (optional) <input type="time" v-model="trip.travel.start"></label>
+            <label>End (optional) <input type="time" v-model="trip.travel.end"></label>
+            <label>Breaks (h:mm) <input v-model.trim="trip.travel.breaks" inputmode="decimal" placeholder="0:45"></label>
             <label>Notes (optional) <input v-model="trip.travel.notes" maxlength="500" placeholder="Drive SAT to Dallas"></label>
-            <div><button class="primary">Save</button> <button type="button" @click="trip.travel = null">Cancel</button></div>
+            <p class="small span2" :class="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)?.error ? 'bad' : 'muted'" v-if="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)">
+              {{ clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).error || clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).text }}</p>
+            <div class="span2"><button class="primary">Save</button> <button type="button" @click="saveTravel(true)">Save, then next day</button>
+              <button type="button" @click="trip.travel = null">Cancel</button></div>
           </form>
           <p class="hint" v-if="!trip.cur.time.length && !trip.travel">No travel time. It's billed by the same shares, at the hourly rate you pick on the invoice.</p>
           <div v-for="x in trip.cur.time" class="cost-row">
             <div class="row"><strong>{{ x.notes || 'Travel' }}</strong><span class="num">{{ x.hours }} h</span></div>
-            <div class="small muted">{{ usDate(x.date) }} · {{ x.userName }}{{ x.billable ? '' : ' · not billable' }}</div>
+            <div class="small muted">{{ usDate(x.date) }}{{ x.start ? ` · ${x.start}–${x.end}` : '' }} · {{ x.userName }}{{ x.billable ? '' : ' · not billable' }}</div>
             <div class="small" v-if="x.billed.length">Billed: {{ billedText(x) }}</div>
             <div class="actions" v-else-if="can('bills')"><button class="link" @click="removeTravel(x)">delete</button></div>
           </div>

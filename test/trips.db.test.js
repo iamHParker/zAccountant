@@ -56,6 +56,11 @@ test('trips: costs and travel time shared by project, billed once per project', 
   assert.equal(await net(pool, co.id, A['3000']), -38900); // put in by the owner
   trip = await trips.addTravelTime(pool, co.id, viewer, trip.id, { date: '2026-10-04', hours: '6', notes: 'Drive to Dallas' });
   assert.equal(trip.time[0].hours, '6.00');
+  // Travel from the clock with breaks: 6:15 AM to 7:05 PM = 12:50, less 0:45 + 0:30 typed as 1:15 = 11:35.
+  const t2 = await trips.addTravelTime(pool, co.id, viewer, trip.id, { date: '2026-10-06', start: '06:15', end: '19:05', breaks: '1:15' });
+  assert.deepEqual(t2.time.map((x) => [x.date, x.minutes, x.start, x.end]).at(-1), ['2026-10-06', 695, '06:15', '19:05']);
+  await assert.rejects(trips.addTravelTime(pool, co.id, viewer, trip.id, { date: '2026-10-06', start: '06:15', end: '07:00', breaks: 'lunch' }), /not valid/);
+  await trips.removeTravelTime(pool, co.id, viewer, trip.id, t2.time.at(-1).id);
 
   const pull = await projects.listUnbilled(pool, co.id, { jobId: big.id });
   // 80% of $412.30 = $329.84; 80% of $389.00 = $311.20; 80% of 6 h = 4.8 h.

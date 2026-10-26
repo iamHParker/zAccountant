@@ -324,3 +324,4 @@ button.wide { width: 100%; margin-top: 8px; }
 .photo-row { margin: 8px 0; }
 .photo-row .photo-btn { margin: 0 6px 6px 0; }
 button.photo-btn { background: none; font: inherit; color: inherit; }
+.grid2 > .span2 { grid-column: 1 / -1; }

@@ -8,6 +8,7 @@ import { createApp } from '/vendor/vue.js';
 // The screens (the HTML in road.html), compiled by the server into a render function (src/core/pages.js).
 import { render } from '/road.render.js';
 import { picturesFromClipboard } from '/paste.js';
+import { clockTime, nextDay } from '/clock.js';
 
 const KEY_STORE = 'zacc.roadKey';
 const SUMMARY_STORE = 'zacc.roadSummary';
@@ -175,7 +176,8 @@ createApp({
     },
     lastDate() { return this.tripItems.filter((i) => i.data.date).at(-1)?.data.date ?? today(); },
     newCost() { this.timeForm = null; this.costForm = { kind: 'other', date: this.lastDate(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [] }; },
-    newTime() { this.costForm = null; this.timeForm = { date: this.lastDate(), hours: '', notes: '' }; },
+    newTime() { this.costForm = null; this.timeForm = { date: this.lastDate(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
+    clockTime,
     // A screenshot or photo copied to the clipboard: the same as choosing it.
     async pastePhotos() {
       try { await this.addPhotos({ target: { files: await picturesFromClipboard(), value: '' } }); }
@@ -203,9 +205,15 @@ createApp({
       else data.amount = f.amount.replace(/[$,]/g, '');
       if (await this.addItem('cost', data, f.photos)) { this.costForm = null; this.flash('Saved on this phone.'); }
     },
-    async saveTime() {
-      const f = this.timeForm;
-      if (await this.addItem('time', { trip: this.tripRef, date: f.date, hours: f.hours, notes: f.notes.trim() || null })) { this.timeForm = null; this.flash('Saved on this phone.'); }
+    // One day's travel: the hours, or start and end less breaks. "Save, then next day" keeps the times for the next date.
+    async saveTime(next = false) {
+      const f = this.timeForm; const clock = clockTime(f.start, f.end, f.breaks);
+      if (clock?.error) { this.flash(clock.error, 'bad'); return; }
+      const data = { trip: this.tripRef, date: f.date, notes: f.notes.trim() || null,
+        ...(clock ? { start: f.start, end: f.end, breaks: f.breaks, hours: clock.hours } : { hours: f.hours }) };
+      if (!(await this.addItem('time', data))) return;
+      this.timeForm = next ? { ...f, date: nextDay(f.date), hours: clock ? '' : f.hours } : null;
+      this.flash(next ? `Saved on this phone. Now ${this.usDate(nextDay(f.date))}.` : 'Saved on this phone.');
     },
     async removeItem(i) {
       if (!confirm('Remove this from the phone? It has not been sent.')) return;

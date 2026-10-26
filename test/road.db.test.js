@@ -89,6 +89,13 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   ok(await phone.call('POST', '/api/road/items', { clientId: 'cost-miles-01', kind: 'cost',
     data: { trip: ref, date: '2026-10-06', kind: 'mileage', miles: '150', mileRate: '0.70', description: 'Site visits' } }), 201);
   ok(await phone.call('POST', '/api/road/items', { clientId: 'time-drive-01', kind: 'time', data: { trip: ref, date: '2026-10-04', hours: '6', notes: 'Drive SAT to DAL' } }), 201);
+  // Day 2 from the clock: 7:30 AM to 5:45 PM = 10:15, less 1:15 of breaks = 9:00. The phone's own "hours" is not trusted.
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'time-day2-01', kind: 'time',
+    data: { trip: ref, date: '2026-10-05', start: '07:30', end: '17:45', breaks: '1:15', hours: '1' } }), 201);
+  const badBreaks = await phone.call('POST', '/api/road/items', { clientId: 'time-bad-001', kind: 'time',
+    data: { trip: ref, date: '2026-10-05', start: '07:30', end: '17:45', breaks: 'lunch' } });
+  assert.equal(badBreaks.status, 400);
+  assert.match(badBreaks.body.details.join(' '), /breaks must be like 0:45/);
   const bad = await phone.call('POST', '/api/road/items', { clientId: 'cost-bad-001', kind: 'cost', data: { trip: ref, date: '2026-13-01', amount: '-5' } });
   assert.equal(bad.status, 400);
   assert.ok(bad.body.details.length >= 2);
@@ -98,8 +105,9 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
 
   // At the desk: four items waiting.
   let inbox = ok(await desk.call('GET', `${b}/road-items`));
-  assert.deepEqual(inbox.map((i) => i.kind), ['trip', 'cost', 'cost', 'time']);
-  const [tItem, air, miles, drive] = inbox;
+  assert.deepEqual(inbox.map((i) => i.kind), ['trip', 'cost', 'cost', 'time', 'time']);
+  const [tItem, air, miles, drive, day2] = inbox;
+  assert.equal(day2.hours, '9.00');
   assert.equal(air.trip.name, 'Dallas, Oct 4-6');
   assert.equal(air.photos.length, 1);
   assert.equal(drive.hours, '6.00');
@@ -120,11 +128,11 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.equal(photos.length, 1);
   ok(await desk.call('POST', `${b}/road-items/${miles.id}/accept`, accounts));
   ok(await desk.call('POST', `${b}/road-items/${drive.id}/accept`, {}));
+  ok(await desk.call('POST', `${b}/road-items/${day2.id}/accept`, {}));
   const after = ok(await desk.call('GET', `${b}/trips/${tr.tripId}`));
   // 150 mi × $0.70 = $105.00; airfare $412.30.
   assert.deepEqual(after.costs.map((c) => c.amountCents).sort((x, y) => x - y), [10500, 41230]);
-  assert.equal(after.time.length, 1);
-  assert.equal(after.time[0].minutes, 360);
+  assert.deepEqual(after.time.map((x) => [x.date, x.minutes, x.start, x.end]), [['2026-10-04', 360, null, null], ['2026-10-05', 540, '07:30', '17:45']]);
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
   // Accepting twice is refused; a photo for a reviewed cost is refused.
   assert.equal((await desk.call('POST', `${b}/road-items/${air.id}/accept`, accounts)).status, 400);

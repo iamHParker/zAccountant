@@ -174,7 +174,8 @@ export async function getTrip(db, companyId, tripId) {
        JOIN journal_entries e ON e.id = tc.journal_entry_id
       WHERE tc.trip_id = $1 ORDER BY tc.status, tc.cost_date, tc.created_at`, [t.id]);
   const { rows: time } = await db.query(
-    `SELECT te.id, to_char(te.work_date, 'YYYY-MM-DD') AS date, te.minutes, te.notes, te.billable, te.status, u.name AS "userName",
+    `SELECT te.id, to_char(te.work_date, 'YYYY-MM-DD') AS date, te.minutes, to_char(te.start_time, 'HH24:MI') AS start,
+            to_char(te.end_time, 'HH24:MI') AS "end", te.notes, te.billable, te.status, u.name AS "userName",
             COALESCE((SELECT json_agg(json_build_object('jobId', l.job_id, 'number', d.number)) FROM document_lines l JOIN documents d ON d.id = l.document_id
                        WHERE l.time_entry_id = te.id AND d.status = 'posted'), '[]') AS billed
        FROM time_entries te JOIN users u ON u.id = te.user_id WHERE te.trip_id = $1 ORDER BY te.work_date, te.created_at`, [t.id]);
