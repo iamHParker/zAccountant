@@ -118,13 +118,22 @@
 
         <section class="card" v-if="timeForm">
           <h2>Travel time</h2>
-          <form @submit.prevent="saveTime">
+          <form @submit.prevent="saveTime()">
+            <p class="muted small">One entry per day. Type the hours, or the start and end times and the breaks; the hours are worked out.</p>
             <div class="grid2">
               <label>Date <input type="date" v-model="timeForm.date" required></label>
-              <label>Hours <input v-model.trim="timeForm.hours" inputmode="decimal" placeholder="3.5 or 3:30" required></label>
+              <label v-if="clockTime(timeForm.start, timeForm.end, timeForm.breaks)?.hours">Hours
+                <input :value="clockTime(timeForm.start, timeForm.end, timeForm.breaks).hours" readonly></label>
+              <label v-else>Hours <input v-model.trim="timeForm.hours" inputmode="decimal" placeholder="3.5 or 3:30" :required="!timeForm.start && !timeForm.end"></label>
+              <label>Start <input type="time" v-model="timeForm.start"></label>
+              <label>End <input type="time" v-model="timeForm.end"></label>
             </div>
+            <label>Breaks (h:mm) <input v-model.trim="timeForm.breaks" inputmode="decimal" placeholder="0:45"></label>
+            <p class="small" :class="clockTime(timeForm.start, timeForm.end, timeForm.breaks)?.error ? 'bad' : 'muted'" v-if="clockTime(timeForm.start, timeForm.end, timeForm.breaks)">
+              {{ clockTime(timeForm.start, timeForm.end, timeForm.breaks).error || clockTime(timeForm.start, timeForm.end, timeForm.breaks).text }}</p>
             <label>Notes <input v-model="timeForm.notes" maxlength="300" placeholder="Drive SAT to DAL"></label>
-            <button class="primary">Save</button> <button type="button" @click="timeForm = null">Cancel</button>
+            <button class="primary">Save</button> <button type="button" @click="saveTime(true)">Save, then next day</button>
+            <button type="button" @click="timeForm = null">Cancel</button>
           </form>
         </section>
 

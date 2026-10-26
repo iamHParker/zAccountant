@@ -10,7 +10,7 @@ import qrcode from 'qrcode-generator';
 import { withTransaction } from '../db/pool.js';
 import { LedgerError, isIsoDate } from '../core/ledger.js';
 import { toCents } from '../core/money.js';
-import { parseDuration, minutesToHours } from '../core/timesheets.js';
+import { parseDuration, parseClock, shiftMinutes, minutesToHours } from '../core/timesheets.js';
 import { parseProjectFolder } from '../core/projects.js';
 import { randomToken } from '../security/crypto.js';
 import { appendAudit } from './audit.js';
@@ -157,8 +157,16 @@ async function cleanItem(db, key, kind, d) {
         else out.amountCents = c;
       }
     } else {
-      const minutes = parseDuration(d.hours);
-      if (minutes == null || minutes <= 0 || minutes > 24 * 60) errors.push('hours must be like 3.5 or 3:30');
+      // The hours, or the start and end times less breaks (worked out again here, not trusted from the phone).
+      let minutes = null;
+      if (d.start || d.end) {
+        const start = parseClock(d.start), end = parseClock(d.end);
+        const off = String(d.breaks ?? '').trim() ? parseDuration(d.breaks) : 0;
+        if (!start || !end) errors.push('the start and end must be times like 7:30 AM');
+        else if (off == null) errors.push('breaks must be like 0:45 or 1:30');
+        else Object.assign(out, { start, end, breakMinutes: off }), minutes = shiftMinutes(start, end) - off;
+      } else minutes = parseDuration(d.hours);
+      if (minutes == null || minutes <= 0 || minutes > 24 * 60) { if (!errors.length) errors.push('hours must be like 3.5 or 3:30'); }
       out.minutes = minutes;
       out.notes = text(d.notes, 300);
     }
@@ -324,7 +332,8 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
       return { accepted: true, tripId, costId: r.costId };
     }
     const t = await createTimeEntry(c, companyId, viewer,
-      { userId: item.user_id, date: d.date, hours: `${Math.floor(d.minutes / 60)}:${String(d.minutes % 60).padStart(2, '0')}`, notes: d.notes, tripId, jobId: null }, { actor });
+      { userId: item.user_id, date: d.date, hours: `${Math.floor(d.minutes / 60)}:${String(d.minutes % 60).padStart(2, '0')}`, start: d.start, end: d.end,
+        notes: d.notes, tripId, jobId: null }, { actor });
     await done({ time_entry_id: t.id, trip_id: tripId });
     return { accepted: true, tripId, timeEntryId: t.id };
   });

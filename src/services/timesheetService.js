@@ -164,7 +164,10 @@ async function cleanEntry(db, companyId, input) {
     minutes = parseDuration(input.hours);
     if (minutes == null) errors.push('hours must be like 7.5 or 7:30');
   } else if (start && end) {
-    minutes = shiftMinutes(start, end) - (input.breakMinutes ? Number(input.breakMinutes) || 0 : 0);
+    // Breaks typed as text ("0:45", travel time) or as a number of minutes (the timesheet API).
+    const off = input.breaks != null && String(input.breaks).trim() !== '' ? parseDuration(input.breaks) : (input.breakMinutes ? Number(input.breakMinutes) || 0 : 0);
+    if (off == null) errors.push('breaks must be like 0:45 or 1:30');
+    else minutes = shiftMinutes(start, end) - off;
   } else if (!errors.length) errors.push('enter the hours, or a start and end time');
   if (minutes != null && !(minutes > 0 && minutes <= 1440)) errors.push('hours must be more than 0 and at most 24');
   const notes = typeof input.notes === 'string' && input.notes.trim() ? input.notes.trim() : null;

@@ -6,6 +6,7 @@ import { render } from '/app.render.js';
 import { HELP, helpForTab, searchHelp } from '/help.js';
 import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
 import { picturesFromClipboard } from '/paste.js';
+import { clockTime, nextDay } from '/clock.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const yearStart = () => today().slice(0, 4) + '-01-01';
@@ -1629,10 +1630,17 @@ createApp({
       const v = this.trip.photoView;
       if (await this.run(() => api('DELETE', `${this.tripBase()}/trip-costs/${v.cost.id}/photos/${ph.id}`), 'Photo removed.')) await this.openTripPhotos(v.cost);
     },
-    newTravel() { Object.assign(this.trip, { travel: { date: this.trip.cur.startDate, hours: '', notes: '' }, cost: null }); },
-    async saveTravel() {
-      const r = await this.run(() => api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, this.trip.travel), 'Travel time saved.');
-      if (r) { this.trip.cur = r; this.trip.travel = null; }
+    newTravel() { Object.assign(this.trip, { travel: { date: this.trip.cur.startDate, hours: '', start: '', end: '', breaks: '', notes: '' }, cost: null }); },
+    clockTime,
+    /** One day's travel: the hours, or start and end less breaks. "Save, then next day" keeps the times for the next date. */
+    async saveTravel(next = false) {
+      const t = this.trip.travel; const clock = clockTime(t.start, t.end, t.breaks);
+      if (clock?.error) { this.flash(clock.error, 'bad'); return; }
+      const body = clock ? { date: t.date, start: t.start, end: t.end, breaks: t.breaks, notes: t.notes } : { date: t.date, hours: t.hours, notes: t.notes };
+      const r = await this.run(() => api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, body), 'Travel time saved.');
+      if (!r) return;
+      this.trip.cur = r;
+      this.trip.travel = next ? { ...t, date: nextDay(t.date), hours: clock ? '' : t.hours } : null;
     },
     async removeTravel(x) {
       if (!confirm(`Delete ${x.hours} h of travel time on ${x.date}?`)) return;
