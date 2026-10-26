@@ -147,6 +147,10 @@ phone. Press **+ Add person** to add one.
 **Print / Save PDF** prints the invoice with your logo, letterhead, Bill To, Project, invoice number, date, due
 date, terms, the lines (Hours, Date, Description, Rate, Tax, Amount), sales tax, total, payments and balance due.
 On paper the heading row of the lines is blue with white letters and every other line is shaded light blue.
+Bill To and Project sit side by side in matching boxes (your tax ID note goes in the Project box). The closing line
+from Settings → Invoice letterhead prints beside the balance due ("Thank you for your business." until you type
+your own). Chrome and Edge print a page number at the bottom instead of the date and web address; in Safari, untick
+"Print headers and footers" in the print window.
 In the print window, choose "Save as PDF" to email it.
 
 **✉ Email** opens your computer's email program (Outlook, Mail…) with the Send to address, a subject (invoice

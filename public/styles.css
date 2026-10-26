@@ -181,10 +181,11 @@ img.invoice-logo { max-height: 90px; max-width: 220px; object-fit: contain; }
 table.invoice-box { width: auto; border-collapse: collapse; }
 table.invoice-box th, table.invoice-box td { border: 1px solid var(--line); padding: 3px 10px; text-align: center; font-size: 13px; }
 table.invoice-box th { color: var(--muted); font-weight: 600; }
-.invoice-parties { margin-bottom: 16px; align-items: start; }
+.invoice-parties { margin-bottom: 16px; align-items: stretch; }
 .invoice-parties .boxed { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
 .invoice-note { margin-top: 8px; }
-.invoice-footer { margin-top: 16px; font-style: italic; }
+.invoice-title { font-size: 20px; font-weight: 700; letter-spacing: 1px; text-align: right; margin-bottom: 4px; }
+table.invoice-lines td.invoice-thanks { font-weight: 400; font-style: italic; text-align: left; }
 table.invoice-lines thead th { background: var(--bg); }
 /* Printed invoice, like Homer's Excel one: a blue heading row with white text, light-blue bands on every other line
    (totals stay plain). print-color-adjust keeps the colours: browsers leave backgrounds out of print otherwise. */
@@ -192,6 +193,9 @@ table.invoice-lines thead th { background: var(--bg); }
   table.invoice-lines { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   table.invoice-lines thead th { background: #4f81bd; color: #fff; font-weight: 700; }
   table.invoice-lines tr.item:nth-child(odd) td { background: #dce6f1; }
+  /* Any page-margin box replaces the browser's own header and footer (date, page title, web address) in Chrome and
+     Edge; the page number takes its place. Safari ignores this: untick "Print headers and footers" there. */
+  @page { @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #555; } }
 }
 .logo-row { align-items: center; gap: 12px; margin-bottom: 4px; }
 .letterhead .grow { flex: 1; }
