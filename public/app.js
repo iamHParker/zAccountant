@@ -1,6 +1,8 @@
 // zAccountant browser app (Vue 3, no build step).
 // ℹ️ Vue keeps the page in sync with the data below: change `this.tab` and the screen switches.
 import { createApp } from '/vendor/vue.js';
+// The screens (the HTML in index.html), compiled by the server into a render function (src/core/pages.js).
+import { render } from '/app.render.js';
 import { HELP, helpForTab, searchHelp } from '/help.js';
 import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
 
@@ -240,6 +242,7 @@ const employeeForm = (e) => {
 };
 
 createApp({
+  render,
   data() {
     return {
       companies: [], companyId: null, company: null, tab: 'home', message: null,

@@ -5,6 +5,8 @@
 // the phone's road key, item by item; each item carries its own id, so sending twice never makes two. At the desk,
 // Trips → "From the road" shows what arrived; nothing is in the books until it is accepted there.
 import { createApp } from '/vendor/vue.js';
+// The screens (the HTML in road.html), compiled by the server into a render function (src/core/pages.js).
+import { render } from '/road.render.js';
 
 const KEY_STORE = 'zacc.roadKey';
 const SUMMARY_STORE = 'zacc.roadSummary';
@@ -68,6 +70,7 @@ const KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging'
 class KeyProblem extends Error {}
 
 createApp({
+  render,
   data() {
     return {
       key: getLocal(KEY_STORE), pasted: '', keyProblem: '', message: null,

@@ -857,7 +857,7 @@
           <label>Check or reference number (optional) <input v-model="ar.pay.reference" maxlength="60"></label>
           <p class="hint" v-if="ar.pay.contactId && !ar.pay.open.length">Nothing open for this {{ S.who }}.</p>
           <table class="data" v-if="ar.pay.open.length">
-            <thead><tr><th>{{ S.Doc }}</th><th>Date</th><th>Due</th><th class="num">Balance</th><th class="num" class="w150">Payment</th></tr></thead>
+            <thead><tr><th>{{ S.Doc }}</th><th>Date</th><th>Due</th><th class="num">Balance</th><th class="num w150">Payment</th></tr></thead>
             <tbody>
               <tr v-for="d in ar.pay.open">
                 <td>{{ d.number }}</td><td>{{ d.date }}</td><td :class="{ bad: d.status === 'overdue' }">{{ d.dueDate }}</td>
