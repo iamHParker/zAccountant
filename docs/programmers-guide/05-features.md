@@ -136,6 +136,11 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
 CSV, OFX/QFX and PDF statements. Repeated lines are skipped by a fingerprint. Rules suggest an account. Each bank line
 is posted, matched to an existing entry, or excluded. Reconciliation ticks lines until the difference is $0.00,
 then locks them. Plaid feeds wait for Homer's keys.
+- **Same payee** (`public/payee.js`, Homer 2026-10-26): `payeeKey` drops words with a digit (card date, 16-18
+  character transaction code, store and phone numbers), words of 16+ letters and noise words (SQ, POS, DEBIT…), and
+  keeps the first two words. Choosing an account on a review line fills it into the other waiting lines with the same
+  key and direction that have nothing chosen (`bank.sameAs` marks them). "Add all … chosen" posts them one by one
+  through the normal post route; "always use this for …" creates a rule with `payeeRuleText`.
 - **PDF statements** (`src/core/bankPdf.js`, migration 034 `source = 'pdf'`): the import route takes `{ pdf: base64 }`
   (8 MB, 60 pages, JSON limit 12 MB) instead of `content`. `readPdfStatement(rows, { creditCard })` finds the
   statement period (gives the year for "10/03" rows; a December row on a January statement is last year's), the

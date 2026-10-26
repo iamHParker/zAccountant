@@ -1551,7 +1551,9 @@
             <option value="review">To review</option><option value="posted">Added to books</option><option value="matched">Matched</option><option value="excluded">Excluded</option>
           </select>
         </div>
-        <p class="hint" v-if="bank.view === 'review'">For each one: choose what it was for and <strong>Add</strong> it, or <strong>Match</strong> it to an entry you already recorded (so it isn't counted twice).</p>
+        <p class="hint" v-if="bank.view === 'review'">For each one: choose what it was for and <strong>Add</strong> it, or <strong>Match</strong> it to an entry you already recorded (so it isn't counted twice).
+          Choosing an account for one line chooses it for the other lines from the same payee too.</p>
+        <p v-if="bank.view === 'review' && can('post') && bankChosen().length > 1"><button class="primary" @click="postAllChosen">Add all {{ bankChosen().length }} with an account chosen</button></p>
         <table class="data" v-if="bank.txs.length">
           <thead><tr><th>Date</th><th>Bank description</th><th class="num">Amount</th><th>{{ bank.view === 'review' ? 'Account' : 'Result' }}</th><th></th></tr></thead>
           <tbody>
@@ -1561,8 +1563,11 @@
               <td>{{ t.description }}</td>
               <td class="num" :class="t.amountCents > 0 ? 'ok' : ''">{{ money(t.amountCents) }}</td>
               <td v-if="bank.view === 'review'">
-                <select v-model="bank.choice[t.id]"><option value="">Choose…</option><option v-for="a in categoryChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
+                <select v-model="bank.choice[t.id]" @change="chooseBankAccount(t)"><option value="">Choose…</option><option v-for="a in categoryChoices" :value="a.id">{{ a.code }} · {{ a.name }}</option></select>
                 <div class="muted small" v-if="t.suggestedAccountId && bank.choice[t.id] === t.suggestedAccountId">suggested by a rule</div>
+                <div class="muted small" v-else-if="bank.sameAs[t.id]">same as the other {{ bank.sameAs[t.id].toUpperCase() }} line</div>
+                <div class="small" v-if="bank.choice[t.id] && !bank.sameAs[t.id] && can('post') && !hasPayeeRule(t)"><button class="link" @click="rememberPayee(t)"
+                  title="Makes a rule: next statement, lines with these words come in with this account chosen">always use this for “{{ payeeRuleText(t) }}”</button></div>
               </td>
               <td v-else>{{ t.status === 'excluded' ? t.note : `entry #${t.entryNumber}` }}</td>
               <td class="actions">
