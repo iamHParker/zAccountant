@@ -315,8 +315,14 @@ list does the same without leaving the invoice (it fills in the project block an
 
 ## 6. Banking
 
-1. **Import** a statement downloaded from your bank's website as **CSV** or **QFX/OFX**. Importing the same dates
-   twice is safe: repeats are skipped.
+1. **Import** a statement downloaded from your bank's website as **CSV** or **QFX/OFX**, or the monthly statement
+   **PDF**. Importing the same dates twice is safe: repeats are skipped. Keep to one kind per month, because a PDF and
+   a CSV word the same transaction differently and both would come in.
+   - With a PDF, the preview lists every row and checks it against the statement: the beginning balance plus the rows
+     must come to the ending balance. If it doesn't, a red note says so (a row may be missing or misread); compare the
+     list with the paper statement before you import.
+   - If a row can't be told as a deposit or a withdrawal, nothing is imported. Download a CSV for that month instead.
+   - A scanned (photographed) statement has no text to read; use the bank's own PDF or CSV.
 2. **Review** each line under *To review*:
    - **Add**: choose what it was for, and it's recorded.
    - **Match**: it's already in your books (for example a customer payment you recorded). Link them so it isn't

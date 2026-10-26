@@ -5,6 +5,7 @@ import * as ledger from '../src/services/ledgerService.js';
 import * as bank from '../src/services/bankService.js';
 import * as reports from '../src/services/reportService.js';
 import { verifyChain } from '../src/services/audit.js';
+import { tinyPdf } from './tinyPdf.js';
 
 const CSV = `Date,Description,Amount
 03/01/2026,OPENING DEPOSIT,10000.00
@@ -131,4 +132,27 @@ test('banking: import, review, rules, match, reconcile', { skip: !hasDb && 'DATA
     const v = await verifyChain(pool, co.id);
     assert.equal(v.ok, true);
   });
+});
+
+test('banking: a PDF statement imports like a CSV, checked against its balances', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
+  const db = await freshDatabase();
+  t.after(() => db.drop());
+  const { pool } = db;
+  const co = await ledger.createCompany(pool, { name: 'Pdf Bank Co', homeState: 'TX' });
+  const checking = (await ledger.listAccounts(pool, co.id)).find((a) => a.code === '1000').id;
+  const W = (x, y, str) => ({ x, y, str });
+  // A made-up statement: 300.00 + 1,200.00 − 64.50 = 1,435.50.
+  const pdf = tinyPdf([
+    W(300, 740, 'Statement Period 10/01/2026 - 10/31/2026'),
+    W(70, 700, 'Beginning Balance'), W(480, 700, '$300.00'), W(70, 688, 'Ending Balance'), W(480, 688, '$1,435.50'),
+    W(70, 650, 'Deposits'), W(70, 636, '10/02'), W(130, 636, 'Client payment'), W(480, 636, '1,200.00'),
+    W(70, 610, 'Withdrawals'), W(70, 596, '10/09'), W(130, 596, 'Office supplies'), W(480, 596, '64.50'),
+  ]);
+  const p = await bank.importStatement(pool, co.id, { bankAccountId: checking, fileName: 'oct.pdf', pdf, preview: true });
+  assert.deepEqual([p.source, p.new, p.inCents, p.outCents, p.beginCents, p.endCents, p.problems], ['pdf', 2, 120000, 6450, 30000, 143550, []]);
+  await bank.importStatement(pool, co.id, { bankAccountId: checking, fileName: 'oct.pdf', pdf });
+  const txs = await bank.listBankTransactions(pool, co.id, { bankAccountId: checking });
+  assert.deepEqual(txs.map((x) => [x.date, x.amountCents, x.source]).sort(), [['2026-10-02', 120000, 'pdf'], ['2026-10-09', -6450, 'pdf']]);
+  assert.equal((await bank.importStatement(pool, co.id, { bankAccountId: checking, fileName: 'oct.pdf', pdf })).duplicates, 2);
+  await assert.rejects(bank.importStatement(pool, co.id, { bankAccountId: checking, pdf: Buffer.from('nope').toString('base64') }), /not a PDF/);
 });

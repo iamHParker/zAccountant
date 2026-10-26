@@ -2109,14 +2109,18 @@ createApp({
       const f = ev.target.files[0];
       this.bank.preview = null;
       if (!f) return;
-      if (f.size > 5_000_000) { this.flash('That file is larger than 5 MB. Download a shorter date range.', 'bad'); return; }
-      this.bank.file = { name: f.name, content: await f.text() };
+      // A PDF statement goes to the server as base64 and is read there; CSV and QFX go as text.
+      const isPdf = /\.pdf$/i.test(f.name) || f.type === 'application/pdf';
+      if (f.size > (isPdf ? 8_000_000 : 5_000_000)) { this.flash(`That file is larger than ${isPdf ? 8 : 5} MB. Download a shorter date range.`, 'bad'); return; }
+      this.bank.file = isPdf
+        ? { name: f.name, pdf: await new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = fail; r.readAsDataURL(f); }) }
+        : { name: f.name, content: await f.text() };
       this.bank.preview = await this.run(() => api('POST', `/companies/${this.companyId}/bank-accounts/${this.bank.accountId}/import`,
-        { fileName: f.name, content: this.bank.file.content, preview: true }));
+        { fileName: f.name, content: this.bank.file.content, pdf: this.bank.file.pdf, preview: true }));
     },
     async importStatement() {
       const b = this.bank;
-      const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-accounts/${b.accountId}/import`, { fileName: b.file.name, content: b.file.content }));
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-accounts/${b.accountId}/import`, { fileName: b.file.name, content: b.file.content, pdf: b.file.pdf }));
       if (!r) return;
       this.flash(`Imported ${r.new} transaction${r.new === 1 ? '' : 's'}${r.duplicates ? ` (${r.duplicates} already imported, skipped)` : ''}.`);
       b.file = null; b.preview = null; b.view = 'review';

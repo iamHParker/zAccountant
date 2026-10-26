@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rowsFromItems, parseOldInvoice, invoiceLine } from '../src/core/oldInvoice.js';
 import { readOldInvoice } from '../src/services/oldInvoiceService.js';
+import { tinyPdf } from './tinyPdf.js';
 
 // [x, y, text] as pdf.js gives them (y counts up from the bottom of the page).
 const W = (x, y, str) => ({ x, y, str, width: str.length * 5 });
@@ -51,21 +52,6 @@ test('a total that does not add up is reported', () => {
   const page = PAGE.map((w) => (w.str === '$2,117.92' ? { ...w, str: '$2,000.00' } : w));
   assert.match(parseOldInvoice(rowsFromItems(page)).problems.join(' '), /add up to 2117\.92, but TOTAL DUE is 2000\.00/);
 });
-
-// A one-page PDF written by hand: each word drawn at its x, y in Helvetica, as Excel's PDF would place it.
-function tinyPdf(words) {
-  const esc = (t) => t.replace(/[\\()]/g, (c) => `\\${c}`);
-  const stream = words.map((w) => `BT /F1 9 Tf ${w.x} ${w.y} Td (${esc(w.str)}) Tj ET`).join('\n');
-  const objs = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
-  let pdf = '%PDF-1.4\n'; const at = [];
-  objs.forEach((o, i) => { at.push(pdf.length); pdf += `${i + 1} 0 obj\n${o}\nendobj\n`; });
-  const xref = pdf.length;
-  pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${at.map((n) => `${String(n).padStart(10, '0')} 00000 n \n`).join('')}`;
-  pdf += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
-  return Buffer.from(pdf, 'latin1').toString('base64');
-}
 
 test('the server reads the PDF itself and matches the saved customer', async () => {
   const db = { query: async (sql) => ({ rows: /FROM contacts/.test(sql) ? [{ id: 'c-1', name: 'jane doe ATTY' }] : [] }) };

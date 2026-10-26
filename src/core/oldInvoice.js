@@ -1,8 +1,8 @@
 // Old invoices brought in from a PDF (Homer, 2026-10-26): invoices written before zAccountant, still unpaid, so a
 // payment can be applied to them and the checking account reconciles against what was billed.
 //
-// The PDF gives positioned words (x across, y up the page, in points). rowsFromItems() puts them back into rows, like
-// reading a printed page line by line; parseOldInvoice() then reads Homer's Excel layout:
+// The PDF gives positioned words; rowsFromItems() (src/core/pdfRows.js) puts them back into rows, like reading a
+// printed page line by line; parseOldInvoice() then reads Homer's Excel layout:
 //   INVOICE                            DATE | INVOICE #   (the values on the row below)
 //   BILL TO:  first line "Client C/o Attorney" (or just the customer), then the address
 //   TERMS (row below: "20 days")        Description block: project name and site address, then TAX ID / TX Firm
@@ -10,28 +10,7 @@
 //   Tax Rate 8.25% $0.00                TOTAL DUE $4,915.83
 // Pure functions, no database: tested in test/oldInvoice.unit.test.js.
 
-const ROW_GAP = 3;   // words within 3 points of the same height are on one row
-const CELL_GAP = 6;  // a gap wider than 6 points starts a new cell
-
-/** Positioned words [{str, x, y}] → rows top to bottom, each {y, cells: [{text, x}]} left to right. */
-export function rowsFromItems(items) {
-  const words = items.filter((w) => w.str && w.str.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
-  const rows = [];
-  for (const w of words) {
-    const row = rows.find((r) => Math.abs(r.y - w.y) <= ROW_GAP);
-    if (row) row.words.push(w); else rows.push({ y: w.y, words: [w] });
-  }
-  rows.sort((a, b) => b.y - a.y);
-  return rows.map((r) => {
-    const cells = [];
-    for (const w of r.words.sort((a, b) => a.x - b.x)) {
-      const last = cells.at(-1);
-      if (last && w.x - last.end <= CELL_GAP) { last.text += (w.x - last.end > 1 ? ' ' : '') + w.str; last.end = w.x + (w.width ?? w.str.length * 5); }
-      else cells.push({ text: w.str, x: w.x, end: w.x + (w.width ?? w.str.length * 5) });
-    }
-    return { y: r.y, cells: cells.map(({ text, x }) => ({ text: text.trim(), x })) };
-  });
-}
+export { rowsFromItems } from './pdfRows.js';
 
 const DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 const MONEY = /^\$?\s*([\d,]+\.\d{2})$/;
