@@ -307,7 +307,7 @@ createApp({
       dep: { agency: null, form: '', date: today(), paidFrom: '', reference: '', key: newKey() },
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
-      items: [], inv: { item: blankItem(), editId: null, letterhead: { address: '', note: '', footer: '' }, logoBusy: false, logoOver: false },
+      items: [], inv: { item: blankItem(), editId: null, popupLine: null, letterhead: { address: '', note: '', footer: '' }, logoBusy: false, logoOver: false },
       lockDate: '', suiRate: '', famliCount: null, audit: null, futaCr: {},
       imp: { show: false, kind: 'journal', asOf: '', file: null, preview: null, problems: null, busy: false, history: [] },
       importKinds: [
@@ -1794,12 +1794,27 @@ createApp({
       const invoice = this.S.kind === 'invoice';
       this.ar.doc = blankDoc(invoice ? this.company?.default_sales_tax_rate ?? '' : '');
       this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null; this.ar.pull = null;
-      if (invoice) this.loadItems();
+      if (invoice) { this.loadItems(); this.ar.doc.lines = [this.newLine()]; }
     },
     // ---------------------------------------------------------------- Invoice setup: saved rates, sales tax, letterhead, logo
     async loadItems(all = false) { this.items = (await this.run(() => api('GET', `/companies/${this.companyId}/invoice-items${all ? '?all=1' : ''}`))) ?? []; },
+    /**
+     * A new invoice line starts on the income account used last on this computer (or Service Revenue) and the date of
+     * the line above. Bills start empty: their lines are expenses chosen each time.
+     */
+    newLine() {
+      const l = blankLine();
+      if (this.S.kind !== 'invoice') return l;
+      const income = this.incomeAccounts();
+      let last = null; try { last = localStorage.getItem(`zacc.lastIncome.${this.companyId}`); } catch { /* private window */ }
+      l.accountId = income.find((a) => a.id === last)?.id ?? income.find((a) => a.code === '4100')?.id ?? '';
+      l.serviceDate = this.ar.doc.lines?.at(-1)?.serviceDate || '';
+      return l;
+    },
     /** A saved rate was picked on an invoice line: fill in its price, tax and income account (all still changeable). */
     pickItem(l) {
+      // "+ Add new rate…": the rate form pops up; saving it picks the new rate on this line (saveItem).
+      if (l.itemId === NEW_CONTACT) { l.itemId = ''; Object.assign(this.inv, { popupLine: l, editId: null, item: { ...blankItem(), accountId: l.accountId } }); return; }
       const it = this.items.find((x) => x.id === l.itemId);
       if (!it) return;
       l.accountId = it.accountId; l.taxable = it.taxable;
@@ -1824,13 +1839,24 @@ createApp({
     },
     incomeAccounts() { return this.accounts.filter((a) => a.isActive && a.type === 'revenue'); },
     editItem(it) { this.inv.editId = it.id; this.inv.item = { name: it.name, kind: it.kind, rate: it.rateCents == null ? '' : (it.rateCents / 100).toFixed(2), taxable: it.taxable, accountId: it.accountId }; },
-    cancelItem() { this.inv.editId = null; this.inv.item = blankItem(); },
+    cancelItem() { Object.assign(this.inv, { editId: null, item: blankItem(), popupLine: null }); },
     async saveItem() {
       const v = this.inv.item; const id = this.inv.editId;
       const r = await this.run(() => (id ? api('PATCH', `/companies/${this.companyId}/invoice-items/${id}`, v) : api('POST', `/companies/${this.companyId}/invoice-items`, v)),
         id ? 'Rate saved.' : 'Rate added.');
-      if (r) { this.cancelItem(); this.loadItems(true); }
+      if (!r) return;
+      const line = this.inv.popupLine;
+      this.cancelItem();
+      // From an invoice line's "+ Add new rate…": pick the new rate on that line.
+      if (line) { await this.loadItems(); line.itemId = r.id; this.pickItem(line); } else this.loadItems(true);
     },
+    /** A saved rate with no price yet: keep the price typed on this invoice line as the rate's price. */
+    async saveLinePrice(l) {
+      const it = this.itemOf(l);
+      if (!it || !l.unitPrice) return;
+      if (await this.run(() => api('PATCH', `/companies/${this.companyId}/invoice-items/${it.id}`, { rate: l.unitPrice }), `${it.name} is now ${money(Math.round(Number(l.unitPrice) * 100))}.`)) await this.loadItems();
+    },
+    itemOf(l) { return this.items.find((x) => x.id === l.itemId); },
     async toggleItem(it) {
       if (await this.run(() => api('PATCH', `/companies/${this.companyId}/invoice-items/${it.id}`, { isActive: !it.isActive }))) this.loadItems(true);
     },
@@ -1882,7 +1908,8 @@ createApp({
     },
     async saveDoc() {
       const d = this.ar.doc;
-      const lines = d.lines.filter((l) => l.accountId || l.unitPrice).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
+      // A line counts once something is typed or picked on it (a new invoice line starts with its income account filled in).
+      const lines = d.lines.filter((l) => l.unitPrice || l.description?.trim() || l.itemId || (l.accountId && this.S.kind === 'bill')).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
         unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined,
         jobId: l.jobId || undefined, billable: !!l.jobId && l.billable, timeEntryId: l.timeEntryId || undefined, billedLineId: l.billedLineId || undefined,
         tripCostId: l.tripCostId || undefined }));
@@ -1897,6 +1924,8 @@ createApp({
         ? await this.run(() => api('PUT', `${this.arBase()}/documents/${d.editId}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} ${d.editNumber} corrected.`)
         : await this.run(() => api('POST', `${this.arBase()}/${this.S.docPath}`, body, { 'Idempotency-Key': d.key }), `${this.S.Doc} saved.`);
       if (!r) return;
+      const income = lines.find((l) => l.accountId)?.accountId;
+      if (this.S.kind === 'invoice' && income) try { localStorage.setItem(`zacc.lastIncome.${this.companyId}`, income); } catch { /* private window */ }
       if (r.numberWasTaken) this.flash(`Saved as invoice ${r.number} (${r.numberWasTaken} was already used).`);
       // A new adjuster typed on the invoice is added to the customer, for next time.
       if (newPerson && customer) {

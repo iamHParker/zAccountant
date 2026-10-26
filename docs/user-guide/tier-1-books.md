@@ -124,7 +124,11 @@ phone. Press **+ Add person** to add one.
    once: it drops off the list when the invoice is saved, and comes back if that invoice is voided. Leave the project
    empty to see everything for all of the customer's projects. Hours are billed to 4 decimals (50 minutes = 0.8333 h).
 3. For each line:
-   - **Rate or item:** pick one, and the rate, tax and income account fill in.
+   - **Rate or item:** pick one, and the rate, tax and income account fill in. **+ Add new rate…** at the bottom of
+     the list opens a small form, saves the new rate and puts it on the line. If a rate has no price saved yet, a note
+     under the line says so: type the price in **Rate / price** and press **Keep … as the rate** to save it for next time.
+   - **Income account:** new lines start on the income account you used last (4100 Service Revenue the first time).
+     4000 Sales is for goods; an engineering firm's fees go to 4100.
    - **Date:** the day the work was done or the cost was incurred.
    - **Task / description:** Report, Site visit, Deposition…
    - **Hours / qty:** hours for a rate; usually 1 for a cost.
