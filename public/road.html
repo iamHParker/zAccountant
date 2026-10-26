@@ -105,8 +105,10 @@
             <label v-else>Amount ($) <input v-model.trim="costForm.amount" inputmode="decimal" placeholder="0.00" required></label>
             <label>Paid to (optional) <input v-model="costForm.vendor" maxlength="120" placeholder="Southwest, Avis, NTTA…"></label>
             <label>What it was <input v-model="costForm.description" maxlength="300" :placeholder="kinds[costForm.kind]"></label>
-            <label class="photo-btn">📷 Receipt photo
-              <input type="file" accept="image/*" capture="environment" multiple @change="addPhotos"></label>
+            <div class="photo-row"><span class="label-like">Receipt photos</span>
+              <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
+              <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
+              <button type="button" class="photo-btn" @click="pastePhotos">📋 Paste</button></div>
             <div class="photo-strip" v-if="costForm.photos.length">
               <span v-for="(p, i) in costForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Receipt"><button type="button" class="link" @click="costForm.photos.splice(i, 1)">remove</button></span>
             </div>

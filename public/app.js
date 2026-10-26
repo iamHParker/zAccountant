@@ -5,6 +5,7 @@ import { createApp } from '/vendor/vue.js';
 import { render } from '/app.render.js';
 import { HELP, helpForTab, searchHelp } from '/help.js';
 import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
+import { picturesFromClipboard } from '/paste.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const yearStart = () => today().slice(0, 4) + '-01-01';
@@ -1917,6 +1918,12 @@ createApp({
       }
       if (failed) this.flash(`The payment is saved, but ${failed} photo${failed === 1 ? '' : 's'} could not be. Add ${failed === 1 ? 'it' : 'them'} from the Payments tab.`, 'bad');
       this.ar.showPay = false; this.ar.pay = blankPay(); this.loadAr();
+    },
+    /** 📋 Paste beside a photo box: the copied screenshot or photo goes to that box's own handler, as if chosen. */
+    async pastePhotos(handler) {
+      let files;
+      try { files = await picturesFromClipboard(); } catch (err) { this.flash(err.message, 'bad'); return; }
+      await this[handler]({ target: { files, value: '' } });
     },
     /** Photos picked or taken for the payment being entered: shrunk now, sent after the payment is saved. */
     async addPayPhotos(e) {

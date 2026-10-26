@@ -7,6 +7,7 @@
 import { createApp } from '/vendor/vue.js';
 // The screens (the HTML in road.html), compiled by the server into a render function (src/core/pages.js).
 import { render } from '/road.render.js';
+import { picturesFromClipboard } from '/paste.js';
 
 const KEY_STORE = 'zacc.roadKey';
 const SUMMARY_STORE = 'zacc.roadSummary';
@@ -175,6 +176,11 @@ createApp({
     lastDate() { return this.tripItems.filter((i) => i.data.date).at(-1)?.data.date ?? today(); },
     newCost() { this.timeForm = null; this.costForm = { kind: 'other', date: this.lastDate(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [] }; },
     newTime() { this.costForm = null; this.timeForm = { date: this.lastDate(), hours: '', notes: '' }; },
+    // A screenshot or photo copied to the clipboard: the same as choosing it.
+    async pastePhotos() {
+      try { await this.addPhotos({ target: { files: await picturesFromClipboard(), value: '' } }); }
+      catch (err) { this.flash(err.message, 'bad'); }
+    },
     async addPhotos(ev) {
       const files = [...(ev.target.files ?? [])];
       ev.target.value = '';

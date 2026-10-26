@@ -320,3 +320,7 @@ button.wide { width: 100%; margin-top: 8px; }
 .hbar-track .bar { height: 10px; border-radius: 0 4px 4px 0; }
 .stats .tiles { margin: 8px 0; }
 
+/* Road page receipt photos: take, choose from Photos, or paste a copied screenshot */
+.photo-row { margin: 8px 0; }
+.photo-row .photo-btn { margin: 0 6px 6px 0; }
+button.photo-btn { background: none; font: inherit; color: inherit; }
