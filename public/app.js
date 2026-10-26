@@ -2058,6 +2058,7 @@ createApp({
       app.config.errorHandler = (err, vm) => {
         noteError('screen', err?.message ?? String(err));
         console.error(err);
+        window.zaccBootError?.(err?.message ?? err); // shown by boot.js if the first screen never appears
         vm?.$root?.flash?.('Something on this screen went wrong. Your saved work is safe; reload the page. 🐞 Beta feedback will send us the details.', 'bad');
       };
     },
