@@ -261,7 +261,9 @@ add the projects it was for, with their shares, so their invoices can bill it.
 ### Projects
 
 **Sales → Projects** lists your projects (the same list as the jobs on the Time tab): number, name, customer and site
-address. **+ New project** adds one. To add many at once from your project folders:
+address. **+ New project** adds one; a customer that isn't on the list yet can be made right there with
+**+ Add new customer…** in its Customer list. While writing an invoice, **+ Add new project…** in the invoice's Project
+list does the same without leaving the invoice (it fills in the project block and number). To add many at once from your project folders:
 
 1. In File Explorer, open the folder that holds your project folders and select them (Ctrl+A for all).
 2. Hold **Shift**, right-click one of them, and choose **Copy as path**.

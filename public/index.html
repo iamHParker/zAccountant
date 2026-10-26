@@ -684,7 +684,7 @@
         : 'Enter bills from vendors when they arrive, then record when you pay them. What you owe shows in Accounts Payable.' }}</p>
 
       <!-- Also opens as a pop-up from the invoice/bill form's "+ Add new customer…" choice (ar.contactPopup). -->
-      <div v-if="ar.showContact" :class="{ overlay: ar.contactPopup }" @click.self="ar.contactPopup && closeContact()">
+      <div v-if="ar.showContact" :class="{ overlay: ar.contactPopup, top: ar.contactPopup }" @click.self="ar.contactPopup && closeContact()">
       <div class="card narrow" :class="{ dialog: ar.contactPopup }">
         <h2>{{ ar.contact.id ? 'Edit ' + S.who : 'New ' + S.who }}</h2>
         <form @submit.prevent="saveContact">
@@ -720,7 +720,7 @@
         <p class="hint" v-if="!ar.contacts.length">No {{ S.who }}s yet: choose <strong>+ Add new {{ S.who }}…</strong> in the list below.</p>
         <form @submit.prevent="saveDoc">
           <div class="grid4">
-            <label>{{ S.Who }} <select v-model="ar.doc.contactId" required @change="ar.doc.contactId === NEW_CONTACT && quickAddContact()"><option value="">Choose…</option>
+            <label>{{ S.Who }} <select v-model="ar.doc.contactId" required @change="ar.doc.contactId === NEW_CONTACT && quickAddContact('doc')"><option value="">Choose…</option>
               <option :value="NEW_CONTACT">+ Add new {{ S.who }}…</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
             <label>{{ S.kind === 'invoice' ? 'Invoice number' : "Vendor's bill number" }}
               <input v-model="ar.doc.number" :placeholder="S.kind === 'invoice' ? 'automatic' : 'from their invoice'" :required="S.kind === 'bill'"></label>
@@ -738,7 +738,8 @@
           <label class="check" v-if="S.kind === 'invoice' && docPersonIsNew() && ar.doc.contactId"><input type="checkbox" v-model="ar.doc.savePerson">
             Save {{ ar.doc.attention.trim() }} to {{ ar.contacts.find(c => c.id === ar.doc.contactId)?.name }} for next time</label>
           <div class="grid2" v-if="S.kind === 'invoice'">
-            <label>Project (optional) <select v-model="ar.doc.jobId" @change="pickDocProject"><option value="">None</option>
+            <label>Project (optional) <select v-model="ar.doc.jobId" @change="ar.doc.jobId === NEW_CONTACT ? quickAddProject() : pickDocProject()"><option value="">None</option>
+              <option v-if="can('invoices') || can('admin')" :value="NEW_CONTACT">+ Add new project…</option>
               <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === ar.doc.jobId)" :value="j.id">{{ jobLabel(j) }}{{ j.customerName ? ' · ' + j.customerName : '' }}</option></select></label>
             <div><button type="button" @click="openPull" :disabled="!ar.doc.jobId && !ar.doc.contactId">⏱ Pull in unbilled time and costs</button>
               <p class="muted small">Billable hours from timesheets, and costs on bills marked “bill to client”, for {{ ar.doc.jobId ? 'this project' : 'all of this customer’s projects' }}.</p></div>
@@ -981,6 +982,21 @@
         <button :class="{ active: ar.panel === 'projects' }" @click="arPanel('projects')">Projects</button>
       </div>
 
+      <!-- "+ Add new project…" in the invoice's Project list: a small pop-up; saving picks it on the invoice. -->
+      <div class="overlay" v-if="ar.proj.popup" @click.self="closeProjectPopup">
+        <form class="card dialog" @submit.prevent="saveProject">
+          <h2>New project</h2>
+          <div class="grid2">
+            <label>Number <input v-model.trim="ar.proj.form.code" maxlength="30" placeholder="2601"></label>
+            <label>Name <input v-model.trim="ar.proj.form.name" maxlength="80" required placeholder="2601 Smith Residence"></label>
+          </div>
+          <label v-if="S.kind === 'invoice'">Customer (optional) <select v-model="ar.proj.form.customerId" @change="ar.proj.form.customerId === NEW_CONTACT && quickAddContact('proj')"><option value="">None</option>
+            <option :value="NEW_CONTACT">+ Add new customer…</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+          <label>Site address (optional) <textarea v-model="ar.proj.form.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
+          <button class="primary">Add project</button> <button type="button" @click="closeProjectPopup">Cancel</button>
+        </form>
+      </div>
+
       <div class="card" v-if="ar.panel === 'projects'">
         <div class="row"><h2>Projects</h2>
           <button v-if="can('invoices') || can('admin')" @click="ar.proj.show && !ar.proj.editId ? (ar.proj.show = false) : editProject(null)">+ New project</button></div>
@@ -988,7 +1004,8 @@
         <form v-if="ar.proj.show" @submit.prevent="saveProject" class="grid4">
           <label>Number <input v-model.trim="ar.proj.form.code" maxlength="30" placeholder="2601"></label>
           <label>Name <input v-model.trim="ar.proj.form.name" maxlength="80" required placeholder="2601 Smith Residence"></label>
-          <label v-if="S.kind === 'invoice'">Customer (optional) <select v-model="ar.proj.form.customerId"><option value="">None</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+          <label v-if="S.kind === 'invoice'">Customer (optional) <select v-model="ar.proj.form.customerId" @change="ar.proj.form.customerId === NEW_CONTACT && quickAddContact('proj')"><option value="">None</option>
+            <option :value="NEW_CONTACT">+ Add new customer…</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
           <label>Site address (optional) <textarea v-model="ar.proj.form.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
           <div><button class="primary">{{ ar.proj.editId ? 'Save project' : 'Add project' }}</button> <button type="button" @click="ar.proj.show = false; ar.proj.editId = null">Cancel</button></div>
         </form>

@@ -325,3 +325,4 @@ button.wide { width: 100%; margin-top: 8px; }
 .photo-row .photo-btn { margin: 0 6px 6px 0; }
 button.photo-btn { background: none; font: inherit; color: inherit; }
 .grid2 > .span2 { grid-column: 1 / -1; }
+.overlay.top { z-index: 5; } /* a pop-up opened from another pop-up (new customer from a new project) */
