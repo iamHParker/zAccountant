@@ -916,16 +916,17 @@
           <button type="button" class="small" v-if="ar.pay.open.length" @click="payInFull">Pay all in full</button>
           <p class="num"><strong>Payment total {{ money(payTotal) }}</strong></p>
           <div class="photo-box">
-            <strong>Photos of the check and remittance</strong> <span class="muted small">(optional; kept with this payment)</span>
+            <strong>Photos of the check and remittance, or a PDF</strong> <span class="muted small">(optional; kept with this payment, e.g. the bank's deposit confirmation)</span>
             <p class="muted small" v-if="ar.pay.roadItem && ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} from the phone will be saved with this payment.</p>
             <p class="muted small" v-else-if="ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected payment.</p>
             <div class="row wrap">
               <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addPayPhotos"></label>
               <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addPayPhotos"></label> <button type="button" @click="pastePhotos('addPayPhotos')">📋 Paste</button>
+              <label class="button">📄 Attach PDF<input type="file" accept="application/pdf,.pdf" multiple class="hidden-file" @change="addPayPhotos"></label>
               <span class="muted small" v-if="ar.pay.photoBusy">Preparing photo…</span>
             </div>
             <div class="row wrap" v-if="ar.pay.photos.length">
-              <span class="thumb" v-for="(ph, i) in ar.pay.photos"><img :src="ph" alt="Photo to save with this payment"><button type="button" class="link" @click="ar.pay.photos.splice(i, 1)">remove</button></span>
+              <span class="thumb" v-for="(ph, i) in ar.pay.photos"><span v-if="isPdf(ph)" class="pdf-thumb">📄 PDF</span><img v-else :src="ph" alt="Photo to save with this payment"><button type="button" class="link" @click="ar.pay.photos.splice(i, 1)">remove</button></span>
             </div>
           </div>
           <button class="primary" :disabled="payTotal <= 0">{{ ar.pay.editId ? 'Save changes' : 'Save payment' }}</button>
@@ -1167,7 +1168,7 @@
               <td class="num">{{ money(p.amountCents) }}</td>
               <td class="actions"><span v-if="p.status === 'void'">{{ p.replacedById ? 'replaced' : 'void' }}</span><template v-else-if="can('post')">
                 <button class="link" @click="editPay(p)">edit</button> <button class="link" @click="voidPay(p)">void</button></template>
-                <button class="link" @click="openPhotos(p)">{{ p.photoCount ? 'photos (' + p.photoCount + ')' : (can(S.perm) && p.status !== 'void' ? 'add photo' : '') }}</button></td>
+                <button class="link" @click="openPhotos(p)">{{ p.photoCount ? 'photos (' + p.photoCount + ')' : (can(S.perm) && p.status !== 'void' ? 'add photo or PDF' : '') }}</button></td>
             </tr>
           </tbody>
         </table>
@@ -1175,20 +1176,21 @@
 
       <div class="card" v-if="ar.panel === 'payments' && ar.photoView">
         <div class="row">
-          <h2>Photos · {{ ar.photoView.payment.contactName }} · {{ money(ar.photoView.payment.amountCents) }} on {{ ar.photoView.payment.date }}</h2>
+          <h2>Photos and PDFs · {{ ar.photoView.payment.contactName }} · {{ money(ar.photoView.payment.amountCents) }} on {{ ar.photoView.payment.date }}</h2>
           <button type="button" @click="ar.photoView = null">Close</button>
         </div>
         <p class="muted small">These can show the payer's bank account numbers. Only people in this company can see them.</p>
         <p class="hint" v-if="!ar.photoView.photos.length">No photos yet.</p>
         <div class="row wrap">
           <span class="thumb big" v-for="ph in ar.photoView.photos">
-            <a :href="photoUrl(ar.photoView.payment, ph)" target="_blank" rel="noopener"><img :src="photoUrl(ar.photoView.payment, ph)" alt="Payment photo"></a>
+            <a :href="photoUrl(ar.photoView.payment, ph)" target="_blank" rel="noopener"><span v-if="isPdf(ph)" class="pdf-thumb">📄 PDF<br><span class="small">open</span></span><img v-else :src="photoUrl(ar.photoView.payment, ph)" alt="Payment photo"></a>
             <button v-if="can(S.perm) && ar.photoView.payment.status !== 'void'" type="button" class="link" @click="removePhoto(ph)">remove</button>
           </span>
         </div>
         <div class="row wrap" v-if="can(S.perm) && ar.photoView.payment.status !== 'void'">
           <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="uploadPhotos"></label>
           <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="uploadPhotos"></label> <button type="button" @click="pastePhotos('uploadPhotos')">📋 Paste</button>
+          <label class="button">📄 Attach PDF<input type="file" accept="application/pdf,.pdf" multiple class="hidden-file" @change="uploadPhotos"></label>
           <span class="muted small" v-if="ar.photoView.busy">Saving photo…</span>
         </div>
       </div>

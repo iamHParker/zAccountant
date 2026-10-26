@@ -58,6 +58,12 @@ test('edit: invoices, bills and payments are corrected by void + replace', { ski
     await photos.addPaymentPhoto(pool, co.id, pay.id, { picture: JPEG, actor: 'owner@x' });
     await photos.addPaymentPhoto(pool, co.id, pay.id, { picture: JPEG, actor: 'owner@x' });
     await assert.rejects(photos.addPaymentPhoto(pool, co.id, pay.id, { picture: 'data:image/gif;base64,R0lG' }), /PNG or JPEG/);
+    // The bank's deposit confirmation, a PDF, is kept beside them; something only named a PDF is refused.
+    const pdf = await photos.addPaymentPhoto(pool, co.id, pay.id, { picture: `data:application/pdf;base64,${Buffer.from('%PDF-1.4 x').toString('base64')}` });
+    assert.equal(pdf.type, 'application/pdf');
+    assert.equal((await photos.getPaymentPhoto(pool, co.id, pay.id, pdf.id)).name, 'payment-document.pdf');
+    await photos.deletePaymentPhoto(pool, co.id, pay.id, pdf.id);
+    await assert.rejects(photos.addPaymentPhoto(pool, co.id, pay.id, { picture: `data:application/pdf;base64,${Buffer.from('hello').toString('base64')}` }), /not a PDF/);
     // The check was really 1,200.00, number 502.
     const fixed = await arap.replacePayment(pool, co.id, pay.id, { contactId: smith.id, date: '2026-04-01', accountId: A['1000'], method: 'check', reference: '502',
       applications: [{ documentId: inv.id, amount: '1200' }] });
