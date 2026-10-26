@@ -129,7 +129,7 @@ export function createApp(pool, { log } = {}) {
     next();
   });
   // Bank statement files can be a few MB; everything else is small.
-  app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '6mb' }));
+  app.use(/^\/api\/companies\/[^/]+\/bank-accounts\/[^/]+\/import$/, express.json({ limit: '12mb' })); // a PDF statement (8 MB) as base64
   app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
   app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
   app.use(/^\/api\/companies\/[^/]+\/mileiq\/(preview|import)$/, express.json({ limit: '3mb' })); // a MileIQ report, as text
@@ -522,7 +522,7 @@ export function createApp(pool, { log } = {}) {
   // Banking
   const B = '/companies/:companyId/bank-accounts/:bankAccountId';
   api.post(`${B}/import`, route('post', ({ db, req, companyId, actor }) =>
-    bank.importStatement(db, companyId, { bankAccountId: req.params.bankAccountId, fileName: req.body?.fileName, content: req.body?.content, preview: req.body?.preview === true, actor })));
+    bank.importStatement(db, companyId, { bankAccountId: req.params.bankAccountId, fileName: req.body?.fileName, content: req.body?.content, pdf: req.body?.pdf, preview: req.body?.preview === true, actor })));
   api.get(`${B}/transactions`, route('view_books', ({ db, req, companyId }) =>
     bank.listBankTransactions(db, companyId, { bankAccountId: req.params.bankAccountId, status: q(req.query.status) ?? 'review' })));
   api.get(`${B}/reconciliations`, route('view_books', ({ db, req, companyId }) => bank.listReconciliations(db, companyId, { bankAccountId: req.params.bankAccountId })));
@@ -802,7 +802,7 @@ export function createApp(pool, { log } = {}) {
   api.post(`${TE}/review`, route(['time_approve', 'time_all'], ({ db, req, companyId, viewer, actor }) =>
     time.reviewTimeEntries(db, companyId, viewer, { ids: req.body?.ids, approve: req.body?.approve, note: req.body?.note }, { actor })));
   api.post(`${TE}/import`, route(TIME, ({ db, req, companyId, viewer, actor }) => time.importTimesheet(db, companyId, viewer, {
-    fileName: req.body?.fileName, content: req.body?.content, preview: req.body?.preview === true, userId: req.body?.userId || null, createJobs: req.body?.createJobs === true }, { actor })));
+    fileName: req.body?.fileName, content: req.body?.content, pdf: req.body?.pdf, preview: req.body?.preview === true, userId: req.body?.userId || null, createJobs: req.body?.createJobs === true }, { actor })));
   api.get('/companies/:companyId/reports/time-summary', route(TIME, ({ db, req, companyId, viewer }) =>
     time.getTimeSummary(db, companyId, viewer, { from: q(req.query.from), to: q(req.query.to) })));
   api.patch(`${TE}/:timeEntryId`, route(TIME, ({ db, req, companyId, viewer, actor }) => time.updateTimeEntry(db, companyId, viewer, req.params.timeEntryId, req.body ?? {}, { actor })));

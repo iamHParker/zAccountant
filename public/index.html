@@ -1511,13 +1511,24 @@
       <template v-else>
       <div class="card narrow" v-if="can('post')">
         <h2>Import a bank statement</h2>
-        <p class="hint">In your bank's website, download transactions as <strong>CSV</strong> or <strong>QFX/OFX</strong> (Quicken). Importing the same dates twice is safe; repeats are skipped.</p>
-        <input type="file" ref="statementFile" accept=".csv,.ofx,.qfx,text/csv" @change="pickStatement">
+        <p class="hint">In your bank's website, download transactions as <strong>CSV</strong> or <strong>QFX/OFX</strong> (Quicken), or choose the
+          monthly statement <strong>PDF</strong>. Importing the same dates twice is safe; repeats are skipped. (A PDF and a CSV of the same month are
+          worded differently, so pick one kind per month.)</p>
+        <input type="file" ref="statementFile" accept=".csv,.ofx,.qfx,.pdf,text/csv,application/pdf" @change="pickStatement">
         <div v-if="bank.preview" class="preview">
           <p><strong>{{ bank.preview.new }}</strong> new transaction{{ bank.preview.new === 1 ? '' : 's' }}
             <span v-if="bank.preview.duplicates">({{ bank.preview.duplicates }} already imported)</span>
             from {{ bank.preview.firstDate }} to {{ bank.preview.lastDate }}:
             <span class="ok">{{ money(bank.preview.inCents) }} in</span>, <span class="bad">{{ money(bank.preview.outCents) }} out</span>.</p>
+          <p v-if="bank.preview.source === 'pdf' && !bank.preview.problems.length" class="ok">Checked against the statement: the beginning balance,
+            {{ money(bank.preview.beginCents) }}, and these rows come to the ending balance, {{ money(bank.preview.endCents) }}.</p>
+          <ul v-if="bank.preview.problems?.length" class="warn"><li v-for="p in bank.preview.problems" :key="p" class="bad">{{ p }}</li></ul>
+          <table v-if="bank.preview.source === 'pdf' && bank.preview.preview?.length" class="data">
+            <thead><tr><th>Date</th><th>Description</th><th class="num">Amount</th></tr></thead>
+            <tr v-for="(t, i) in bank.preview.preview" :key="i"><td>{{ usDate(t.date) }}</td><td>{{ t.description }}</td>
+              <td class="num" :class="t.amountCents < 0 ? 'bad' : 'ok'">{{ money(t.amountCents) }}</td></tr>
+          </table>
+          <p v-if="bank.preview.source === 'pdf' && bank.preview.new > 50" class="hint">The first 50 rows are shown.</p>
           <button class="primary" :disabled="!bank.preview.new" @click="importStatement">Import {{ bank.preview.new }} transaction{{ bank.preview.new === 1 ? '' : 's' }}</button>
         </div>
         <details v-if="bank.imports.length" class="imports">

@@ -124,7 +124,8 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
 
 ## Old invoices from a PDF (`oldInvoiceService.js`, `src/core/oldInvoice.js`)
 - `POST /companies/:id/invoices/read-pdf` (`invoices`) takes `{ pdf: base64 }` (4 MB) and saves nothing. pdf.js
-  (`pdfjs-dist`, legacy build, eval off) gives positioned words; `rowsFromItems` rebuilds rows and cells by y/x;
+  (`pdfjs-dist`, legacy build, eval off; `src/services/pdfText.js`) gives positioned words; `rowsFromItems`
+  (`src/core/pdfRows.js`) rebuilds rows and cells by y/x;
   `parseOldInvoice` reads Homer's Excel layout (INVOICE # / DATE, BILL TO with "X C/o Y", TERMS, Description block
   minus TAX ID / TX Firm, the Hours…Subtotal rows, Tax Rate, TOTAL DUE) and lists `problems`.
 - `invoiceLine` keeps hours × rate when it rounds to the printed subtotal, else 1 × subtotal (hours in the text), so
@@ -132,9 +133,18 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   through the normal create route. The PDF is never stored, logged or audited (it names a client).
 
 ## Banking (`bankService.js`, `src/core/bankImport.js`)
-CSV and OFX/QFX statements. Repeated lines are skipped by a fingerprint. Rules suggest an account. Each bank line
+CSV, OFX/QFX and PDF statements. Repeated lines are skipped by a fingerprint. Rules suggest an account. Each bank line
 is posted, matched to an existing entry, or excluded. Reconciliation ticks lines until the difference is $0.00,
 then locks them. Plaid feeds wait for Homer's keys.
+- **PDF statements** (`src/core/bankPdf.js`, migration 034 `source = 'pdf'`): the import route takes `{ pdf: base64 }`
+  (8 MB, 60 pages, JSON limit 12 MB) instead of `content`. `readPdfStatement(rows, { creditCard })` finds the
+  statement period (gives the year for "10/03" rows; a December row on a January statement is last year's), the
+  beginning/ending balances, and rows that start with a date and end with an amount; a line just under a row with no
+  amount continues its description. Direction, in order: a printed sign (on a card statement minus = payment = in),
+  the in/out column it sits under, the running balance's change, the section heading (Deposits in; Checks, Withdrawals,
+  Fees, Purchases out; "Daily balance" skipped). A row still undecided stops the import (never guessed). The preview
+  returns `beginCents`, `endCents` and `problems` (e.g. beginning + rows ≠ ending). Tests: `test/bankPdf.unit.test.js`
+  with made-up statements in each layout; `test/tinyPdf.js` writes real PDFs for tests.
 
 ## Payroll (`payrollService.js`, `src/payroll/engine.js`, `src/payroll/tables/2026.json`)
 - `calculatePaycheck` is pure: wages, pre-tax deductions, federal (2020+ W-4 and older forms), FICA, state income

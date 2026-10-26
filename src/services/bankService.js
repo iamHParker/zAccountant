@@ -11,6 +11,9 @@ import { withTransaction } from '../db/pool.js';
 import { LedgerError, isIsoDate, simpleTransaction } from '../core/ledger.js';
 import { toCents } from '../core/money.js';
 import { readStatement, dedupeKeys, applyRules, ImportError } from '../core/bankImport.js';
+import { readPdfStatement } from '../core/bankPdf.js';
+import { rowsFromItems } from '../core/pdfRows.js';
+import { pdfBytes, pdfWords } from './pdfText.js';
 import { insertEntry, reverseEntry } from './ledgerService.js';
 import { appendAudit } from './audit.js';
 
@@ -36,21 +39,38 @@ async function activeRules(db, companyId) {
   return rows.map(ruleOut);
 }
 
+export const MAX_STATEMENT_PDF_BYTES = 8 * 1024 * 1024;
+const MAX_STATEMENT_PAGES = 60;
+
 /**
- * Import a CSV or OFX/QFX statement for one bank account. Transactions already imported (same bank
+ * Import a CSV, OFX/QFX or PDF statement for one bank account. Transactions already imported (same bank
  * id, or same date+amount+description) are skipped, so overlapping downloads are safe.
+ * A PDF comes as base64 in `pdf` (not `content`); it is read in memory and dropped, never stored or logged.
  * With preview: true nothing is saved; the result shows what would happen.
  */
-export async function importStatement(pool, companyId, { bankAccountId, fileName = '', content, preview = false, actor = null }) {
-  if (typeof content !== 'string' || !content.trim()) throw new LedgerError('Choose a statement file to import');
-  if (content.length > 5_000_000) throw new LedgerError('File is too large (5 MB limit)');
+export async function importStatement(pool, companyId, { bankAccountId, fileName = '', content, pdf, preview = false, actor = null }) {
   let txns;
-  try { txns = readStatement(content, fileName); } catch (e) {
-    if (e instanceof ImportError) throw new LedgerError(e.message, e.details);
-    throw e;
+  let source;
+  let check = null; // a PDF's beginning/ending balance check
+  if (pdf != null) {
+    const rows = rowsFromItems(await pdfWords(pdfBytes(pdf, MAX_STATEMENT_PDF_BYTES, 'a statement PDF'), MAX_STATEMENT_PAGES));
+    const acct = await bankAccount(pool, companyId, bankAccountId);
+    try { check = readPdfStatement(rows, { creditCard: acct.subtype === 'credit_card' }); } catch (e) {
+      if (e instanceof ImportError) throw new LedgerError(e.message, e.details);
+      throw e;
+    }
+    txns = check.txns;
+    source = 'pdf';
+  } else {
+    if (typeof content !== 'string' || !content.trim()) throw new LedgerError('Choose a statement file to import');
+    if (content.length > 5_000_000) throw new LedgerError('File is too large (5 MB limit)');
+    try { txns = readStatement(content, fileName); } catch (e) {
+      if (e instanceof ImportError) throw new LedgerError(e.message, e.details);
+      throw e;
+    }
+    source = /<OFX>/i.test(content.slice(0, 5000)) ? 'ofx' : 'csv';
   }
   const keys = dedupeKeys(txns);
-  const source = /<OFX>/i.test(content.slice(0, 5000)) ? 'ofx' : 'csv';
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     const acct = await bankAccount(c, companyId, bankAccountId);
@@ -67,6 +87,7 @@ export async function importStatement(pool, companyId, { bankAccountId, fileName
       firstDate: dates[0] ?? null, lastDate: dates.at(-1) ?? null,
       inCents: fresh.filter((t) => t.amountCents > 0).reduce((s, t) => s + t.amountCents, 0),
       outCents: fresh.filter((t) => t.amountCents < 0).reduce((s, t) => s - t.amountCents, 0),
+      beginCents: check?.beginCents ?? null, endCents: check?.endCents ?? null, problems: check?.problems ?? [],
       preview: preview ? fresh.slice(0, 50).map((t) => ({ date: t.date, amountCents: t.amountCents, description: t.description, suggestedAccountId: t.rule?.accountId ?? null })) : undefined,
     };
     if (preview) return summary;
