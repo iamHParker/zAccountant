@@ -114,7 +114,8 @@ phone. Press **+ Add person** to add one.
    then 2601B, and after 2601Z comes 2601AA. A message tells you the number it was saved under.
 2. **Attention**: pick the adjuster from the customer's people, and **Send to** fills in with their email. A name
    you type that isn't saved yet gets a tick box, "Save … to DWH - SATX for next time". **Claim / job number** is
-   the client's own number; it prints in the box with the invoice number.
+   the client's own number; it prints in the box with the invoice number. **Their client, c/o** is for invoices to
+   an attorney: type the attorney's client (Ms Smith) and Bill To opens with "Ms Smith c/o Jane Doe, ATTY".
    **Project** (optional): the project name and site address. They print beside Bill To.
    **Project** (the list above the project block): pick it and the customer, the project block (name and site
    address) and the invoice number (the project number) fill in when they're empty.

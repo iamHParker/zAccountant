@@ -44,14 +44,16 @@ test('customers: divisions, adjusters, and who an invoice is for', { skip: !hasD
 
   await t.test('an invoice records attention, send-to and the claim number, and keeps them on edit', async () => {
     const inv = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: satx.id, number: '2601', date: '2026-10-01',
-      attention: 'Jane Doe', sendTo: 'jane@dwh.example', clientRef: 'CLM-88213', lines: [{ accountId: A['4100'], amount: '900' }] });
-    assert.deepEqual([inv.attention, inv.sendTo, inv.clientRef, inv.contact.groupName], ['Jane Doe', 'jane@dwh.example', 'CLM-88213', 'DWH']);
+      attention: 'Jane Doe', careOf: 'Ms Smith', sendTo: 'jane@dwh.example', clientRef: 'CLM-88213', lines: [{ accountId: A['4100'], amount: '900' }] });
+    assert.deepEqual([inv.attention, inv.careOf, inv.sendTo, inv.clientRef, inv.contact.groupName], ['Jane Doe', 'Ms Smith', 'jane@dwh.example', 'CLM-88213', 'DWH']);
     await assert.rejects(arap.createDocument(pool, co.id, { kind: 'invoice', contactId: satx.id, date: '2026-10-01', sendTo: 'jane',
       lines: [{ accountId: A['4100'], amount: '1' }] }), /not valid/);
     const fixed = await arap.replaceDocument(pool, co.id, inv.id, { contactId: satx.id, date: '2026-10-01', attention: 'Jane Doe',
       sendTo: 'jane@dwh.example', clientRef: 'CLM-88213', lines: [{ accountId: A['4100'], amount: '950' }] });
     assert.equal(fixed.number, '2601');
     assert.equal(fixed.clientRef, 'CLM-88213');
+    assert.equal(fixed.careOf, null); // the corrected copy holds what was sent with it
+    assert.equal((await arap.updateDocumentDetails(pool, co.id, fixed.id, { careOf: 'Ms Smith' })).careOf, 'Ms Smith');
     // A second invoice on project 2601 is 2601A, a third 2601B.
     const b = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: aus.id, number: '2601', date: '2026-10-05', lines: [{ accountId: A['4100'], amount: '100' }] });
     const c = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: aus.id, number: '2601', date: '2026-10-06', lines: [{ accountId: A['4100'], amount: '50' }] });
