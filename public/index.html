@@ -682,6 +682,13 @@
       <p class="hint">{{ tab === 'sales'
         ? 'Send invoices to customers and record their payments. What customers owe shows in Accounts Receivable.'
         : 'Enter bills from vendors when they arrive, then record when you pay them. What you owe shows in Accounts Payable.' }}</p>
+      <!-- Old invoices (written before zAccountant, still unpaid): drop the PDF, check the filled-in form, save, then apply payments. -->
+      <label v-if="tab === 'sales' && can('invoices') && !ar.showDoc" class="logo-drop old-invoice-drop" :class="{ over: ar.pdfOver, busy: ar.pdfBusy }"
+        @dragover.prevent="ar.pdfOver = true" @dragleave="ar.pdfOver = false" @drop.prevent="dropOldInvoice">
+        <strong>{{ ar.pdfBusy ? 'Reading…' : 'Bring in an old invoice: drop its PDF here' }}</strong>
+        <span class="muted small">or <span class="file-link">choose the PDF</span>. It fills in a new invoice for you to check and save, so payments can be applied to it.</span>
+        <input type="file" accept="application/pdf,.pdf" @change="chooseOldInvoice" :disabled="ar.pdfBusy">
+      </label>
 
       <!-- Also opens as a pop-up from the invoice/bill form's "+ Add new customer…" choice (ar.contactPopup). -->
       <div v-if="ar.showContact" :class="{ overlay: ar.contactPopup, top: ar.contactPopup }" @click.self="ar.contactPopup && closeContact()">
@@ -717,6 +724,11 @@
       <div class="card" v-if="ar.showDoc">
         <h2>{{ ar.doc.editId ? 'Edit ' + S.Doc.toLowerCase() + ' ' + ar.doc.editNumber : 'New ' + S.Doc.toLowerCase() }}</h2>
         <p class="hint" v-if="ar.doc.editId">Saving voids the old {{ S.Doc.toLowerCase() }} and records this corrected one in its place{{ S.kind === 'invoice' ? ', with the same number unless you change it' : '' }}. The old one stays in history, marked replaced.</p>
+        <div class="hint pdf-notes" v-if="ar.doc.fromPdf">
+          Filled in from <strong>{{ ar.doc.fromPdf.file }}</strong>. The PDF's TOTAL DUE is <strong>{{ money(ar.doc.fromPdf.totalCents) }}</strong>; check the
+          customer, the lines and the income account, then save.
+          <ul v-if="ar.doc.fromPdf.problems.length"><li v-for="p in ar.doc.fromPdf.problems" class="bad">{{ p }}</li></ul>
+        </div>
         <p class="hint" v-if="!ar.contacts.length">No {{ S.who }}s yet: choose <strong>+ Add new {{ S.who }}…</strong> in the list below.</p>
         <form @submit.prevent="saveDoc">
           <div class="grid4">
