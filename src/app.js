@@ -486,6 +486,9 @@ export function createApp(pool, { log } = {}) {
     ledger.postEntry(db, companyId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) }), 201));
   api.post('/companies/:companyId/entries/simple', route('post', ({ db, req, companyId, actor }) =>
     ledger.postSimple(db, companyId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) }), 201));
+  // Edit = reverse + corrected entry in one step.
+  api.put('/companies/:companyId/entries/:entryId', route('post', ({ db, req, companyId, actor }) =>
+    ledger.correctEntry(db, companyId, req.params.entryId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) })));
   api.post('/companies/:companyId/entries/:entryId/reverse', route('post', ({ db, req, companyId, actor }) =>
     ledger.reverseEntry(db, companyId, req.params.entryId, { date: req.body?.date, memo: req.body?.memo, actor, idempotencyKey: idemKey(req) }), 201));
 
@@ -534,6 +537,10 @@ export function createApp(pool, { log } = {}) {
   api.post(`${R}/lines`, route('post', ({ db, req, companyId }) => bank.setCleared(db, companyId, req.params.reconId, { lineIds: req.body?.lineIds, cleared: req.body?.cleared !== false })));
   api.post(`${R}/complete`, route('post', ({ db, req, companyId, actor }) => bank.completeReconciliation(db, companyId, req.params.reconId, { actor })));
   api.delete(R, route('post', ({ db, req, companyId, actor }) => bank.cancelReconciliation(db, companyId, req.params.reconId, { actor })));
+  // Reopening a finished reconciliation undoes a control, so it takes the "close the books" permission.
+  api.post(`${R}/reopen`, route('close', ({ db, req, companyId, actor }) => bank.reopenReconciliation(db, companyId, req.params.reconId, { reason: req.body?.reason, actor })));
+  api.get(`${B}/imports`, route('view_books', ({ db, req, companyId }) => bank.listImports(db, companyId, { bankAccountId: req.params.bankAccountId })));
+  api.post('/companies/:companyId/bank-imports/:batch/undo', route('post', ({ db, req, companyId, actor }) => bank.undoImport(db, companyId, req.params.batch, { actor })));
 
   // Customers & invoices, vendors & bills, payments (accounts receivable / payable)
   // Sales needs "invoices", Bills needs "bills"; anyone who can see the books can also look.
@@ -571,6 +578,12 @@ export function createApp(pool, { log } = {}) {
     await needSide(db, can, 'documents', req.params.documentId);
     const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef } = req.body ?? {};
     return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
+  }));
+  // Details that never reach the ledger (memo, due date, PO, project block, attention, send-to): changed in place, even when paid.
+  api.patch('/companies/:companyId/documents/:documentId', route(['invoices', 'bills'], async ({ db, req, companyId, can, actor }) => {
+    if (/^[0-9a-f-]{36}$/i.test(req.params.documentId)) await needSide(db, can, 'documents', req.params.documentId);
+    const { memo, dueDate, clientRef, project, attention, sendTo } = req.body ?? {};
+    return arap.updateDocumentDetails(db, companyId, req.params.documentId, { memo, dueDate, clientRef, project, attention, sendTo, actor });
   }));
   // Billable time and costs not yet on an invoice, for the invoice form's "Pull in unbilled time and costs".
   api.get('/companies/:companyId/unbilled', route('invoices', ({ db, req, companyId }) =>
@@ -731,6 +744,8 @@ export function createApp(pool, { log } = {}) {
   api.post('/companies/:companyId/payroll-runs/preview', route('payroll', ({ db, req, companyId }) => payroll.previewRun(db, companyId, runOpts(req))));
   api.post('/companies/:companyId/payroll-runs', route('payroll', ({ db, req, companyId, actor }) => payroll.postRun(db, companyId, runOpts(req), { actor }), 201));
   api.get('/companies/:companyId/payroll-runs', route(['view_books', 'payroll'], ({ db, companyId }) => payroll.listRuns(db, companyId)));
+  api.post('/companies/:companyId/payroll-runs/:runId/void', route('payroll', ({ db, req, companyId, actor }) =>
+    payroll.voidRun(db, companyId, req.params.runId, { date: req.body?.date, reason: req.body?.reason, actor })));
   api.get('/companies/:companyId/payroll-runs/:runId', route(['view_books', 'payroll'], ({ db, req, companyId }) => payroll.getRun(db, companyId, req.params.runId)));
   // Pay stubs and tax totals show pay details, so they need the payroll role (not every member).
   api.get('/companies/:companyId/paychecks/:paycheckId/stub', route('payroll', ({ db, req, companyId }) => payroll.getPayStub(db, companyId, req.params.paycheckId)));

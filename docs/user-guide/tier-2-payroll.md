@@ -54,6 +54,10 @@ Open a **stub** to print it or save it as a PDF for the employee. It shows this 
 **Mistake on a paycheck?** Void it, most recent paycheck first. The books are reversed, the year-to-date totals go
 back, and any timesheet hours it paid become unpaid again, so the next run picks them up.
 
+**A whole run went out wrong** (wrong hours for everyone, the wrong period)? Press **void run** beside it under Payroll
+runs and give the reason. Every paycheck in it is voided the same way, and the same pay period can be run again with
+the right numbers. If someone in it has a later paycheck, void that one first.
+
 ## 4. Payroll taxes and deposits
 
 **Payroll → Payroll taxes owed**: choose the dates and press **Show**. Taxes are grouped by where they are paid

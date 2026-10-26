@@ -27,6 +27,7 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `020_corrections.sql` | `replaced_by_id` on documents and payments (Edit = void + corrected copy); invoice number unique among non-replaced |
 | `021_payment_photos.sql` | photos of the check and remittance kept with a payment (RLS by company) |
 | `022_customer_people.sql` | customer "Part of" group and people (adjusters); invoice attention, send-to, claim/job number |
+| `031_corrections_2.sql` | void a payroll run once (void columns, `zacc_run_void_once`, period unique among runs not voided); reopen the latest reconciliation (`zacc_recon_final`), which also fixes Cancel (the trigger returned NULL on DELETE) |
 | `030_employee_details.sql` | employee home address (jsonb, for the W-2), hire and termination dates; each paycheck keeps its own copy of the employee in `calculation.employee` |
 | `029_home_layout.sql` | `home_layouts`: each person's Home card arrangement per company (`{ left, right }` card ids); RLS on company and user |
 | `028_mileiq.sql` | `mileage_drives`: each drive imported from MileIQ (when, where, miles, rate, tolls, parking), its trip and the mileage cost it is part of; `drive_key` stops a second import; RLS |

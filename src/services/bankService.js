@@ -388,6 +388,61 @@ export async function completeReconciliation(pool, companyId, reconId, { actor =
   });
 }
 
+/**
+ * Reopen the latest finished reconciliation of an account (CPA edit sweep, batch 4), to fix a wrong tick or a typed
+ * ending balance. Only the latest, only while its statement date is in open books, and the database checks the same.
+ * The ticks stay; finish it again when the difference is $0.00. Audited with the reason.
+ */
+export async function reopenReconciliation(pool, companyId, reconId, { reason, actor = null } = {}) {
+  if (!(typeof reason === 'string' && reason.trim().length >= 3)) throw new LedgerError('Say why the reconciliation is being reopened');
+  return withTransaction(pool, async (c) => {
+    const co = await lockCompany(c, companyId);
+    const { rows: [r] } = await c.query('SELECT * FROM reconciliations WHERE company_id = $1 AND id::text = $2 FOR UPDATE', [companyId, String(reconId)]);
+    if (!r) throw new LedgerError('Reconciliation not found');
+    if (r.status !== 'completed') throw new LedgerError('This reconciliation is still in progress');
+    const { rows: [later] } = await c.query(
+      'SELECT statement_date FROM reconciliations WHERE company_id = $1 AND bank_account_id = $2 AND statement_date > $3 LIMIT 1', [companyId, r.bank_account_id, r.statement_date]);
+    if (later) throw new LedgerError('Only the latest reconciliation can be reopened; reopen the later ones first, newest first');
+    if (co.locked_through && r.statement_date <= co.locked_through) throw new LedgerError(`The books are closed through ${co.locked_through}, so this reconciliation stays final`);
+    await c.query(`UPDATE reconciliations SET status = 'open', completed_by = NULL, completed_at = NULL WHERE company_id = $1 AND id = $2`, [companyId, r.id]);
+    await appendAudit(c, companyId, { action: 'reopen', entity: 'reconciliation', entityId: String(r.id), actor,
+      payload: { bankAccountId: r.bank_account_id, statementDate: r.statement_date, endingCents: r.ending_cents, reason: reason.trim() } });
+    return getReconciliation(c, companyId, r.id);
+  });
+}
+
+/** Statement imports for an account, newest first, with how many of their lines are still waiting in review. */
+export async function listImports(db, companyId, { bankAccountId }) {
+  await bankAccount(db, companyId, bankAccountId);
+  const { rows } = await db.query(
+    `SELECT t.import_batch AS batch, min(t.created_at) AS "importedAt", min(t.posted_date) AS "firstDate", max(t.posted_date) AS "lastDate",
+            count(*)::int AS lines, count(*) FILTER (WHERE t.status IN ('review', 'excluded'))::int AS undoable,
+            (SELECT a.payload->>'fileName' FROM audit_log a WHERE a.company_id = $1 AND a.entity = 'bank_statement' AND a.entity_id = t.import_batch::text LIMIT 1) AS "fileName"
+       FROM bank_transactions t WHERE t.company_id = $1 AND t.bank_account_id = $2
+      GROUP BY t.import_batch ORDER BY min(t.created_at) DESC LIMIT 20`, [companyId, bankAccountId]);
+  return rows;
+}
+
+/**
+ * Undo a statement import (CPA edit sweep, batch 4): its lines still in review (or excluded) are removed, so the
+ * file can be imported again. Lines already added to the books or matched stay: undo those one by one first if
+ * they should go too.
+ */
+export async function undoImport(pool, companyId, batch, { actor = null } = {}) {
+  if (typeof batch !== 'string' || !/^[0-9a-f-]{36}$/i.test(batch)) throw new LedgerError('Import not found');
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows } = await c.query('SELECT status FROM bank_transactions WHERE company_id = $1 AND import_batch = $2', [companyId, batch]);
+    if (!rows.length) throw new LedgerError('Import not found (or already undone)');
+    const { rowCount: removed } = await c.query(
+      `DELETE FROM bank_transactions WHERE company_id = $1 AND import_batch = $2 AND status IN ('review', 'excluded')`, [companyId, batch]);
+    const kept = rows.length - removed;
+    if (!removed) throw new LedgerError('Every line of this import is already in the books or matched; undo those lines in Banking first');
+    await appendAudit(c, companyId, { action: 'undo_import', entity: 'bank_statement', entityId: batch, actor, payload: { removed, kept } });
+    return { removed, kept };
+  });
+}
+
 /** Abandon a reconciliation that is still in progress (nothing in the books changes). */
 export async function cancelReconciliation(pool, companyId, reconId, { actor = null } = {}) {
   return withTransaction(pool, async (c) => {

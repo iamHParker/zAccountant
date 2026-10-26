@@ -198,6 +198,8 @@ const ENTRY_OWNER = {
   invoice: { where: 'Sales', what: 'invoice' }, bill: { where: 'Bills', what: 'bill' }, payment: { where: 'Sales or Bills', what: 'payment' },
   trip: { where: 'Trips', what: 'trip' }, payroll: { where: 'Payroll', what: "year-to-date pay" }, bank: { where: 'Banking (Undo)', what: 'bank line' },
 };
+// Entries the Transactions tab can Edit (reverse + corrected copy); same list as CORRECTABLE in ledgerService.js.
+const CORRECTABLE = ['manual', 'simple', 'recurring', 'import'];
 const DEFAULT_HOME = { left: ['stats'], right: ['invoice', 'paid', 'bill', 'bank', 'card', 'trip', 'pnl'] };
 
 /** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
@@ -253,7 +255,7 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '',
-      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null, ENTRY_OWNER, profile: null,
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null, ENTRY_OWNER, CORRECTABLE, profile: null,
       MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
       statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
@@ -307,7 +309,7 @@ createApp({
         { id: 'journal', label: 'Transactions (journal)', template: 'journal-entries.csv', help: 'QuickBooks: Reports → Journal for the date range → Export to CSV. Or fill in our template (one row per line; rows with the same Entry number form one entry).' },
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
-      ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null,
+      ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
         showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
@@ -315,7 +317,7 @@ createApp({
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
-        recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
+        imports: [], recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
   },
   computed: {
@@ -970,6 +972,11 @@ createApp({
       if (await this.run(() => api('PATCH', `/companies/${this.companyId}/employees/${e.id}/user`, { userId: userId || null }), 'Saved.')) this.loadEmployees();
       else this.loadEmployees();
     },
+    async voidRun(r) {
+      const reason = prompt(`Void the whole ${r.payFrequency} payroll paid ${this.usDate(r.payDate)} (${r.paycheckCount} paycheck${r.paycheckCount === 1 ? '' : 's'})? Every paycheck in it is voided and you can run the period again. Why?`);
+      if (!reason) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/payroll-runs/${r.id}/void`, { reason }), 'Payroll run voided. Run the period again with the right numbers.')) this.loadEmployees();
+    },
     async previewRun() { this.prun.preview = await this.run(() => api('POST', `/companies/${this.companyId}/payroll-runs/preview`, this.runBody())); },
     async postRun() {
       const r = await this.run(() => api('POST', `/companies/${this.companyId}/payroll-runs`, this.runBody(), { 'Idempotency-Key': this.prun.key }),
@@ -1102,6 +1109,11 @@ createApp({
         if (ok) { this.je = { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] }; this.showJE = false; this.loadRecurring(); }
         return;
       }
+      if (je.correctsId) {
+        ok = await this.run(() => api('PUT', `/companies/${this.companyId}/entries/${je.correctsId}`, { date: je.date, memo: je.memo, lines }, { 'Idempotency-Key': je.key }));
+        if (ok) { this.flash(`Entry #${je.correctsNumber} corrected: reversed by #${ok.reversalNumber}, corrected entry is #${ok.entry_number}.`); this.cancelCorrection(); this.loadEntries(); }
+        return;
+      }
       if (je.repeat.on) {
         // A repeating entry is saved as a template; the ones already due are posted right away.
         ok = await this.run(() => api('POST', `/companies/${this.companyId}/recurring`, {
@@ -1115,6 +1127,17 @@ createApp({
         this.je = { date: je.date, memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] };
         this.showJE = false; this.loadEntries(); this.loadRecurring();
       }
+    },
+    editEntry(e) {
+      const d = (c) => (c ? (c / 100).toFixed(2) : '');
+      this.je = { date: e.date, memo: e.memo ?? '', key: newKey(), correctsId: e.id, correctsNumber: e.number, repeat: blankRepeat(),
+        lines: e.lines.map((l) => ({ accountId: l.accountId, debit: d(l.debitCents), credit: d(l.creditCents) })) };
+      this.showJE = true;
+      this.$nextTick(() => document.querySelector('.je-card')?.scrollIntoView({ behavior: 'smooth' }));
+    },
+    cancelCorrection() {
+      this.je = { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] };
+      this.showJE = false;
     },
     async reverse(e) {
       if (!confirm(`Reverse entry #${e.number}? A new entry will cancel it out; the original stays on record.`)) return;
@@ -1304,6 +1327,7 @@ createApp({
       b.matches = {};
       b.rules = (await this.run(() => api('GET', `/companies/${this.companyId}/bank-rules`))) ?? [];
       b.recons = (await this.run(() => api('GET', `${base}/reconciliations`))) ?? [];
+      b.imports = (await this.run(() => api('GET', `${base}/imports`))) ?? [];
       const open = b.recons.find((r) => r.status === 'open');
       b.recon = open ? await this.run(() => api('GET', `/companies/${this.companyId}/reconciliations/${open.id}`)) : null;
     },
@@ -1824,7 +1848,13 @@ createApp({
       return `mailto:${encodeURIComponent(doc.sendTo ?? '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     },
     openEmail(doc) { window.location.href = this.emailLink(doc); },
-    async openDoc(d) { this.ar.detail = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
+    async openDoc(d) { this.ar.details = null; this.ar.detail = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
+    startDetails(d) { this.ar.details = { memo: d.memo ?? '', dueDate: d.dueDate, clientRef: d.clientRef ?? '' }; },
+    async saveDetails() {
+      const d = this.ar.detail;
+      const r = await this.run(() => api('PATCH', `/companies/${this.companyId}/documents/${d.id}`, this.ar.details), 'Details changed. The amounts stay as they were.');
+      if (r) { this.ar.detail = { ...d, ...r }; this.ar.details = null; this.loadAr(); }
+    },
     async voidDoc(d) {
       if (!confirm(`Void ${this.S.Doc.toLowerCase()} ${d.number}? Its entry is reversed; this can't be undone.`)) return;
       const r = await this.run(() => api('POST', `${this.arBase()}/documents/${d.id}/void`, {}), `${this.S.Doc} ${d.number} voided.`);
@@ -1994,6 +2024,16 @@ createApp({
     },
     async finishRecon() {
       if (await this.run(() => api('POST', `/companies/${this.companyId}/reconciliations/${this.bank.recon.id}/complete`, {}), 'Reconciled. This statement is now locked in.')) this.loadBank();
+    },
+    async reopenRecon(r) {
+      const reason = prompt(`Reopen the ${this.usDate(r.statementDate)} reconciliation? Your ticks stay, ready to fix. Why is it being reopened?`);
+      if (!reason) return;
+      if (await this.run(() => api('POST', `/companies/${this.companyId}/reconciliations/${r.id}/reopen`, { reason }), 'Reopened. Fix it, then finish it again.')) this.loadBank();
+    },
+    async undoImport(i) {
+      if (!confirm(`Undo the import of ${i.fileName || 'this file'}? Its ${i.undoable} line${i.undoable === 1 ? '' : 's'} still waiting for review will be removed.`)) return;
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-imports/${i.batch}/undo`, {}));
+      if (r) { this.flash(`Removed ${r.removed} line${r.removed === 1 ? '' : 's'}${r.kept ? `; ${r.kept} already in the books stay` : ''}.`); this.loadBank(); }
     },
     async cancelRecon() {
       if (!confirm('Cancel this reconciliation? Your ticks will be cleared; nothing in the books changes.')) return;

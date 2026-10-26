@@ -593,7 +593,9 @@
         <p class="hint" v-else>No recurring entries yet.</p>
       </div>
       <div class="card je-card" v-if="showJE">
-        <h2>{{ je.editId ? 'Change recurring entry' : 'Journal entry' }}</h2>
+        <h2>{{ je.editId ? 'Change recurring entry' : je.correctsId ? `Correct entry #${je.correctsNumber}` : 'Journal entry' }}</h2>
+        <p class="hint" v-if="je.correctsId">Saving reverses entry #{{ je.correctsNumber }} and posts this corrected entry in its place.
+          Both stay on record for your accountant. <button type="button" class="link" @click="cancelCorrection">cancel</button></p>
         <p class="hint" v-if="je.editId">Changes apply from the next date ({{ usDate(je.date) }}) on. Entries already posted stay as they were. The start date and how often can't change: stop this one and start a new one for that.</p>
         <p class="hint">Debits must equal credits. Difference: <strong :class="{ bad: jeDiff !== 0, ok: jeDiff === 0 }">{{ money(jeDiff) }}</strong></p>
         <form @submit.prevent="postJE">
@@ -613,7 +615,7 @@
             </tbody>
           </table>
           <button type="button" @click="je.lines.push({ accountId: '', debit: '', credit: '' })">Add line</button>
-          <label class="check"><input type="checkbox" v-model="je.repeat.on" :disabled="!!je.editId"> Repeat this entry (rent, loan payment, depreciation…)</label>
+          <label class="check" v-if="!je.correctsId"><input type="checkbox" v-model="je.repeat.on" :disabled="!!je.editId"> Repeat this entry (rent, loan payment, depreciation…)</label>
           <div class="grid2" v-if="je.repeat.on">
             <label>How often
               <select v-model="je.repeat.frequency" :disabled="!!je.editId"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select>
@@ -622,7 +624,7 @@
             <label>Name <input v-model.trim="je.repeat.name" :placeholder="je.memo || 'e.g. Office rent'"></label>
           </div>
           <p class="hint" v-if="je.repeat.on && !je.editId">The date above is the first one. Entries on the 29th–31st post on the last day of shorter months.</p>
-          <button class="primary" :disabled="jeDiff !== 0">{{ je.editId ? 'Save changes' : je.repeat.on ? 'Save recurring entry' : 'Post entry' }}</button>
+          <button class="primary" :disabled="jeDiff !== 0">{{ je.editId ? 'Save changes' : je.correctsId ? 'Save correction' : je.repeat.on ? 'Save recurring entry' : 'Post entry' }}</button>
         </form>
       </div>
       <form class="card search" @submit.prevent="loadEntries()">
@@ -655,7 +657,8 @@
                 <span class="muted" v-if="e.reversedByNumber">reversed by #{{ e.reversedByNumber }}</span>
                 <span class="muted" v-else-if="e.reversesEntryId">reversal</span>
                 <span class="muted small" v-else-if="ENTRY_OWNER[e.source]" :title="'Change it there so the ' + ENTRY_OWNER[e.source].what + ' stays right'">void on {{ ENTRY_OWNER[e.source].where }}</span>
-                <button v-else-if="can('post')" class="link" @click="reverse(e)">reverse</button>
+                <template v-else-if="can('post')"><button v-if="CORRECTABLE.includes(e.source)" class="link" @click="editEntry(e)">edit</button>
+                  <button class="link" @click="reverse(e)">reverse</button></template>
               </template>
             </td>
           </tr>
@@ -891,9 +894,19 @@
             <button v-if="can(S.perm) && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="editDoc(ar.detail)">Edit</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="voidDoc(ar.detail)">Void</button>
+            <button v-if="can(S.perm) && ar.detail.status !== 'void' && ar.detail.paidCents && !ar.details" @click="startDetails(ar.detail)"
+              title="Memo, due date and claim / job number. The amounts stay as they are.">Change details</button>
             <button @click="ar.detail = null">Close</button>
           </span>
         </div>
+        <form class="row wrap no-print" v-if="ar.details" @submit.prevent="saveDetails">
+          <label>Memo <input v-model.trim="ar.details.memo" maxlength="500"></label>
+          <label>Due date <input type="date" v-model="ar.details.dueDate" required></label>
+          <label>Claim / job number <input v-model.trim="ar.details.clientRef" maxlength="60"></label>
+          <button class="primary">Save</button> <button type="button" @click="ar.details = null">Cancel</button>
+          <p class="hint">This {{ S.Doc.toLowerCase() }} has payments, so its amounts stay as they are (void the payment first to change them).
+            These details never reach the books; the change is kept in the audit trail.</p>
+        </form>
         <template v-if="S.kind === 'invoice'">
         <div class="letterhead">
           <img v-if="logoUrl()" :src="logoUrl()" alt="" class="invoice-logo">
@@ -1402,6 +1415,17 @@
             <span class="ok">{{ money(bank.preview.inCents) }} in</span>, <span class="bad">{{ money(bank.preview.outCents) }} out</span>.</p>
           <button class="primary" :disabled="!bank.preview.new" @click="importStatement">Import {{ bank.preview.new }} transaction{{ bank.preview.new === 1 ? '' : 's' }}</button>
         </div>
+        <details v-if="bank.imports.length" class="imports">
+          <summary>Recent imports</summary>
+          <table class="data">
+            <thead><tr><th>File</th><th>Dates</th><th class="num">Lines</th><th class="num">Still to review</th><th></th></tr></thead>
+            <tr v-for="i in bank.imports" :key="i.batch"><td>{{ i.fileName || '(no name)' }}</td><td>{{ usDate(i.firstDate) }} to {{ usDate(i.lastDate) }}</td>
+              <td class="num">{{ i.lines }}</td><td class="num">{{ i.undoable }}</td>
+              <td class="actions"><button v-if="can('post') && i.undoable" class="link" @click="undoImport(i)">undo import</button></td></tr>
+          </table>
+          <p class="hint">Imported the wrong file, or into the wrong account? <strong>undo import</strong> removes its lines still waiting for
+            review, so you can import it again. Lines already added or matched stay; undo those one by one first.</p>
+        </details>
       </div>
 
       <div class="card">
@@ -1478,7 +1502,9 @@
           <button class="primary">Start reconciling</button>
         </form>
         <p class="hint" v-if="bank.recons.some(r => r.status === 'completed')">Reconciled through:
-          <strong>{{ bank.recons.find(r => r.status === 'completed').statementDate }}</strong></p>
+          <strong>{{ bank.recons.find(r => r.status === 'completed').statementDate }}</strong>
+          <button v-if="can('close') && !bank.recon && bank.recons[0]?.status === 'completed'" class="link" @click="reopenRecon(bank.recons[0])"
+            title="To fix a wrong tick or ending balance. Only the latest one, and only while its month is open.">reopen</button></p>
       </div>
 
       <div class="card narrow">
@@ -2095,10 +2121,14 @@
       <template v-if="runs.length">
         <h2>Payroll runs</h2>
         <table class="data">
-          <thead><tr><th>Pay date</th><th>Period</th><th>Schedule</th><th class="num">Paychecks</th><th class="num">Gross</th><th class="num">Net</th><th class="num">Employer taxes</th></tr></thead>
-          <tr v-for="r in runs.slice(0, 12)"><td>{{ r.payDate }}</td><td>{{ r.periodStart }} to {{ r.periodEnd }}</td><td>{{ r.payFrequency }}</td>
-            <td class="num">{{ r.paycheckCount }}</td><td class="num">{{ money(r.grossCents) }}</td><td class="num">{{ money(r.netPayCents) }}</td><td class="num">{{ money(r.employerTaxCents) }}</td></tr>
+          <thead><tr><th>Pay date</th><th>Period</th><th>Schedule</th><th class="num">Paychecks</th><th class="num">Gross</th><th class="num">Net</th><th class="num">Employer taxes</th><th></th></tr></thead>
+          <tr v-for="r in runs.slice(0, 12)" :class="{ muted: r.voidDate }"><td>{{ r.payDate }}</td><td>{{ r.periodStart }} to {{ r.periodEnd }}</td><td>{{ r.payFrequency }}</td>
+            <td class="num">{{ r.paycheckCount }}</td><td class="num">{{ money(r.grossCents) }}</td><td class="num">{{ money(r.netPayCents) }}</td><td class="num">{{ money(r.employerTaxCents) }}</td>
+            <td class="actions"><span class="muted small" v-if="r.voidDate" :title="r.voidReason">void</span>
+              <button v-else-if="can('payroll')" class="link" @click="voidRun(r)">void run</button></td></tr>
         </table>
+        <p class="hint">A whole run paid with the wrong hours or rates? <strong>void run</strong> voids every paycheck in it (timesheet
+          hours become unpaid again), and you can run the same period again.</p>
       </template>
 
       <template v-if="paychecks.length">

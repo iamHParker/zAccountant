@@ -439,7 +439,7 @@ export async function postRun(pool, companyId, opts, { actor = null } = {}) {
       const { rows: [dup] } = await c.query('SELECT id FROM payroll_runs WHERE company_id = $1 AND idempotency_key = $2', [companyId, key]);
       if (dup) return { ...(await getRun(c, companyId, dup.id)), duplicate: true };
     }
-    const { rows: [same] } = await c.query('SELECT pay_date FROM payroll_runs WHERE company_id = $1 AND pay_frequency = $2 AND period_start = $3',
+    const { rows: [same] } = await c.query('SELECT pay_date FROM payroll_runs WHERE company_id = $1 AND pay_frequency = $2 AND period_start = $3 AND voided_at IS NULL',
       [companyId, opts.payFrequency, opts.periodStart]);
     if (same) throw new PayrollError(`This ${opts.payFrequency} pay period starting ${opts.periodStart} was already paid on ${same.pay_date}`);
     const pre = await previewRun(c, companyId, opts);
@@ -486,7 +486,45 @@ const runOut = (r) => ({
   id: r.id, payFrequency: r.pay_frequency, periodStart: r.period_start, periodEnd: r.period_end, payDate: r.pay_date, paidFromAccountId: r.paid_from_account_id,
   paycheckCount: r.paycheck_count, grossCents: r.gross_cents, netPayCents: r.net_pay_cents, employeeTaxCents: r.employee_tax_cents,
   employerTaxCents: r.employer_tax_cents, deductionCents: r.deduction_cents, createdBy: r.created_by, createdAt: r.created_at,
+  voidDate: r.void_date ?? null, voidReason: r.void_reason ?? null,
 });
+
+/**
+ * Void a whole payroll run (CPA edit sweep, batch 4): every paycheck in it is voided (newest-first rules apply: a later
+ * paycheck for any of these people must be voided first), timesheet hours it paid become unpaid again, and the run is
+ * marked void so the same pay period can be run again with the right numbers.
+ */
+export async function voidRun(pool, companyId, runId, { date, reason, actor = null } = {}) {
+  if (!(typeof reason === 'string' && reason.trim().length >= 3)) throw new PayrollError('A reason is required to void a payroll run');
+  if (typeof runId !== 'string' || !/^[0-9a-f-]{36}$/i.test(runId)) throw new LedgerError('Payroll run not found');
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    const { rows: [r] } = await c.query('SELECT * FROM payroll_runs WHERE company_id = $1 AND id = $2', [companyId, runId]);
+    if (!r) throw new LedgerError('Payroll run not found');
+    if (r.voided_at) throw new PayrollError('This payroll run is already void');
+    const { rows: pcs } = await c.query(
+      `SELECT p.id FROM paychecks p WHERE p.company_id = $1 AND p.run_id = $2 AND p.voids_paycheck_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM paychecks v WHERE v.voids_paycheck_id = p.id)`, [companyId, r.id]);
+    const voidDate = date || r.pay_date;
+    let reopened = 0;
+    for (const p of pcs) {
+      try {
+        reopened += (await voidPaycheck(c, companyId, p.id, { date: voidDate, reason: `Payroll run voided: ${reason.trim()}`, actor })).timeEntriesReopened;
+      } catch (e) {
+        if (e instanceof PayrollError || e instanceof LedgerError) {
+          const { rows: [who] } = await c.query(`SELECT ${PC_NAME('p', 'e')} AS name FROM paychecks p JOIN employees e ON e.id = p.employee_id WHERE p.id = $1`, [p.id]);
+          throw new PayrollError(`${who.name}: ${e.message}`);
+        }
+        throw e;
+      }
+    }
+    await c.query('UPDATE payroll_runs SET void_date = $3, void_reason = $4, voided_by = $5, voided_at = now() WHERE company_id = $1 AND id = $2',
+      [companyId, r.id, voidDate, reason.trim(), actor]);
+    await appendAudit(c, companyId, { action: 'void', entity: 'payroll_run', entityId: r.id, actor,
+      payload: { periodStart: r.period_start, payDate: r.pay_date, voidDate, reason: reason.trim(), paychecksVoided: pcs.length, timeEntriesReopened: reopened } });
+    return { ...(await getRun(c, companyId, r.id)), paychecksVoided: pcs.length, timeEntriesReopened: reopened };
+  });
+}
 
 export async function listRuns(db, companyId, { limit = 50 } = {}) {
   const { rows } = await db.query('SELECT * FROM payroll_runs WHERE company_id = $1 ORDER BY pay_date DESC, created_at DESC LIMIT $2', [companyId, Math.min(Number(limit) || 50, 500)]);
