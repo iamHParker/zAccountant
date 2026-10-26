@@ -268,9 +268,15 @@ list does the same without leaving the invoice (it fills in the project block an
 
 1. In File Explorer, open the folder that holds your project folders and select them (Ctrl+A for all).
 2. Hold **Shift**, right-click one of them, and choose **Copy as path**.
-3. In Projects, open **Add projects from your folder names**, paste, and press **Check the list**. The number at the
-   start of each folder name (2601 in "2601 Smith Residence") becomes the project number. Projects already on the
-   list are skipped. Pick a customer to set it on all of the new ones, then press **Add … new projects**.
+3. In Projects, open **Add projects from your folder names**, paste, and press **Check the list**. Each folder name
+   is read as *number customer, reference, street, city, state note*: "26-005 Fields, Sierra Homes, 989 Earle Oak
+   Ave., Bulverde, TX" becomes project **26-005 Fields, Sierra Homes**, customer **Fields**, site address
+   **989 Earle Oak Ave. / Bulverde, TX**. Anything after the state ("DIR", "- XO Opinion") stays in the project
+   name. A name with no comma ("26-007 Trophy Oak") stays as it is, and divider folders ("26-010 -------") are
+   skipped. The list shows what was read before anything is saved.
+4. Customers are matched to your customer list by name; tick **Add customers that aren't on the list yet** to add
+   the rest (or pick one customer for all of them). Projects already on the list only get what they're missing
+   (customer, site address, the shorter name); nothing you filled in is changed. Then press **Add … new projects**.
 
 ## 6. Banking
 

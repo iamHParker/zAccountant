@@ -318,7 +318,7 @@ createApp({
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
         showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
-        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', preview: null }, pull: null },
+        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
@@ -1408,11 +1408,19 @@ createApp({
     // Folder names pasted from File Explorer ("Copy as path") become projects: 2601 Smith Residence → number 2601.
     async pasteProjects(preview) {
       const p = this.ar.proj;
-      const r = await this.run(() => api('POST', `${this.arBase()}/jobs/import`, { text: p.paste, customerId: p.pasteCustomer || null, preview }));
+      const r = await this.run(() => api('POST', `${this.arBase()}/jobs/import`,
+        { text: p.paste, customerId: p.pasteCustomer || null, makeCustomers: !p.pasteCustomer && p.makeCustomers, preview }));
       if (!r) return;
       if (preview) { p.preview = r; return; }
-      this.flash(r.added ? `Added ${r.added} project${r.added === 1 ? '' : 's'}.` : 'All of those projects were already on the list.');
+      const said = [r.added && `added ${r.added} project${r.added === 1 ? '' : 's'}`, r.updated && `filled in ${r.updated}`,
+        r.customersAdded && `added ${r.customersAdded} customer${r.customersAdded === 1 ? '' : 's'}`].filter(Boolean);
+      this.flash(said.length ? `Done: ${said.join(', ')}.` : 'All of those projects were already on the list.');
       p.paste = ''; p.preview = null; this.loadAr();
+    },
+    projectImportLabel() {
+      const rows = this.ar.proj.preview?.projects ?? [];
+      const n = rows.filter((x) => x.status === 'new').length; const f = rows.filter((x) => x.status === 'fills in').length;
+      return [n && `Add ${n} new project${n === 1 ? '' : 's'}`, f && `fill in ${f}`].filter(Boolean).join(' and ').replace(/^f/, 'F');
     },
     // The invoice's project: fills in the customer, the printed project block, and its number as the invoice number.
     pickDocProject() {

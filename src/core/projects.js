@@ -38,8 +38,52 @@ export function parseProjectList(text) {
   for (const line of lines) {
     const p = parseProjectFolder(line);
     if (!p || seen.has(p.name.toLowerCase())) continue;
+    // A divider folder ("26-010 ----------") is not a project.
+    if (!/[A-Za-z0-9]/.test(p.code ? p.name.slice(p.code.length) : p.name)) continue;
     seen.add(p.name.toLowerCase());
     out.push(p);
   }
   return out;
+}
+
+const STATES = { texas: 'TX', colorado: 'CO', california: 'CA', 'district of columbia': 'DC' };
+const STREET = /(^|\s)(\d{1,6}[A-Za-z]?\s+[A-Za-z])/; // "285 Bridgestone", "4602 Finley"; not "TX40571901"
+
+/**
+ * The parts of a folder name after its number (Homer, 2026-10-26): "26-002 DWH, 285 Bridgestone Way, Buda, TX DIR".
+ * Up to the first comma is the customer; then, until the street address, a reference (claim number, attorney,
+ * builder); then the street, the city and the state; anything after the state is a note ("DIR", "- XO Opinion").
+ * A street that starts inside the first part splits it: "Garner NHWIC TX40571901 4602 Finley, Austin, TX".
+ * A name with no comma has no parts ("26-007 Trophy Oak" stays a project name). Returns
+ * { customer, reference, address ("street\ncity, ST"), note, name (the folder name without the address) }.
+ */
+export function splitProjectName(name, code) {
+  const none = { customer: null, reference: null, address: null, note: null, name };
+  let rest = name;
+  if (code && rest.startsWith(code)) rest = rest.slice(code.length).replace(/^[\s_–—:-]+/, '');
+  if (!rest.includes(',')) return none;
+  const segs = rest.split(',').map((s) => s.trim()).filter(Boolean);
+  // Where the street starts: the first part holding "digits + word".
+  let at = -1; let street = null;
+  for (let i = 0; i < segs.length; i++) {
+    const m = STREET.exec(segs[i]);
+    if (m) { at = i; street = segs[i].slice(m.index + m[1].length); if (i === 0) segs.splice(0, 1, segs[0].slice(0, m.index).trim(), street); break; }
+  }
+  if (at === 0) at = 1; // the first part was split in two
+  const customer = segs[0] || null;
+  if (at < 0) return { ...none, customer, reference: segs.slice(1).join(', ') || null };
+  const reference = segs.slice(1, at).join(', ') || null;
+  const after = segs.slice(at + 1);
+  // The state is the last part that starts with a state (TX, Texas…); the city is the part before it.
+  let note = null; let city = null; let state = null;
+  const last = after.at(-1) ?? '';
+  const sm = /^([A-Za-z]{2}|texas|colorado|california|district of columbia)\b\.?\s*(?:\d{5}(?:-\d{4})?)?\s*[-–—]?\s*(.*)$/i.exec(last);
+  if (after.length >= 2 && sm) {
+    state = STATES[sm[1].toLowerCase()] ?? sm[1].toUpperCase();
+    note = sm[2].trim() || null;
+    city = after.slice(0, -1).join(', ');
+  } else city = after.join(', ') || null;
+  const address = [segs[at], [city, state].filter(Boolean).join(', ')].filter(Boolean).join('\n').slice(0, 300) || null;
+  const short = [code, [customer, reference].filter(Boolean).join(', ')].filter(Boolean).join(' ') + (note ? ` - ${note}` : '');
+  return { customer, reference, address, note, name: (short || name).slice(0, 80) };
 }

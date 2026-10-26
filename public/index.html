@@ -1030,19 +1030,30 @@
             <li>In File Explorer, open the folder that holds your project folders.</li>
             <li>Select the project folders (Ctrl+A for all of them).</li>
             <li>Hold Shift, right-click one of them, and choose <strong>Copy as path</strong>.</li>
-            <li>Paste here. The number at the start of each folder name becomes the project number.</li>
+            <li>Paste here. Each folder name is read as <em>number customer, reference, street, city, state note</em>:
+              <span class="muted">26-005 Fields, Sierra Homes, 989 Earle Oak Ave., Bulverde, TX</span> → number 26-005, customer Fields,
+              reference Sierra Homes, site address 989 Earle Oak Ave. / Bulverde, TX. A name with no comma stays as it is.</li>
           </ol>
           <textarea v-model="ar.proj.paste" rows="6" @input="ar.proj.preview = null" placeholder='"C:\Projects\2601 Smith Residence"&#10;"C:\Projects\2602 Jones Roof"'></textarea>
           <div class="row wrap">
-            <label v-if="S.kind === 'invoice'">Customer for all of them (optional) <select v-model="ar.proj.pasteCustomer" class="auto"><option value="">None</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+            <label v-if="S.kind === 'invoice'">Customer for all of them (optional) <select v-model="ar.proj.pasteCustomer" class="auto" @change="ar.proj.preview = null"><option value="">Read from each name</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
+            <label class="check" v-if="!ar.proj.pasteCustomer && can('invoices')"><input type="checkbox" v-model="ar.proj.makeCustomers"> Add customers that aren't on the list yet</label>
             <button type="button" :disabled="!ar.proj.paste.trim()" @click="pasteProjects(true)">Check the list</button>
-            <button type="button" class="primary" v-if="ar.proj.preview" :disabled="!ar.proj.preview.projects.some(p => p.isNew)" @click="pasteProjects(false)">
-              Add {{ ar.proj.preview.projects.filter(p => p.isNew).length }} new project{{ ar.proj.preview.projects.filter(p => p.isNew).length === 1 ? '' : 's' }}</button>
+            <button type="button" class="primary" v-if="ar.proj.preview" :disabled="!ar.proj.preview.projects.some(p => p.status !== 'already on the list')" @click="pasteProjects(false)">
+              {{ projectImportLabel() }}</button>
           </div>
-          <table class="data" v-if="ar.proj.preview">
-            <thead><tr><th>Number</th><th>Project</th><th></th></tr></thead>
-            <tr v-for="p in ar.proj.preview.projects"><td>{{ p.code }}</td><td>{{ p.name }}</td><td :class="p.isNew ? 'ok' : 'muted'">{{ p.isNew ? 'new' : 'already on the list' }}</td></tr>
+          <div class="scroll-x" v-if="ar.proj.preview">
+          <table class="data small">
+            <thead><tr><th>Number</th><th>Project</th><th>Customer</th><th>Reference</th><th>Site address</th><th></th></tr></thead>
+            <tbody>
+            <tr v-for="p in ar.proj.preview.projects">
+              <td>{{ p.code }}</td><td>{{ p.name }}</td>
+              <td>{{ p.customer }}<span v-if="p.customer && p.customerIsNew" class="muted">{{ ar.proj.makeCustomers ? ' (new customer)' : ' (not on the list: left blank)' }}</span></td>
+              <td>{{ p.reference }}</td><td class="pre-line">{{ p.address }}</td>
+              <td :class="p.status === 'already on the list' ? 'muted' : 'ok'">{{ p.status }}{{ p.fills.length ? ': ' + p.fills.join(', ') : '' }}</td></tr>
+            </tbody>
           </table>
+          </div>
         </details>
       </div>
 

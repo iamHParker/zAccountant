@@ -5,7 +5,7 @@ import * as ledger from '../src/services/ledgerService.js';
 import * as arap from '../src/services/arapService.js';
 import * as time from '../src/services/timesheetService.js';
 import * as projects from '../src/services/projectService.js';
-import { parseProjectFolder, parseProjectList } from '../src/core/projects.js';
+import { parseProjectFolder, parseProjectList, splitProjectName } from '../src/core/projects.js';
 
 // Homer names his project folders by number and name; "Copy as path" in File Explorer pastes them in quotes.
 test('projects from folder names', () => {
@@ -17,6 +17,22 @@ test('projects from folder names', () => {
   assert.equal(parseProjectFolder('   '), null);
   const list = parseProjectList('"C:\\J\\2601 Smith Residence"\r\n\r\n2601 smith residence\n2604 Lee');
   assert.deepEqual(list.map((p) => p.code), ['2601', '2604']); // blank lines and repeats skipped
+});
+
+test('folder names split into customer, reference and site address (Homer\'s list, 2026-10-26)', () => {
+  const split = (s) => { const p = parseProjectFolder(s); return splitProjectName(p.name, p.code); };
+  assert.deepEqual(split('26-002 DWH, 285 Bridgestone Way, Buda, TX DIR'),
+    { customer: 'DWH', reference: null, address: '285 Bridgestone Way\nBuda, TX', note: 'DIR', name: '26-002 DWH - DIR' });
+  // The street starts inside the first part (no comma before it).
+  assert.deepEqual(split('26-003 Garner NHWIC TX40571901 4602 Finley, Austin, TX DIR'),
+    { customer: 'Garner NHWIC TX40571901', reference: null, address: '4602 Finley\nAustin, TX', note: 'DIR', name: '26-003 Garner NHWIC TX40571901 - DIR' });
+  assert.deepEqual(split('26-005 Fields, Sierra Homes, 989 Earle Oak Ave. , Bulverde, TX'),
+    { customer: 'Fields', reference: 'Sierra Homes', address: '989 Earle Oak Ave.\nBulverde, TX', note: null, name: '26-005 Fields, Sierra Homes' });
+  assert.equal(split('26-008 Witte, 12008 Battle Bridge Dr, Austin, TX - XO Opinion').note, 'XO Opinion');
+  assert.equal(split('26-012 DWH, 915 Fort Crockett, San Antonio, Texas').address, '915 Fort Crockett\nSan Antonio, TX');
+  assert.deepEqual(split('26-007 Trophy Oak'), { customer: null, reference: null, address: null, note: null, name: '26-007 Trophy Oak' });
+  assert.deepEqual(parseProjectList('26-009 Arbitration\n26-010 --------------\n26-010 Swimming Pool').map((p) => p.name),
+    ['26-009 Arbitration', '26-010 Swimming Pool']); // a divider folder is not a project
 });
 
 test('hours as an invoice quantity', () => {
@@ -45,6 +61,24 @@ test('billing a project: unbilled time and costs, billed once', { skip: !hasDb &
   assert.equal((await projects.importProjects(pool, co.id, { text: '2601 Smith Residence\n2602 Jones Roof', customerId: dwh.id })).added, 2);
   const again = await projects.importProjects(pool, co.id, { text: '2601 Smith Residence\n2603 Lee', customerId: dwh.id });
   assert.deepEqual([again.added, again.projects.map((p) => p.isNew)], [1, [false, true]]);
+  // Names read into parts: the customer matched by name (or added), the address into the site address, and an
+  // earlier import of the same folder (full name, no customer) filled in without losing anything.
+  await projects.importProjects(pool, co.id, { text: '26-004 Beldon, 101 Paseo Encinal, San Antonio, TX' });
+  const parts = await projects.importProjects(pool, co.id, { makeCustomers: true, text:
+    '"C:\\Jobs\\26-002 DWH - SATX, 285 Bridgestone Way, Buda, TX DIR"\n26-004 Beldon, 101 Paseo Encinal, San Antonio, TX\n26-007 Trophy Oak' });
+  assert.deepEqual(parts.projects.map((p) => [p.name, p.customer, p.customerIsNew, p.status]), [
+    ['26-002 DWH - SATX - DIR', 'DWH - SATX', false, 'new'],
+    ['26-004 Beldon', 'Beldon', true, 'fills in'],
+    ['26-007 Trophy Oak', null, false, 'new']]);
+  assert.deepEqual([parts.added, parts.updated, parts.customersAdded], [2, 1, 1]);
+  const byCode = Object.fromEntries((await time.listJobs(pool, co.id)).map((j) => [j.code, j]));
+  assert.deepEqual([byCode['26-002'].customerName, byCode['26-002'].address], ['DWH - SATX', '285 Bridgestone Way\nBuda, TX']);
+  assert.deepEqual([byCode['26-004'].name, byCode['26-004'].customerName, byCode['26-004'].address], ['26-004 Beldon', 'Beldon', '101 Paseo Encinal\nSan Antonio, TX']);
+  // Without "add customers", a customer not on the list is left blank.
+  const noAdd = await projects.importProjects(pool, co.id, { text: '26-013 Nguyen, 4 Elm St, Kyle, TX' });
+  assert.equal((await time.listJobs(pool, co.id)).find((j) => j.code === '26-013').customerId, null);
+  assert.equal(noAdd.customersAdded, 0);
+
   const jobs = Object.fromEntries((await time.listJobs(pool, co.id)).map((j) => [j.code, j]));
   assert.equal(jobs['2601'].customerName, 'DWH - SATX');
   await time.updateJob(pool, co.id, jobs['2601'].id, { ...jobs['2601'], address: '12 Oak St\nSan Antonio, TX' });
