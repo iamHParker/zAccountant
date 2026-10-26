@@ -17,6 +17,8 @@ The security is built in layers, like redundant load paths. If one layer fails, 
   needs a full sign-in **and** a fresh authenticator code. We check the challenge, the origin, the site's hash, the
   user-verified flag, the signature (ES256, RS256, EdDSA) and that the counter never goes backwards (a copied key).
   No attestation: we ask for `'none'`. Tests use a pretend device (`test/fakeAuthenticator.js`).
+- **Password change** (`POST /api/auth/password`): current password **and** a fresh authenticator code, then every other
+  session of that person is deleted. The email can't change until a new address can be confirmed by email.
 - **Secrets at rest:** Social Security numbers and authenticator secrets are encrypted with AES-256-GCM
   (`FIELD_ENCRYPTION_KEY`). Passwords are hashed (scrypt).
 

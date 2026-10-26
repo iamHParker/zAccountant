@@ -164,6 +164,11 @@ export function createApp(pool, { log } = {}) {
   const authApi = express.Router();
   authApi.use(rateLimiter({ windowMs: 5 * 60_000, max: Number(process.env.AUTH_RATE_LIMIT ?? 30) }));
   const session = async (req) => auth.getSession(pool, readCookie(req, COOKIE()));
+  const fullSession = async (req) => {
+    const s = await session(req);
+    if (!s?.session.mfa_passed) throw new AuthError('Please sign in', 401);
+    return s;
+  };
 
   authApi.post('/signup', async (req, res) => {
     const { email, password, name } = req.body ?? {};
@@ -205,13 +210,18 @@ export function createApp(pool, { log } = {}) {
     setSessionCookie(res, r.token);
     res.json({ ok: true });
   });
+  // Your own sign-in: name and password (email stays until it can be confirmed by email).
+  authApi.patch('/me', async (req, res) => {
+    const s = await fullSession(req);
+    res.json(await auth.updateMyName(pool, s.user.id, { name: req.body?.name }));
+  });
+  authApi.post('/password', async (req, res) => {
+    const s = await fullSession(req);
+    res.json(await auth.changePassword(pool, s.user.id, s.session.token_hash,
+      { currentPassword: req.body?.currentPassword, newPassword: req.body?.newPassword, code: req.body?.code }));
+  });
   // Passkeys (Face ID, Touch ID, Windows Hello). The site's name for them is its host name; the browser checks it.
   const relyingParty = (req) => ({ rpId: (req.headers.host ?? '').toLowerCase().replace(/:\d+$/, ''), origin: `${req.protocol}://${(req.headers.host ?? '').toLowerCase()}` });
-  const fullSession = async (req) => {
-    const s = await session(req);
-    if (!s?.session.mfa_passed) throw new AuthError('Please sign in', 401);
-    return s;
-  };
   authApi.post('/passkey/options', async (req, res) => res.json(await auth.passkeyLoginOptions(pool, relyingParty(req))));
   authApi.post('/passkey/login', async (req, res) => {
     const r = await auth.passkeyLogin(pool, { credential: req.body?.credential }, relyingParty(req));

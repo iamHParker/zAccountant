@@ -2236,6 +2236,24 @@
         <p class="hint">The home state can't change once payroll has run, and the fiscal-year start can't change while any
           period is closed. Every change is kept in the audit trail.</p>
       </form>
+      <div class="card" v-if="auth.user">
+        <h2>Your sign-in</h2>
+        <form class="row wrap" @submit.prevent="saveMyName">
+          <label>Your name <input v-model.trim="mine.name" maxlength="100" required></label>
+          <label>Email (your sign-in) <input :value="auth.user.email" disabled></label>
+          <button :disabled="mine.name === auth.user.name">Save name</button>
+        </form>
+        <p class="hint">The email can't be changed yet: zAccountant will first need to confirm a new address by email. Ask us if
+          you must change it.</p>
+        <h3>Change your password</h3>
+        <form class="grid4" @submit.prevent="changePassword" autocomplete="off">
+          <label>Current password <input type="password" v-model="mine.current" autocomplete="current-password" required></label>
+          <label>New password (12 or more characters) <input type="password" v-model="mine.next" autocomplete="new-password" minlength="12" required></label>
+          <label>6-digit code from your app <input v-model.trim="mine.code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required></label>
+          <label class="end"><button class="primary">Change password</button></label>
+        </form>
+        <p class="hint">You stay signed in here; every other phone or computer signed in as you is signed out.</p>
+      </div>
       <div class="card" v-if="passkeys.supported">
         <h2>Sign in with Face ID, Touch ID or Windows Hello</h2>
         <p class="hint">A passkey lets this phone or computer sign you in with your face, fingerprint or device PIN: no password

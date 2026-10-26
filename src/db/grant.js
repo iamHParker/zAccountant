@@ -18,7 +18,7 @@ export async function grantRuntimeRole(pool, role) {
                     passkeys, auth_challenges, road_keys, road_items, road_photos, mileage_drives, home_layouts TO ${role};
     GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount, futa_credit_reduction, default_sales_tax_rate,
                   invoice_address, invoice_note, invoice_footer, entity_type, books_start_date, setup_done, name, home_state, fiscal_year_start_month) ON companies TO ${role};
-    GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash) ON users TO ${role};
+    GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash, name) ON users TO ${role};
     GRANT UPDATE (mfa_passed, last_seen_at, expires_at) ON sessions TO ${role};
     GRANT UPDATE (posted_count, next_date, is_active, last_error, name, memo, lines, end_date) ON recurring_entries TO ${role};
     GRANT UPDATE (status, suggested_account_id, rule_id, journal_entry_id, note, reviewed_by, reviewed_at) ON bank_transactions TO ${role};

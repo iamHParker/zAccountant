@@ -101,6 +101,9 @@ send us a screenshot or tell us about a problem some other way, mention that num
   **Add this device**. From then on, choose **Sign in with Face ID or a passkey** on the sign-in screen: nothing is
   typed, so a camera over your shoulder sees nothing. **rename** gives a passkey a clearer name. Lost the device? Remove its passkey in the same place. Your
   password and code still work as the backup.
+- **Change your name or password** in **Settings → Your sign-in**. A new password needs your current one and a 6-digit
+  code from your authenticator app, and it signs out every other phone or computer signed in as you (handy if you
+  forgot to sign out somewhere). The email you sign in with can't be changed yet; ask us if you must.
 - Never share your password or recovery codes. zAccountant staff will never ask for them.
 - Social Security numbers and authenticator secrets are encrypted before they are stored.
 - Each company's data is walled off by the database itself. Other companies can't see yours, even by mistake.
