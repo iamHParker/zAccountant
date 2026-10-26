@@ -181,5 +181,15 @@ Batch 2 (master data, all audited from/to, all through column grants in `src/db/
 - `ledgerService.updateRecurring` (`PUT …/recurring/:id`, post): name, memo, lines, end date, `restart`. Start date and
   frequency are fixed, so `next_date` is recomputed with `nextOccurrence(…, posted_count)`; nothing posted changes.
 - `bankService.updateRule` (`PUT …/bank-rules/:id`, post): same checks as `createRule`.
+Batch 3 (employees, migration 030):
+- Each paycheck's `calculation` carries `employee` (name, SSN last 4, work state, pay type, frequency, address) and
+  `employer` (name, state), copied in `compute()` and onto void records. Stubs, the paycheck list, runs and the payroll
+  register read the name from there (`PC_NAME`, falling back to `employees` for older paychecks); liabilities take the
+  state from `calculation.state`. The W-2 deliberately uses the current name and address.
+- `payrollService.updateEmployee` (`PUT …/employees/:id`, payroll): partial; same checks as create (`checkEmployee`);
+  audit shows from/to for name, state, frequency, pay type, rate and hire date, only "changed" for W-4, state forms,
+  address and SSN.
+- `setEmployeeStatus` (`POST …/terminate` / `…/rehire`, payroll): last day / new start date; `active` drives payroll
+  runs and timesheets.
 Tests: `test/edits.db.test.js` (HTTP, restricted runtime role).
 
