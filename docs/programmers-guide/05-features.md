@@ -204,5 +204,9 @@ Batch 4 (ledger corrections, migration 031):
   returned NULL, so Cancel never deleted an open reconciliation: B7).
 - `bankService.listImports` / `undoImport` (`GET …/bank-accounts/:id/imports`, `POST …/bank-imports/:batch/undo`):
   deletes the batch's lines still in review or excluded.
+Batch 5 (your own sign-in): `authService.changePassword` (`POST /api/auth/password`: current password + TOTP code,
+then every other session of that user is deleted) and `updateMyName` (`PATCH /api/auth/me`). Email change and
+"forgot password" wait for outgoing email: an unconfirmed email change would let someone claim an address an owner
+later adds as a member, or one listed in `ADMIN_EMAILS` / `DEVELOPER_EMAILS`.
 Tests: `test/edits.db.test.js` (HTTP, restricted runtime role).
 

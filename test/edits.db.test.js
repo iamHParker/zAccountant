@@ -219,4 +219,32 @@ test('edits: company, accounts, recurring entries, bank rules, employees', { ski
     ok(await call('DELETE', `${c}/reconciliations/${rec.id}`, {}));
     ok(await call('POST', `${c}/bank-accounts/${A['1010'].id}/reconciliations`, { statementDate: '2026-05-31', endingBalance: '1000' }), 201);
   });
+
+  // ---------------------------------------------------------------- batch 5: your own sign-in
+  await t.test('change your name and password; other sessions end', async () => {
+    const named = await call('PATCH', '/api/auth/me', { name: 'Homer P. Parker' });
+    ok(named);
+    assert.equal(named.body.name, 'Homer P. Parker');
+    refused(await call('PATCH', '/api/auth/me', { name: ' ' }), /enter your name/);
+    // A second sign-in (say, the office computer): password only, half signed in, which is enough to test that it ends.
+    const other = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'owner@example.com', password: 'a long enough passphrase' }) });
+    const otherCookie = other.headers.get('set-cookie').split(';')[0];
+    const me = () => fetch(`${base}/api/auth/me`, { headers: { cookie: otherCookie } }).then((r) => r.status);
+    assert.equal(await me(), 200);
+    const next = totpCode(setup.body.secret, Date.now() + 30_000); // the sign-up code was already used
+    const wrong = await call('POST', '/api/auth/password', { currentPassword: 'not it at all', newPassword: 'a brand new passphrase', code: next });
+    assert.equal(wrong.status, 400);
+    assert.match(wrong.body.error, /current password is not correct/);
+    refused(await call('POST', '/api/auth/password', { currentPassword: 'a long enough passphrase', newPassword: 'short', code: next }), /12 characters/);
+    assert.equal((await call('POST', '/api/auth/password', { currentPassword: 'a long enough passphrase', newPassword: 'a brand new passphrase', code: '000000' })).status, 401);
+    const changed = await call('POST', '/api/auth/password', { currentPassword: 'a long enough passphrase', newPassword: 'a brand new passphrase', code: next });
+    ok(changed);
+    assert.equal(changed.body.otherSessionsEnded, 1);
+    assert.equal(await me(), 401, 'the other computer is signed out');
+    ok(await call('GET', `${c}/accounts`), 200); // this one stays signed in
+    const login = (pw) => fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'owner@example.com', password: pw }) }).then((r) => r.status);
+    assert.equal(await login('a long enough passphrase'), 401);
+    assert.equal(await login('a brand new passphrase'), 200);
+  });
 });

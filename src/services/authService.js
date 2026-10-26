@@ -83,6 +83,35 @@ export async function logout(db, token) {
   if (typeof token === 'string') await db.query('DELETE FROM sessions WHERE token_hash = $1', [sha256(token)]);
 }
 
+/**
+ * Change your password (CPA edit sweep, batch 5): the current password and a fresh 6-digit code are both required,
+ * so a session left open on someone else's computer can't be used to lock you out. Every other session of yours
+ * is signed out; this one stays.
+ */
+export async function changePassword(db, userId, tokenHash, { currentPassword, newPassword, code }) {
+  const { rows: [u] } = await db.query('SELECT * FROM users WHERE id = $1', [userId]);
+  if (!(await verifyPassword(typeof currentPassword === 'string' ? currentPassword : '', u.password_hash))) {
+    throw new AuthError('Your current password is not correct', 400);
+  }
+  const problems = passwordProblems(newPassword, u.email);
+  if (problems.length) throw new LedgerError('New password is not valid', problems);
+  if (newPassword === currentPassword) throw new LedgerError('New password is not valid', ['choose a password different from the current one']);
+  await checkSecondFactor(db, userId, { code });
+  await db.query('UPDATE users SET password_hash = $2, failed_logins = 0, locked_until = NULL WHERE id = $1', [userId, await hashPassword(newPassword)]);
+  const { rowCount } = await db.query('DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2', [userId, tokenHash]);
+  return { ok: true, otherSessionsEnded: rowCount };
+}
+
+/**
+ * Change the name people see (on members lists, timesheets, the top of the screen). The email address is the
+ * sign-in and what owners add people by, so it can't change until zAccountant can confirm a new one by email.
+ */
+export async function updateMyName(db, userId, { name }) {
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 100) throw new LedgerError('Name is not valid', ['enter your name (up to 100 characters)']);
+  const { rows: [u] } = await db.query('UPDATE users SET name = $2 WHERE id = $1 RETURNING *', [userId, name.trim()]);
+  return publicUser(u);
+}
+
 /** Step 1 of turning on two-factor: make a secret the person scans/types into their authenticator app. */
 export async function mfaSetup(db, userId) {
   const { rows: [u] } = await db.query('SELECT * FROM users WHERE id = $1', [userId]);

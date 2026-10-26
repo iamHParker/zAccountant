@@ -255,7 +255,7 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '',
-      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null, ENTRY_OWNER, CORRECTABLE, profile: null,
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null, ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
       MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
       statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
@@ -380,7 +380,7 @@ createApp({
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if ((t === 'payroll' || t === 'settings') && this.has('payroll') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
-      if (t === 'settings') { this.editProfile(); if (this.passkeys.supported) this.loadPasskeys(); this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
+      if (t === 'settings') { this.editProfile(); this.mine = { name: this.auth.user?.name ?? '', current: '', next: '', code: '' }; if (this.passkeys.supported) this.loadPasskeys(); this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'setup') this.loadSetup();
       if (t === 'bank') this.loadBank();
@@ -471,6 +471,16 @@ createApp({
       if (!res) return;
       this.auth.user = res.user; this.version = res.version ?? '';
       await this.enterApp();
+    },
+    async saveMyName() {
+      const u = await this.run(() => api('PATCH', '/auth/me', { name: this.mine.name }), 'Name saved.');
+      if (u) this.auth.user = { ...this.auth.user, name: u.name };
+    },
+    async changePassword() {
+      const m = this.mine;
+      const r = await this.run(() => api('POST', '/auth/password', { currentPassword: m.current, newPassword: m.next, code: m.code }));
+      if (r) this.flash(`Password changed.${r.otherSessionsEnded ? ` ${r.otherSessionsEnded} other sign-in${r.otherSessionsEnded === 1 ? ' was' : 's were'} ended.` : ''}`);
+      this.mine = { ...m, current: '', next: '', code: '' };
     },
     async loadPasskeys() {
       this.passkeys.list = (await this.run(() => api('GET', '/auth/passkeys'))) ?? [];
