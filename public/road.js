@@ -58,11 +58,11 @@ async function shrinkPhoto(file) {
 
 /** miles × rate, exactly as the server does it (half-up once, in cents). */
 function mileageCents(miles, rate) {
-  const m = /^(\d{1,6})(?:\.(\d{1,2}))?$/.exec(String(miles ?? '').trim());
-  const r = /^\$?(\d{1,2})(?:\.(\d{1,4}))?$/.exec(String(rate ?? '').trim());
-  if (!m || !r) return null;
-  const hundredthsMiles = BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'));
-  const tenThousandthsDollars = BigInt(r[1]) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0'));
+  const m = /^(\d{0,6})(?:\.(\d{1,2}))?$/.exec(String(miles ?? '').trim()); // ".5" and "$.725" work too
+  const r = /^\$?(\d{0,2})(?:\.(\d{1,4}))?$/.exec(String(rate ?? '').trim());
+  if (!m || !r || (!m[1] && !m[2]) || (!r[1] && !r[2])) return null;
+  const hundredthsMiles = BigInt(m[1] || 0) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'));
+  const tenThousandthsDollars = BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0'));
   const n = hundredthsMiles * tenThousandthsDollars; // in 1/10000 of a cent
   return Number((n + 5000n) / 10000n);
 }

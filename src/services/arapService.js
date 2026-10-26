@@ -49,13 +49,18 @@ async function systemAccount(c, companyId, key, missing) {
   return a;
 }
 
+/** A typed quantity as stored: trimmed, ".5" → "0.5", "2." → "2" (Homer typed .5 hours, Oct 2026). */
+export function cleanQuantity(quantity) {
+  return String(quantity ?? '1').trim().replace(/^\./, '0.').replace(/\.$/, '');
+}
+
 /**
  * Quantity "2.5" × unit price cents → line amount in cents, rounded half-up (exact, no floating point).
  * A share "1/3" (a cost split evenly across 3 jobs, Homer 2026-10-24) is price × 1 ÷ 3, divided exactly
  * then rounded once, so $350.00 at 1/3 is $116.67 (35000 ÷ 3 = 11666.67 → 11667 cents).
  */
 export function lineAmount(quantity, unitPriceCents) {
-  const q = String(quantity ?? '1').trim();
+  const q = cleanQuantity(quantity);
   const f = /^(\d{1,4})\/(\d{1,4})$/.exec(q);
   if (f) {
     if (BigInt(f[2]) === 0n) throw new LedgerError('A share like 1/3 cannot divide by 0');
@@ -283,7 +288,7 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
     let amount;
     try { amount = lineAmount(l.quantity ?? '1', unit); } catch (e) { errors.push(`${n}: ${e.message}`); return null; }
     if (amount > MAX_LINE_CENTS) { errors.push(`${n}: amount is too large`); return null; }
-    return { accountId: l.accountId, description: text(l.description, 300), quantity: String(l.quantity ?? '1').trim(), unitPriceCents: unit, amountCents: amount,
+    return { accountId: l.accountId, description: text(l.description, 300), quantity: cleanQuantity(l.quantity), unitPriceCents: unit, amountCents: amount,
       taxable: kind === 'invoice' && l.taxable === true, serviceDate, itemId, jobId, billable, timeEntryId, billedLineId, tripCostId };
   });
 }
