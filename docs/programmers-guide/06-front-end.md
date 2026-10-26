@@ -11,6 +11,7 @@ The screens are plain files the server sends as they are, except that the server
 | `styles.css` | every style, including print rules |
 | `help.js` | the in-app Help guides (searchable; the ? button opens the guide for the current tab) |
 | `feedback.js` | the Beta feedback recorder and pictures |
+| `paste.js` | `picturesFromClipboard()`: copied screenshots/photos as `File`s for the **📋 Paste** buttons beside photo pickers (app and Road page) |
 | `templates/` | CSV templates people download for imports |
 
 ## The screens are compiled on the server (since Oct 2026)

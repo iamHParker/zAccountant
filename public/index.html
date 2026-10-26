@@ -873,7 +873,7 @@
             <p class="muted small" v-if="ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected payment.</p>
             <div class="row wrap">
               <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addPayPhotos"></label>
-              <label class="button">Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addPayPhotos"></label>
+              <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addPayPhotos"></label> <button type="button" @click="pastePhotos('addPayPhotos')">📋 Paste</button>
               <span class="muted small" v-if="ar.pay.photoBusy">Preparing photo…</span>
             </div>
             <div class="row wrap" v-if="ar.pay.photos.length">
@@ -1093,7 +1093,7 @@
         </div>
         <div class="row wrap" v-if="can(S.perm) && ar.photoView.payment.status !== 'void'">
           <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="uploadPhotos"></label>
-          <label class="button">Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="uploadPhotos"></label>
+          <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="uploadPhotos"></label> <button type="button" @click="pastePhotos('uploadPhotos')">📋 Paste</button>
           <span class="muted small" v-if="ar.photoView.busy">Saving photo…</span>
         </div>
       </div>
@@ -1340,7 +1340,7 @@
               <p class="muted small" v-if="trip.cost.keptPhotos">{{ trip.cost.keptPhotos }} photo{{ trip.cost.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected cost.</p>
               <div class="row wrap">
                 <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addTripCostPhotos"></label>
-                <label class="button">Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addTripCostPhotos"></label>
+                <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addTripCostPhotos"></label> <button type="button" @click="pastePhotos('addTripCostPhotos')">📋 Paste</button>
                 <span class="muted small" v-if="trip.cost.photoBusy">Preparing photo…</span>
               </div>
               <div class="row wrap" v-if="trip.cost.photos.length">
@@ -1371,7 +1371,7 @@
             </div>
             <div class="row wrap" v-if="can('bills')">
               <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="uploadTripPhotos"></label>
-              <label class="button">Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="uploadTripPhotos"></label>
+              <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="uploadTripPhotos"></label> <button type="button" @click="pastePhotos('uploadTripPhotos')">📋 Paste</button>
               <span class="muted small" v-if="trip.photoView.busy">Saving photo…</span>
             </div>
           </div>

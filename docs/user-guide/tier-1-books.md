@@ -199,8 +199,9 @@ is already on an invoice can't be edited or voided until that invoice is.
 2. **+ Add cost** for each expense: pick what it was (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other), the
    date, who was paid, the amount, the expense account, and what you paid with (bank, credit card, or an owner account
    when you paid personally). For **Mileage**, type the miles and the rate per mile (the IRS standard mileage rate for
-   the year, from irs.gov, or your own); the amount is worked out. **📷 Take photo** keeps the receipt with the cost.
-   Saving records the expense in your books.
+   the year, from irs.gov, or your own); the amount is worked out. **📷 Take photo** keeps the receipt with the cost;
+   **🖼 Choose photo** picks one already taken (or a screenshot) from Photos; **📋 Paste** adds a picture you copied
+   (see below). Saving records the expense in your books.
 3. **+ Add travel time**: the hours spent travelling. It's billed by the same shares, at the rate you pick on the invoice.
 4. A cost that shows up later (tolls two weeks after the trip): open the trip and add it. It waits on each project's
    list until it's billed. To correct a cost, press **edit**; the old one is voided and the corrected one takes its
@@ -221,12 +222,17 @@ while you travel, even with no signal, without signing in to your books on the p
    page's box.)
 2. On the road: **+ New trip** (name, dates, the projects it's for; type new project numbers like *2610 Garcia Barn*
    one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other; the amount or
-   the miles and rate; **📷 Receipt photo**) and **+ Travel time**. Everything is saved on the phone first and sent when
+   the miles and rate; receipt photos: **📷 Take photo**, **🖼 Choose photo** from Photos, or **📋 Paste**) and **+ Travel time**. Everything is saved on the phone first and sent when
    there is signal. The top of the page says how many are waiting; **Send now** sends them at once.
 3. Back at the desk: **Trips → From the road** lists what arrived. Choose the expense account and what you paid with,
    then **Accept** the new trip first (its projects share it evenly; open the trip to change the shares), then its
    costs and travel time. **Dismiss** anything that shouldn't go in the books. On the phone each item then says
    *In the books*; **Clear items already in the books** tidies the list.
+
+**A screenshot or an emailed receipt as the receipt photo.** Take the screenshot, tap its little picture in the
+corner, then **Share → Copy** (or press and hold a picture in an email or web page and choose **Copy**). Then tap
+**📋 Paste** on the cost; Safari shows a small **Paste** bubble, tap it. Screenshots are also in Photos, so
+**🖼 Choose photo** works too. The same three buttons are on payment photos (checks and remittances).
 
 The road key can't see your books or change anything already saved; it can only add to the *From the road* box.
 It works for 90 days. Lost the phone? **Trips → Your phone on the road → turn off**.
