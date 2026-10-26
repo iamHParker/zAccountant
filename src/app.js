@@ -784,8 +784,10 @@ export function createApp(pool, { log } = {}) {
   const JOB_ADMIN = ['time_approve', 'time_all', 'admin', 'invoices'];
   api.get('/companies/:companyId/jobs', route('member', ({ db, req, companyId }) => time.listJobs(db, companyId, { includeInactive: req.query.inactive === '1' })));
   api.post('/companies/:companyId/jobs', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.createJob(db, companyId, req.body ?? {}, { actor }), 201));
-  api.post('/companies/:companyId/jobs/import', route(JOB_ADMIN, ({ db, req, companyId, actor }) =>
-    projects.importProjects(db, companyId, { text: req.body?.text, customerId: req.body?.customerId || null, preview: req.body?.preview === true }, { actor })));
+  api.post('/companies/:companyId/jobs/import', route(JOB_ADMIN, ({ db, req, companyId, can, actor }) =>
+    projects.importProjects(db, companyId, { text: req.body?.text, customerId: req.body?.customerId || null,
+      // Adding customers from the names needs the right to add customers (invoices), not just to manage jobs.
+      makeCustomers: req.body?.makeCustomers === true && (can('invoices') || can('admin')), preview: req.body?.preview === true }, { actor })));
   api.patch('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.updateJob(db, companyId, req.params.jobId, req.body ?? {}, { actor })));
   const TE = '/companies/:companyId/time-entries';
   api.get(TE, route(TIME, ({ db, req, companyId, viewer }) => time.listTimeEntries(db, companyId, viewer, {
