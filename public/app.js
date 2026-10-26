@@ -88,7 +88,7 @@ const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', de
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 // Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
 const ZOOM_MIN = 50; const ZOOM_MAX = 200;
-const NEW_CONTACT = '+new'; // the "+ Add new customer…" choice in the invoice/bill form's list
+const NEW_CONTACT = '+new'; // the "+ Add new customer…" (and "+ Add new project…") choice in the invoice/bill form's lists
 const lastZoom = () => { try { const z = Number(localStorage.getItem('zacc.zoom')); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 100; } catch { return 100; } };
 const keepZoom = (z) => { try { localStorage.setItem('zacc.zoom', String(z)); } catch { /* private window: not kept */ } };
 const applyZoom = (z) => document.documentElement.style.setProperty('--zoom', String(z / 100));
@@ -317,7 +317,7 @@ createApp({
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
         showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
-        jobs: [], proj: { form: blankProject(), editId: null, show: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
+        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
@@ -1371,8 +1371,18 @@ createApp({
       const r = p.editId
         ? await this.run(() => api('PATCH', `${this.arBase()}/jobs/${p.editId}`, { ...f, isActive: this.ar.jobs.find((j) => j.id === p.editId)?.isActive !== false }), 'Project saved.')
         : await this.run(() => api('POST', `${this.arBase()}/jobs`, f), 'Project added.');
-      if (r) { p.editId = null; p.show = false; p.form = blankProject(); this.loadAr(); }
+      if (!r) return;
+      const popup = p.popup;
+      Object.assign(p, { editId: null, show: false, popup: false, form: blankProject() });
+      await this.loadAr();
+      // From the invoice's "+ Add new project…": pick it there and fill in the project block and number.
+      if (popup && this.ar.showDoc) { this.ar.doc.jobId = r.id; this.pickDocProject(); }
     },
+    quickAddProject() {
+      Object.assign(this.ar.proj, { editId: null, popup: true, form: { ...blankProject(), customerId: this.ar.doc.contactId || '' } });
+      this.ar.doc.jobId = '';
+    },
+    closeProjectPopup() { Object.assign(this.ar.proj, { popup: false, form: blankProject() }); },
     async toggleProject(j) {
       if (await this.run(() => api('PATCH', `${this.arBase()}/jobs/${j.id}`, { name: j.name, code: j.code, customerId: j.customerId, isActive: !j.isActive }),
         j.isActive ? 'Project closed.' : 'Project reopened.')) this.loadAr();
@@ -1712,11 +1722,11 @@ createApp({
       const open = this.ar.showContact && !this.ar.contact.id;
       this.ar.contact = blankContact(); this.ar.showContact = !open; this.ar.contactPopup = false;
     },
-    // "+ Add new customer…" in the invoice's (or bill's) list: the customer form pops up over the invoice;
-    // saving picks the new customer on the invoice (saveContact), Cancel leaves the list on "Choose…".
-    quickAddContact() {
-      Object.assign(this.ar, { contact: blankContact(), showContact: true, contactPopup: true });
-      this.ar.doc.contactId = '';
+    // "+ Add new customer…" in the invoice's (or bill's) list, or a project's: the customer form pops up over it;
+    // saving picks the new customer there (saveContact), Cancel leaves the list as it was before.
+    quickAddContact(forWhat) {
+      Object.assign(this.ar, { contact: blankContact(), showContact: true, contactPopup: forWhat });
+      if (forWhat === 'proj') this.ar.proj.form.customerId = ''; else this.ar.doc.contactId = '';
     },
     closeContact() { Object.assign(this.ar, { showContact: false, contactPopup: false }); },
     // Edit a customer or vendor: the same form, filled in; saving sends only the form's fields (PATCH).
@@ -1733,8 +1743,10 @@ createApp({
         ? await this.run(() => api('PATCH', `${this.arBase()}/contacts/${id}`, fields), `${this.S.Who} updated.`)
         : await this.run(() => api('POST', `${this.arBase()}/${this.S.contacts}`, fields), `${this.S.Who} added.`);
       if (!r) return;
+      const forWhat = this.ar.contactPopup;
       this.ar.contact = blankContact(); this.closeContact();
-      if (!id && this.ar.showDoc && !this.ar.doc.contactId) this.ar.doc.contactId = r.id;
+      if (!id && forWhat === 'proj') this.ar.proj.form.customerId = r.id;
+      else if (!id && this.ar.showDoc && !this.ar.doc.contactId) this.ar.doc.contactId = r.id;
       this.loadAr();
     },
     addPerson() { this.ar.contact.people.push(blankPerson()); },
