@@ -1011,9 +1011,12 @@
         </form>
         <p class="hint" v-if="!ar.jobs.length">No projects yet. Add one above, or paste your project folder names below.</p>
         <table class="data" v-else>
-          <thead><tr><th>Number</th><th>Project</th><th>Customer</th><th>Site address</th><th></th></tr></thead>
+          <thead><tr>
+            <th v-for="[k, label] in [['code', 'Number'], ['name', 'Project'], ['customer', 'Customer']]" :aria-sort="ar.proj.sort.key === k ? (ar.proj.sort.dir > 0 ? 'ascending' : 'descending') : 'none'">
+              <button type="button" class="th-sort" @click="sortProjects(k)" :title="'Sort by ' + label.toLowerCase()">{{ label }}<span class="muted">{{ ar.proj.sort.key === k ? (ar.proj.sort.dir > 0 ? ' ▲' : ' ▼') : '' }}</span></button></th>
+            <th>Site address</th><th></th></tr></thead>
           <tbody>
-            <tr v-for="j in ar.jobs" :class="{ muted: !j.isActive }">
+            <tr v-for="j in sortedJobs()" :class="{ muted: !j.isActive }">
               <td>{{ j.code }}</td><td>{{ j.name }}<span v-if="!j.isActive" class="muted small"> · closed</span></td><td>{{ j.customerName }}</td><td class="pre-line small">{{ j.address }}</td>
               <td class="actions"><template v-if="can('invoices') || can('admin')">
                 <button class="link" @click="editProject(j)">edit</button>

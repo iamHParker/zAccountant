@@ -88,6 +88,7 @@ const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', de
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 // Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
 const ZOOM_MIN = 50; const ZOOM_MAX = 200;
+const projectSort = () => { try { const s = JSON.parse(localStorage.getItem('zacc.projectSort')); if (['code', 'name', 'customer'].includes(s?.key)) return { key: s.key, dir: s.dir < 0 ? -1 : 1 }; } catch { /* none kept */ } return { key: 'code', dir: 1 }; };
 const NEW_CONTACT = '+new'; // the "+ Add new customer…" (and "+ Add new project…") choice in the invoice/bill form's lists
 const lastZoom = () => { try { const z = Number(localStorage.getItem('zacc.zoom')); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 100; } catch { return 100; } };
 const keepZoom = (z) => { try { localStorage.setItem('zacc.zoom', String(z)); } catch { /* private window: not kept */ } };
@@ -317,7 +318,7 @@ createApp({
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
         showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
-        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
+        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
@@ -1361,6 +1362,23 @@ createApp({
     arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.ar.photoView = null; this.loadAr(); },
     // ---------------------------------------------------------------- Projects (the jobs time is entered against)
     activeJobs() { return this.ar.jobs.filter((j) => j.isActive); },
+    // Sales → Projects: click Number, Project or Customer to sort; again to reverse. Kept on this computer.
+    // "Project" sorts by the name without its number (2601 Smith Residence sorts under S), so it differs from Number.
+    sortProjects(key) {
+      const s = this.ar.proj.sort;
+      this.ar.proj.sort = { key, dir: s.key === key ? -s.dir : 1 };
+      try { localStorage.setItem('zacc.projectSort', JSON.stringify(this.ar.proj.sort)); } catch { /* private window */ }
+    },
+    sortedJobs() {
+      const { key, dir } = this.ar.proj.sort;
+      const text = (j) => key === 'code' ? (j.code ?? '') : key === 'customer' ? (j.customerName ?? '')
+        : (j.code && j.name.startsWith(j.code) ? j.name.slice(j.code.length).replace(/^[\s\-–·:]+/, '') : j.name);
+      return [...this.ar.jobs].sort((a, b) => {
+        const x = text(a), y = text(b);
+        if (!x !== !y) return x ? -1 : 1; // blanks last either way
+        return dir * x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' }) || a.name.localeCompare(b.name, 'en', { numeric: true });
+      });
+    },
     jobLabel(j) { return j.code && !j.name.startsWith(j.code) ? `${j.code} · ${j.name}` : j.name; },
     editProject(j) {
       this.ar.proj.editId = j?.id ?? null; this.ar.proj.show = true;
