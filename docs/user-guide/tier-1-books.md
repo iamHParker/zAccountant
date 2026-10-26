@@ -92,6 +92,8 @@ change anything yet.
 
 **+ New customer**: name, email, address (it prints in the Bill To box), and payment terms in days (20 days means
 the invoice is due 20 days after its date).
+Already writing the invoice? Choose **+ Add new customer…** at the top of the Customer list: the same form pops up
+over the invoice, and the new customer is picked when you save it (bills have **+ Add new vendor…**).
 
 To change a customer's details, open the **Customers** tab and press **edit** on their row. The same form opens
 filled in; change what you need and press **Save changes**. Invoices already written keep their numbers and amounts,

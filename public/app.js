@@ -88,6 +88,7 @@ const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', de
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 // Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
 const ZOOM_MIN = 50; const ZOOM_MAX = 200;
+const NEW_CONTACT = '+new'; // the "+ Add new customer…" choice in the invoice/bill form's list
 const lastZoom = () => { try { const z = Number(localStorage.getItem('zacc.zoom')); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 100; } catch { return 100; } };
 const keepZoom = (z) => { try { localStorage.setItem('zacc.zoom', String(z)); } catch { /* private window: not kept */ } };
 const applyZoom = (z) => document.documentElement.style.setProperty('--zoom', String(z / 100));
@@ -260,7 +261,7 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '',
-      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, renaming: null, ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, NEW_CONTACT, renaming: null, ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
       MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
       statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
@@ -315,7 +316,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
-        showContact: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, paste: '', pasteCustomer: '', preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
@@ -1709,13 +1710,20 @@ createApp({
     },
     newContact() {
       const open = this.ar.showContact && !this.ar.contact.id;
-      this.ar.contact = blankContact(); this.ar.showContact = !open;
+      this.ar.contact = blankContact(); this.ar.showContact = !open; this.ar.contactPopup = false;
     },
+    // "+ Add new customer…" in the invoice's (or bill's) list: the customer form pops up over the invoice;
+    // saving picks the new customer on the invoice (saveContact), Cancel leaves the list on "Choose…".
+    quickAddContact() {
+      Object.assign(this.ar, { contact: blankContact(), showContact: true, contactPopup: true });
+      this.ar.doc.contactId = '';
+    },
+    closeContact() { Object.assign(this.ar, { showContact: false, contactPopup: false }); },
     // Edit a customer or vendor: the same form, filled in; saving sends only the form's fields (PATCH).
     editContact(c) {
       this.ar.contact = { id: c.id, name: c.name, email: c.email ?? '', phone: c.phone ?? '', address: c.address ?? '', termsDays: c.termsDays, is1099: !!c.is1099,
         groupName: c.groupName ?? '', people: (c.people ?? []).map((p) => ({ name: p.name, email: p.email ?? '', phone: p.phone ?? '' })) };
-      this.ar.showContact = true;
+      this.ar.showContact = true; this.ar.contactPopup = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     async saveContact() {
@@ -1725,7 +1733,7 @@ createApp({
         ? await this.run(() => api('PATCH', `${this.arBase()}/contacts/${id}`, fields), `${this.S.Who} updated.`)
         : await this.run(() => api('POST', `${this.arBase()}/${this.S.contacts}`, fields), `${this.S.Who} added.`);
       if (!r) return;
-      this.ar.contact = blankContact(); this.ar.showContact = false;
+      this.ar.contact = blankContact(); this.closeContact();
       if (!id && this.ar.showDoc && !this.ar.doc.contactId) this.ar.doc.contactId = r.id;
       this.loadAr();
     },
