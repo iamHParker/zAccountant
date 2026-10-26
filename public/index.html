@@ -945,7 +945,7 @@
         <table class="data invoice-lines">
           <thead><tr><th class="num">Hours / qty</th><th>Date</th><th>Description</th><th class="num">Rate</th><th title="Taxable">Tax</th><th class="num">Amount</th></tr></thead>
           <tbody>
-            <tr v-for="l in ar.detail.lines"><td class="num">{{ l.quantity }}</td><td>{{ l.serviceDate ? usDate(l.serviceDate) : '' }}</td>
+            <tr v-for="l in ar.detail.lines" class="item"><td class="num">{{ l.quantity }}</td><td>{{ l.serviceDate ? usDate(l.serviceDate) : '' }}</td>
               <td>{{ l.description || l.itemName || l.accountName }}<span v-if="l.itemName && l.description" class="muted small"> · {{ l.itemName }}</span></td>
               <td class="num">{{ money(l.unitPriceCents) }}</td><td>{{ l.taxable ? 'T' : '' }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
             <tr v-if="ar.detail.taxCents"><td colspan="5" class="num">Subtotal</td><td class="num">{{ money(ar.detail.subtotalCents) }}</td></tr>

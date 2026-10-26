@@ -57,6 +57,8 @@ that shows it redraws by itself. You never write "find this element and change i
   account from `localStorage zacc.lastIncome.<companyId>`, else 4100); `saveLinePrice(l)` keeps a typed price as the rate.
   `sortLines()` keeps invoice lines oldest-first (on date blur, add, pull-in, save); rows are keyed by the line's
   screen-only `row` tag so the boxes move with their line.
+- **Printed colours:** browsers drop backgrounds when printing unless the element has `print-color-adjust: exact`
+  (the printed invoice's blue heading and light-blue bands in `styles.css` use it).
 - **Dates:** ISO `'YYYY-MM-DD'` everywhere. `usDate()` shows MM/DD/YYYY on printed documents.
 - **Build number:** `GET /api/auth/me` (and sign-in) return `version` from `appVersion()` in `src/core/platform.js`:
   `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The status bar at the
