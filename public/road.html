@@ -28,7 +28,7 @@
     <!-- No key yet: scan the QR code at the desk, or paste the link -->
     <section class="card" v-if="!key">
       <h1>Road page</h1>
-      <p>Jot down trip costs, receipt photos and travel time on the road, even with no signal. They wait in the
+      <p>Jot down trip costs, receipt photos, travel time and checks received on the road, even with no signal. They wait in the
         "From the road" box in zAccountant until you accept them at your desk.</p>
       <p>At your desk: <strong>Trips → Your phone on the road → Make a road key</strong>, then scan the code with this phone's camera.</p>
       <form @submit.prevent="useLink">
@@ -45,8 +45,44 @@
       </section>
       <p class="muted small" v-if="summary">{{ summary.company }} · {{ summary.user }} · key works until {{ usDate(summary.expiresOn) }}</p>
 
+      <!-- A check received (the road is also when deposits get made): it becomes the payment at the desk, on Sales. -->
+      <section class="card" v-if="checkForm">
+        <h2>Check received</h2>
+        <form @submit.prevent="saveCheck">
+          <div class="grid2">
+            <label>Date <input type="date" v-model="checkForm.date" required></label>
+            <label>Amount ($) <input v-model.trim="checkForm.amount" inputmode="decimal" placeholder="0.00" required></label>
+          </div>
+          <label>From (who paid) <input v-model="checkForm.from" maxlength="120" placeholder="Doe Law"></label>
+          <div class="grid2">
+            <label>Check number <input v-model.trim="checkForm.checkNumber" maxlength="30" inputmode="numeric"></label>
+            <label>Invoice number(s) <input v-model="checkForm.invoices" maxlength="200" placeholder="26-124, 26-130"></label>
+          </div>
+          <label>Notes <input v-model="checkForm.notes" maxlength="300" placeholder="Deposited at Frost, Selma"></label>
+          <div class="photo-row"><span class="label-like">Photos (check, remittance)</span>
+            <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
+            <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
+            <button type="button" class="photo-btn" @click="pastePhotos">📋 Paste</button></div>
+          <div class="photo-strip" v-if="checkForm.photos.length">
+            <span v-for="(p, i) in checkForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Check"><button type="button" class="link" @click="checkForm.photos.splice(i, 1)">remove</button></span>
+          </div>
+          <button class="primary" :disabled="busy">Save</button> <button type="button" @click="checkForm = null">Cancel</button>
+        </form>
+      </section>
+      <section class="card" v-else-if="!tripForm && !costForm && !timeForm">
+        <button class="wide" @click="newCheck">+ Check received</button>
+        <div class="road-item" v-for="i in checkItems">
+          <div class="row wrap">
+            <span><span class="muted small">{{ usDate(i.data.date) }}</span> {{ itemText(i) }}</span>
+            <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
+          </div>
+          <p class="bad small" v-if="i.error">{{ i.error }}</p>
+          <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button>
+        </div>
+      </section>
+
       <!-- Which trip -->
-      <section class="card" v-if="!tripForm">
+      <section class="card" v-if="!tripForm && !checkForm">
         <label>Trip
           <select v-model="tripKey">
             <option value="">Choose a trip…</option>
@@ -82,7 +118,7 @@
         </form>
       </section>
 
-      <template v-if="tripKey && !tripForm">
+      <template v-if="tripKey && !tripForm && !checkForm">
         <div class="row wrap road-actions" v-if="!costForm && !timeForm">
           <button class="primary" @click="newCost">+ Cost or receipt</button>
           <button @click="newTime">+ Travel time</button>

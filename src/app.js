@@ -612,11 +612,12 @@ export function createApp(pool, { log } = {}) {
   api.get(RK, route('bills', ({ db, req, companyId }) => roadSvc.listRoadKeys(db, companyId, req.user.id)));
   api.post(RK, route('bills', ({ db, req, companyId, actor }) => roadSvc.createRoadKey(db, companyId, req.user.id, req.body ?? {}, { origin: siteOrigin(req), actor }), 201));
   api.post(`${RK}/:keyId/revoke`, route('bills', ({ db, req, companyId, actor }) => roadSvc.revokeRoadKey(db, companyId, req.user.id, req.params.keyId, { actor })));
-  api.get(RI, route(['view_books', 'bills'], ({ db, req, companyId }) => roadSvc.listRoadItems(db, companyId, { status: req.query.status })));
-  api.get(`${RI}/:itemId/photos/:photoId`, route(['view_books', 'bills'], async ({ db, req, companyId }) =>
+  api.get(RI, route(['view_books', 'bills', 'invoices'], ({ db, req, companyId }) => roadSvc.listRoadItems(db, companyId, { status: req.query.status })));
+  api.get(`${RI}/:itemId/photos/:photoId`, route(['view_books', 'bills', 'invoices'], async ({ db, req, companyId }) =>
     ({ [FILE]: await roadSvc.getRoadPhoto(db, companyId, req.params.itemId, req.params.photoId) })));
   api.post(`${RI}/:itemId/accept`, route('bills', ({ db, req, companyId, viewer, actor }) => roadSvc.acceptRoadItem(db, companyId, viewer, req.params.itemId, req.body ?? {}, { actor })));
-  api.post(`${RI}/:itemId/dismiss`, route('bills', ({ db, req, companyId, actor }) => roadSvc.dismissRoadItem(db, companyId, req.params.itemId, { actor })));
+  api.post(`${RI}/:itemId/accept-check`, route('invoices', ({ db, req, companyId, actor }) => roadSvc.acceptRoadCheck(db, companyId, req.params.itemId, req.body ?? {}, { actor })));
+  api.post(`${RI}/:itemId/dismiss`, route(['bills', 'invoices'], ({ db, req, companyId, actor }) => roadSvc.dismissRoadItem(db, companyId, req.params.itemId, { actor })));
   api.get(TR, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.listTrips(db, companyId, { includeClosed: req.query.closed !== '0' })));
   api.post(TR, route('bills', ({ db, req, companyId, actor }) => trips.createTrip(db, companyId, req.body ?? {}, { actor }), 201));
   api.get(`${TR}/:tripId`, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.getTrip(db, companyId, req.params.tripId)));

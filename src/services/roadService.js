@@ -170,6 +170,15 @@ async function cleanItem(db, key, kind, d) {
       out.minutes = minutes;
       out.notes = text(d.notes, 300);
     }
+  } else if (kind === 'check') {
+    // A check received (Homer, 2026-10-26): who paid, how much, its number and the invoice numbers it pays.
+    out = { date: d.date, from: text(d.from, 120), checkNumber: text(d.checkNumber, 30), invoices: text(d.invoices, 200), notes: text(d.notes, 300) };
+    if (!isIsoDate(out.date)) errors.push('the date must be a real date');
+    let c = null;
+    try { c = toCents(String(d.amount ?? '')); } catch { /* reported below */ }
+    if (c == null || c <= 0) errors.push('the amount must be a dollar amount over $0.00');
+    else out.amountCents = c;
+    if (!out.from && !out.invoices) errors.push('say who paid or which invoice it pays');
   } else errors.push('unknown kind of item');
   if (errors.length) throw new LedgerError('That item is not valid', errors);
   return out;
@@ -195,12 +204,12 @@ export async function receivePhoto(db, key, itemClientId, { clientId, picture })
   if (p.bytes.length > MAX_PHOTO_BYTES) throw new LedgerError('The photo is too large (3 MB at most)');
   const { rows: [item] } = typeof itemClientId === 'string' ? await db.query(
     'SELECT id, kind, status FROM road_items WHERE key_id = $1 AND client_id = $2 FOR UPDATE', [key.id, itemClientId]) : { rows: [] };
-  if (!item || item.kind !== 'cost') throw new LedgerError('Send the cost before its photos');
+  if (!item || !['cost', 'check'].includes(item.kind)) throw new LedgerError('Send the cost before its photos');
   const { rows: [had] } = await db.query('SELECT 1 FROM road_photos WHERE item_id = $1 AND client_id = $2', [item.id, clientId]);
   if (had) return { clientId, duplicate: true };
-  if (item.status !== 'pending') throw new LedgerError('That cost was already reviewed at the desk; add the photo there');
+  if (item.status !== 'pending') throw new LedgerError(`That ${item.kind} was already reviewed at the desk; add the photo there`);
   const { rows: [{ n }] } = await db.query('SELECT count(*)::int AS n FROM road_photos WHERE item_id = $1', [item.id]);
-  if (n >= MAX_PHOTOS_PER_COST) throw new LedgerError(`A cost can have at most ${MAX_PHOTOS_PER_COST} photos`);
+  if (n >= MAX_PHOTOS_PER_COST) throw new LedgerError(`A ${item.kind} can have at most ${MAX_PHOTOS_PER_COST} photos`);
   await db.query('INSERT INTO road_photos (company_id, item_id, client_id, picture, picture_type) VALUES ($1,$2,$3,$4,$5)',
     [key.companyId, item.id, clientId, p.bytes, p.type]);
   return { clientId, duplicate: false };
@@ -220,7 +229,7 @@ export async function itemStatuses(db, key, clientIds) {
 export async function listRoadItems(db, companyId, { status = 'pending' } = {}) {
   const { rows } = await db.query(
     `SELECT i.id, i.kind, i.client_id AS "clientId", i.key_id AS "keyId", i.data, i.status, i.trip_id AS "tripId", i.trip_cost_id AS "tripCostId",
-            i.received_at AS "receivedAt", u.name AS "userName", k.name AS "keyName",
+            i.payment_id AS "paymentId", i.received_at AS "receivedAt", u.name AS "userName", k.name AS "keyName",
             coalesce((SELECT json_agg(p.id ORDER BY p.created_at) FROM road_photos p WHERE p.item_id = i.id), '[]') AS photos
        FROM road_items i JOIN users u ON u.id = i.user_id JOIN road_keys k ON k.id = i.key_id
       WHERE i.company_id = $1 AND ($2::text = 'all' OR i.status = $2)
@@ -238,7 +247,20 @@ export async function listRoadItems(db, companyId, { status = 'pending' } = {}) 
   const { rows: tripNames } = tripItems.some((t) => t.tripId) ? await db.query(
     'SELECT id, name FROM trips WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, tripItems.map((t) => t.tripId).filter(Boolean)]) : { rows: [] };
   for (const t of tripNames) tripName.set(t.id, t.name);
+  // A check names invoice numbers as typed ("26-124, 26-130"): the unpaid invoices with those numbers.
+  const typed = (r) => (r.data.invoices ?? '').split(/[\s,;&]+|\band\b/i).map((s) => s.replace(/^#/, '').trim().toLowerCase()).filter(Boolean);
+  const wanted = [...new Set(rows.filter((r) => r.kind === 'check').flatMap(typed))];
+  const { rows: invs } = wanted.length ? await db.query(
+    `SELECT d.id, d.number, d.contact_id AS "contactId", ct.name AS "contactName", d.total_cents - COALESCE((SELECT sum(a.amount_cents)
+            FROM payment_applications a JOIN payments p ON p.id = a.payment_id WHERE a.document_id = d.id AND p.status = 'posted'), 0)::bigint AS "balanceCents"
+       FROM documents d JOIN contacts ct ON ct.id = d.contact_id
+      WHERE d.company_id = $1 AND d.kind = 'invoice' AND d.status <> 'void' AND d.replaced_by_id IS NULL AND lower(d.number) = ANY($2::text[])`,
+    [companyId, wanted]) : { rows: [] };
   return rows.map(({ keyId, ...r }) => {
+    if (r.kind === 'check') {
+      const nums = typed(r);
+      return { ...r, trip: null, hours: null, invoices: invs.filter((i) => nums.includes(i.number.toLowerCase())).map((i) => ({ ...i, balanceCents: Number(i.balanceCents) })) };
+    }
     let trip = null;
     if (r.kind === 'trip') trip = { name: r.data.name, tripId: r.tripId, fromRoad: true };
     else if (r.data.trip?.id) trip = { name: tripName.get(r.data.trip.id) ?? 'a trip', tripId: r.data.trip.id, fromRoad: false };
@@ -296,6 +318,7 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
   return withTransaction(db, async (c) => {
     await lockCompany(c, companyId);
     const item = await lockItem(c, companyId, itemId);
+    if (item.kind === 'check') throw new LedgerError('Record a check as a payment: Sales → Checks from the road');
     const d = item.data;
     const done = async (cols) => {
       const sets = Object.keys(cols).map((k, i) => `${k} = $${i + 3}`).join(', ');
@@ -336,6 +359,24 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
         notes: d.notes, tripId, jobId: null }, { actor });
     await done({ time_entry_id: t.id, trip_id: tripId });
     return { accepted: true, tripId, timeEntryId: t.id };
+  });
+}
+
+/** A check from the road became a payment at the desk (Sales → Receive payment): link them and copy its photos. */
+export async function acceptRoadCheck(db, companyId, itemId, { paymentId } = {}, { actor = null } = {}) {
+  return withTransaction(db, async (c) => {
+    await lockCompany(c, companyId);
+    const item = await lockItem(c, companyId, itemId);
+    if (item.kind !== 'check') throw new LedgerError('That item is not a check');
+    if (!isId(paymentId)) throw new LedgerError('Payment not found');
+    const { rows: [p] } = await c.query("SELECT id FROM payments WHERE company_id = $1 AND id = $2 AND kind = 'received' AND status = 'posted'", [companyId, paymentId]);
+    if (!p) throw new LedgerError('Payment not found');
+    const { rowCount: photos } = await c.query(
+      `INSERT INTO payment_photos (company_id, payment_id, picture, picture_type, created_by)
+       SELECT company_id, $2, picture, picture_type, $3 FROM road_photos WHERE item_id = $1 ORDER BY created_at, id`, [item.id, p.id, actor]);
+    await c.query("UPDATE road_items SET status = 'accepted', reviewed_by = $2, reviewed_at = now(), payment_id = $3 WHERE id = $1", [item.id, actor, p.id]);
+    await appendAudit(c, companyId, { action: 'accept', entity: 'road_item', entityId: item.id, actor, payload: { kind: 'check', payment_id: p.id, photos } });
+    return { accepted: true, paymentId: p.id, photos };
   });
 }
 

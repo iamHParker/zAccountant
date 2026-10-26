@@ -79,11 +79,12 @@ createApp({
       summary: (() => { try { return JSON.parse(getLocal(SUMMARY_STORE) ?? 'null'); } catch { return null; } })(),
       online: navigator.onLine, syncing: false, busy: false,
       items: [], tripKey: getLocal('zacc.roadTrip') ?? '',
-      tripForm: null, projectSearch: '', costForm: null, timeForm: null, kinds: KINDS,
+      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, kinds: KINDS,
     };
   },
   computed: {
     waiting() { return this.items.filter((i) => !i.sentItem || (i.photos ?? []).some((p) => !(i.sentPhotos ?? []).includes(p.clientId))).length; },
+    checkItems() { return this.items.filter((i) => i.kind === 'check').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20); },
     localTrips() { return this.items.filter((i) => i.kind === 'trip' && i.status !== 'dismissed'); },
     /** Trips in zAccountant, less the ones this phone started (an accepted one shows up in both lists). */
     serverTrips() {
@@ -176,6 +177,15 @@ createApp({
     },
     lastDate() { return this.tripItems.filter((i) => i.data.date).at(-1)?.data.date ?? today(); },
     newCost() { this.timeForm = null; this.costForm = { kind: 'other', date: this.lastDate(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [] }; },
+    newCheck() { this.costForm = null; this.timeForm = null; this.checkForm = { date: today(), amount: '', from: '', checkNumber: '', invoices: '', notes: '', photos: [] }; },
+    async saveCheck() {
+      const f = this.checkForm;
+      if (!/^\$?\d{1,3}(,?\d{3})*(\.\d{1,2})?$|^\$?\d*(\.\d{1,2})?$/.test(f.amount) || !/\d/.test(f.amount)) { this.flash('Enter the amount like 4915.83', 'bad'); return; }
+      if (!f.from.trim() && !f.invoices.trim()) { this.flash('Say who paid or which invoice it pays.', 'bad'); return; }
+      const data = { date: f.date, amount: f.amount.replace(/[$,]/g, ''), from: f.from.trim() || null, checkNumber: f.checkNumber.trim() || null,
+        invoices: f.invoices.trim() || null, notes: f.notes.trim() || null };
+      if (await this.addItem('check', data, f.photos)) { this.checkForm = null; this.flash('Saved on this phone.'); }
+    },
     newTime() { this.costForm = null; this.timeForm = { date: this.lastDate(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
     clockTime,
     // A screenshot or photo copied to the clipboard: the same as choosing it.
@@ -189,8 +199,9 @@ createApp({
       this.busy = true;
       try {
         for (const f of files) {
-          if (this.costForm.photos.length >= 6) { this.flash('A cost can have at most 6 photos.', 'bad'); break; }
-          this.costForm.photos.push({ clientId: `photo-${newId()}`, dataUrl: await shrinkPhoto(f) });
+          const form = this.checkForm ?? this.costForm;
+          if (form.photos.length >= 6) { this.flash('At most 6 photos.', 'bad'); break; }
+          form.photos.push({ clientId: `photo-${newId()}`, dataUrl: await shrinkPhoto(f) });
         }
       } catch { this.flash('That photo could not be read. Try taking it again.', 'bad'); } finally { this.busy = false; }
     },
@@ -226,6 +237,7 @@ createApp({
     },
     itemText(i) {
       if (i.kind === 'trip') return `Trip: ${i.data.name}`;
+      if (i.kind === 'check') return `Check${i.data.checkNumber ? ' #' + i.data.checkNumber : ''}${i.data.from ? ' from ' + i.data.from : ''} · ${money(Math.round(Number(i.data.amount) * 100))}${i.data.invoices ? ' · inv ' + i.data.invoices : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''}`;
       if (i.kind === 'time') return `Travel time ${i.data.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
       const amount = i.data.kind === 'mileage' ? `${i.data.miles} mi × $${i.data.mileRate} = ${money(mileageCents(i.data.miles, i.data.mileRate))}` : money(Math.round(Number(i.data.amount) * 100));
       return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''} · ${amount}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''}`;

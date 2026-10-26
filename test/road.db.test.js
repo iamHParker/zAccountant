@@ -148,6 +148,26 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   ok(await desk.call('POST', `${b}/road-items/${inbox[0].id}/dismiss`, {}));
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
 
+  // A check received on the road: photos of the check, the invoice number it pays. At the desk it becomes the payment.
+  const cust = ok(await desk.call('POST', `${b}/customers`, { name: 'Doe Law' }), 201);
+  const inv = ok(await desk.call('POST', `${b}/invoices`, { contactId: cust.id, number: '26-124', date: '2026-10-03',
+    lines: [{ accountId: A['4100'], description: 'Report', amount: '900.00' }] }), 201);
+  assert.equal((await phone.call('POST', '/api/road/items', { clientId: 'check-bad-0001', kind: 'check', data: { date: '2026-10-20', amount: '0' } })).status, 400);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'check-doe-0001', kind: 'check',
+    data: { date: '2026-10-20', amount: '900.00', from: 'Doe Law', checkNumber: '5521', invoices: '#26-124, 26-999' } }), 201);
+  ok(await phone.call('POST', '/api/road/items/check-doe-0001/photos', { clientId: 'photo-chk-01', picture: PNG }), 201);
+  const [chk] = ok(await desk.call('GET', `${b}/road-items`));
+  assert.equal(chk.kind, 'check');
+  assert.deepEqual(chk.invoices.map((x) => [x.number, x.contactId, x.balanceCents]), [['26-124', cust.id, 90000]]); // 26-999 isn't in the books
+  // A check isn't accepted onto a trip; it is linked to the payment recorded from it, and its photo moves there.
+  assert.equal((await desk.call('POST', `${b}/road-items/${chk.id}/accept`, {})).status, 400);
+  const pay = ok(await desk.call('POST', `${b}/payments-received`, { contactId: cust.id, date: '2026-10-20', accountId: A['1000'], method: 'check',
+    reference: '5521', applications: [{ documentId: inv.id, amount: '900.00' }] }), 201);
+  assert.equal(ok(await desk.call('POST', `${b}/road-items/${chk.id}/accept-check`, { paymentId: pay.id })).photos, 1);
+  assert.equal(ok(await desk.call('GET', `${b}/payments/${pay.id}/photos`)).length, 1);
+  assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
+  assert.equal((await desk.call('POST', `${b}/road-items/${chk.id}/accept-check`, { paymentId: pay.id })).status, 400);
+
   // A viewer can't make a road key.
   const viewer = await newUser('viewer@example.com');
   ok(await desk.call('POST', `${b}/members`, { email: 'viewer@example.com', role: 'viewer' }), 201);

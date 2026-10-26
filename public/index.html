@@ -682,6 +682,28 @@
       <p class="hint">{{ tab === 'sales'
         ? 'Send invoices to customers and record their payments. What customers owe shows in Accounts Receivable.'
         : 'Enter bills from vendors when they arrive, then record when you pay them. What you owe shows in Accounts Payable.' }}</p>
+      <!-- Checks received on the road (the phone's Road page): each one becomes a payment here. -->
+      <div class="card road-inbox" v-if="tab === 'sales' && ar.roadChecks.length && !ar.showPay && !ar.showDoc">
+        <h2>Checks from the road ({{ ar.roadChecks.length }})</h2>
+        <p class="hint">Sent from your phone. <strong>Record payment</strong> opens Receive payment filled in from the check; choose the deposit account and save. The photos go with the payment.</p>
+        <div class="road-item" v-for="i in ar.roadChecks">
+          <div class="row wrap">
+            <span><span class="muted small">{{ usDate(i.data.date) }}</span> Check{{ i.data.checkNumber ? ' #' + i.data.checkNumber : '' }}{{ i.data.from ? ' from ' + i.data.from : '' }}</span>
+            <strong class="num">{{ money(i.data.amountCents) }}</strong>
+          </div>
+          <div class="small" v-if="i.data.invoices">Invoices: {{ i.data.invoices }}
+            <span v-if="i.invoices.length" class="muted"> · found {{ i.invoices.map(x => x.number + ' (' + x.contactName + ', owes ' + money(x.balanceCents) + ')').join(', ') }}</span>
+            <span v-else class="bad"> · no unpaid invoice with that number</span></div>
+          <div class="small muted" v-if="i.data.notes">{{ i.data.notes }}</div>
+          <div class="photo-strip" v-if="i.photos.length">
+            <a v-for="id in i.photos" :href="roadCheckPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadCheckPhotoUrl(i, id)" alt="Check photo"></a>
+          </div>
+          <div class="row wrap" v-if="can('invoices')">
+            <span class="muted small">from {{ i.keyName }}</span>
+            <span><button class="primary small" @click="recordRoadCheck(i)">Record payment</button> <button class="small" @click="dismissRoadCheck(i)">Dismiss</button></span>
+          </div>
+        </div>
+      </div>
       <!-- Old invoices (written before zAccountant, still unpaid): drop the PDF, check the filled-in form, save, then apply payments. -->
       <label v-if="tab === 'sales' && can('invoices') && !ar.showDoc" class="logo-drop old-invoice-drop" :class="{ over: ar.pdfOver, busy: ar.pdfBusy }"
         @dragover.prevent="ar.pdfOver = true" @dragleave="ar.pdfOver = false" @drop.prevent="dropOldInvoice">
@@ -895,7 +917,8 @@
           <p class="num"><strong>Payment total {{ money(payTotal) }}</strong></p>
           <div class="photo-box">
             <strong>Photos of the check and remittance</strong> <span class="muted small">(optional; kept with this payment)</span>
-            <p class="muted small" v-if="ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected payment.</p>
+            <p class="muted small" v-if="ar.pay.roadItem && ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} from the phone will be saved with this payment.</p>
+            <p class="muted small" v-else-if="ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected payment.</p>
             <div class="row wrap">
               <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addPayPhotos"></label>
               <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addPayPhotos"></label> <button type="button" @click="pastePhotos('addPayPhotos')">📋 Paste</button>

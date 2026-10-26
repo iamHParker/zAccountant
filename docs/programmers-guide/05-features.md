@@ -108,7 +108,10 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     first). Trips → From the road accepts an item in one transaction: a trip (new project numbers become jobs unless a
     job with that name or number exists; even shares via `evenShares`), a cost (`addTripCost` with idempotency key
     `road-<item id>`, photos copied), or travel time (a time entry for the sender). QR codes come from
-    `qrcode-generator` on the server (SVG).
+    `qrcode-generator` on the server (SVG). A **check** item (migration 033: date, from, amount, check number, typed
+    invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
+    The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
+    { paymentId }` (`invoices`) links it (`road_items.payment_id`) and copies its photos to `payment_photos`.
   - **MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`):** the CSV is laid out
     like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's
     header, reads only typed cells and works the dollars out itself. A drive's `key` is a SHA-256 of when, where, miles
