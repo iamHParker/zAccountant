@@ -60,7 +60,7 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   skips replaced invoices). Migration 020.
 - Divisions and adjusters (migration 022): `contacts.group_name` ("Part of"; `getAging` returns `groups` totals) and
   `contacts.people` (jsonb `[{name,email,phone}]`, ≤ 50, checked by `cleanPeople`). Invoices carry `attention`,
-  `send_to`, `client_ref` (claim/job number), set at save like every document field. A typed invoice number already in
+  `send_to`, `client_ref` (claim/job number), `care_of` (an attorney's client: Bill To reads "client c/o contact"; migration 032), set at save like every document field. A typed invoice number already in
   use becomes the next lettered one (`nextLetteredNumber`: 2601 → 2601A … Z, AA …), returned as `numberWasTaken`; an
   automatic number never gets a letter. The ✉ Email button is a `mailto:` link built in the browser.
 - Payment photos (migration 021, `src/services/paymentPhotoService.js`): `payment_photos` (bytea ≤ 3 MB, JPEG/PNG,

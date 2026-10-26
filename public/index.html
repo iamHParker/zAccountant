@@ -734,6 +734,7 @@
             <datalist id="doc-people"><option v-for="p in docPeople()" :value="p.name"></option></datalist>
             <label>Send to (email) <input v-model="ar.doc.sendTo" type="email" maxlength="200" placeholder="adjuster's email"></label>
             <label>Claim / job number (optional) <input v-model="ar.doc.clientRef" maxlength="60" placeholder="their number"></label>
+            <label title="For an attorney: Bill To then reads &quot;Client c/o Attorney&quot;">Their client, c/o (optional) <input v-model="ar.doc.careOf" maxlength="120" placeholder="e.g. Ms Smith"></label>
           </div>
           <label class="check" v-if="S.kind === 'invoice' && docPersonIsNew() && ar.doc.contactId"><input type="checkbox" v-model="ar.doc.savePerson">
             Save {{ ar.doc.attention.trim() }} to {{ ar.contacts.find(c => c.id === ar.doc.contactId)?.name }} for next time</label>
@@ -935,7 +936,7 @@
           </table></div>
         </div>
         <div class="grid2 invoice-parties">
-          <div class="boxed"><span class="muted small">BILL TO</span><br><strong>{{ ar.detail.contact.name }}</strong>
+          <div class="boxed"><span class="muted small">BILL TO</span><br><strong><template v-if="ar.detail.careOf">{{ ar.detail.careOf }} c/o </template>{{ ar.detail.contact.name }}</strong>
             <div v-if="ar.detail.attention">Attn: {{ ar.detail.attention }}</div>
             <div class="pre-line" v-if="ar.detail.contact.address">{{ ar.detail.contact.address }}</div><div v-if="ar.detail.sendTo || ar.detail.contact.email">{{ ar.detail.sendTo || ar.detail.contact.email }}</div></div>
           <div class="boxed" v-if="ar.detail.project || company.invoice_note">

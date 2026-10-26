@@ -112,7 +112,7 @@ const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } 
 // The accounts last used for costs that came in from the Road page.
 const lastRoadAccounts = () => { try { return JSON.parse(localStorage.getItem('zacc.roadAccounts') ?? '{}') ?? {}; } catch { return {}; } };
 const keepRoadAccounts = (v) => { try { localStorage.setItem('zacc.roadAccounts', JSON.stringify(v)); } catch { /* not kept */ } };
-const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', jobId: '', attention: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
+const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', jobId: '', attention: '', careOf: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, groupName: '', people: [] });
 const blankPerson = () => ({ name: '', email: '', phone: '' });
@@ -1906,7 +1906,7 @@ createApp({
       const dollars = (c) => (c / 100).toFixed(2);
       this.ar.doc = { ...blankDoc(doc.taxRate ?? ''), editId: doc.id, editNumber: doc.number, contactId: doc.contactId, number: doc.number,
         date: doc.date, dueDate: doc.dueDate ?? '', memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
-        attention: doc.attention ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
+        attention: doc.attention ?? '', careOf: doc.careOf ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
           description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true,
           jobId: l.jobId ?? '', billable: !!l.billable, timeEntryId: l.timeEntryId ?? '', billedLineId: l.billedLineId ?? '', tripCostId: l.tripCostId ?? '',
@@ -1927,7 +1927,7 @@ createApp({
       const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
         project: this.S.kind === 'invoice' ? d.project : undefined, jobId: this.S.kind === 'invoice' ? d.jobId || undefined : undefined,
         taxRate: d.taxRate || undefined, lines };
-      if (this.S.kind === 'invoice') Object.assign(body, { attention: d.attention, sendTo: d.sendTo, clientRef: d.clientRef });
+      if (this.S.kind === 'invoice') Object.assign(body, { attention: d.attention, careOf: d.careOf, sendTo: d.sendTo, clientRef: d.clientRef });
       const newPerson = this.S.kind === 'invoice' && d.savePerson && this.docPersonIsNew()
         ? { name: d.attention.trim(), email: d.sendTo.trim(), phone: '' } : null;
       const customer = this.ar.contacts.find((c) => c.id === d.contactId);

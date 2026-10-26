@@ -206,7 +206,7 @@ const docOut = (d, today) => {
     id: d.id, kind: d.kind, contactId: d.contact_id, contactName: d.contact_name, number: d.number, date: d.doc_date, dueDate: d.due_date,
     memo: d.memo, project: d.project ?? null, subtotalCents: d.subtotal_cents, taxRate: d.tax_rate, taxCents: d.tax_cents, totalCents: d.total_cents,
     paidCents: paid, balanceCents: balance, status, voidDate: d.void_date, journalEntryId: d.journal_entry_id, entryNumber: d.entry_number ?? null,
-    replacedById: d.replaced_by_id ?? null, attention: d.attention ?? null, sendTo: d.send_to ?? null, clientRef: d.client_ref ?? null,
+    replacedById: d.replaced_by_id ?? null, attention: d.attention ?? null, careOf: d.care_of ?? null, sendTo: d.send_to ?? null, clientRef: d.client_ref ?? null,
     jobId: d.job_id ?? null,
   };
 };
@@ -328,7 +328,7 @@ async function billableSources(c, companyId, rawLines) {
 }
 
 /** Create and post an invoice (kind 'invoice') or a bill (kind 'bill'). */
-export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, sendTo, clientRef, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
+export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
   const side = SIDE[kind];
   if (!side) throw new LedgerError('kind must be invoice or bill');
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
@@ -347,10 +347,11 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     try { projectText = blockText(project, 300, 'project'); } catch (e) { errors.push(e.message.replace(/^Keep/, 'keep')); }
     if (projectText && kind !== 'invoice') errors.push('the project block is for invoices');
     const attn = text(attention, 120);
+    const careOfText = text(careOf, 120);
     const sendToText = text(sendTo, 200);
     const ref = text(clientRef, 60);
     if (sendToText && !EMAIL.test(sendToText)) errors.push('the send-to email address is not valid');
-    if ((attn || sendToText) && kind !== 'invoice') errors.push('attention and send-to are for invoices');
+    if ((attn || sendToText || careOfText) && kind !== 'invoice') errors.push('attention, client (c/o) and send-to are for invoices');
     let job = null;
     if (jobId != null && jobId !== '') {
       if (kind !== 'invoice') errors.push('a bill names its project on each line');
@@ -417,9 +418,9 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     const je = await insertEntry(c, companyId, entry, { source: kind, sourceRef: docId, actor });
     await c.query(
       `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, project, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by,
-                              attention, send_to, client_ref, job_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
-      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor, attn, sendToText, ref, job?.id ?? null]);
+                              attention, send_to, client_ref, job_id, care_of)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor, attn, sendToText, ref, job?.id ?? null, careOfText]);
     for (const l of clean) {
       await c.query(
         `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable, service_date, item_id,
@@ -508,13 +509,13 @@ export async function voidDocument(pool, companyId, docId, { date = null, actor 
  * reference, project block, attention and send-to. Allowed even when it's paid, because none of these reach the
  * ledger (the due date moves it in the aging report). Fields left out stay as they are. Audited from/to.
  */
-export async function updateDocumentDetails(pool, companyId, docId, { memo, dueDate, clientRef, project, attention, sendTo, actor = null } = {}) {
+export async function updateDocumentDetails(pool, companyId, docId, { memo, dueDate, clientRef, project, attention, careOf, sendTo, actor = null } = {}) {
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
     const { rows: [d] } = await c.query(
       `SELECT id, kind, number, status, replaced_by_id, to_char(doc_date, 'YYYY-MM-DD') AS doc_date, to_char(due_date, 'YYYY-MM-DD') AS due_date,
-              memo, client_ref, project, attention, send_to FROM documents WHERE company_id = $1 AND id = $2 FOR UPDATE`, [companyId, docId]);
+              memo, client_ref, project, attention, care_of, send_to FROM documents WHERE company_id = $1 AND id = $2 FOR UPDATE`, [companyId, docId]);
     if (!d) throw new LedgerError('Invoice or bill not found');
     const label = `${SIDE[d.kind].label} ${d.number}`;
     if (d.status === 'void') throw new LedgerError(`${label} is void`);
@@ -526,10 +527,11 @@ export async function updateDocumentDetails(pool, companyId, docId, { memo, dueD
       if (!isIsoDate(dueDate) || dueDate < d.doc_date) errors.push(`due date must be on or after the date (${d.doc_date})`);
       else change.due_date = dueDate;
     }
-    if (project !== undefined || attention !== undefined || sendTo !== undefined) {
-      if (d.kind !== 'invoice') errors.push('project, attention and send-to are for invoices');
+    if (project !== undefined || attention !== undefined || careOf !== undefined || sendTo !== undefined) {
+      if (d.kind !== 'invoice') errors.push('project, attention, client (c/o) and send-to are for invoices');
       if (project !== undefined) { try { change.project = blockText(project, 300, 'project'); } catch (e) { errors.push(e.message.replace(/^Keep/, 'keep')); } }
       if (attention !== undefined) change.attention = text(attention, 120);
+      if (careOf !== undefined) change.care_of = text(careOf, 120);
       if (sendTo !== undefined) {
         change.send_to = text(sendTo, 200);
         if (change.send_to && !EMAIL.test(change.send_to)) errors.push('the send-to email address is not valid');
