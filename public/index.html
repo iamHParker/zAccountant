@@ -899,7 +899,7 @@
 
       <div class="card statement-doc print-me" v-if="ar.detail">
         <div class="row">
-          <h2>{{ S.Doc }} {{ ar.detail.number }} <span class="muted small no-print">· {{ ar.detail.replacedById ? 'Replaced by a corrected copy' : statusLabel(ar.detail.status) }}</span></h2>
+          <h2 :class="{ 'no-print': S.kind === 'invoice' }">{{ S.Doc }} {{ ar.detail.number }} <span class="muted small no-print">· {{ ar.detail.replacedById ? 'Replaced by a corrected copy' : statusLabel(ar.detail.status) }}</span></h2>
           <span>
             <button @click="printPage" title="Your browser's print window can also save a PDF">Print / Save PDF</button>
             <button v-if="S.kind === 'invoice' && ar.detail.status !== 'void'" @click="openEmail(ar.detail)"
@@ -925,20 +925,21 @@
           <img v-if="logoUrl()" :src="logoUrl()" alt="" class="invoice-logo">
           <div class="grow"><strong class="company-name">{{ company.name }}</strong>
             <div class="pre-line" v-if="company.invoice_address">{{ company.invoice_address }}</div></div>
+          <div><div class="invoice-title">INVOICE</div>
           <table class="invoice-box">
             <tr><th>Invoice #</th><td>{{ ar.detail.number }}</td></tr>
             <tr v-if="ar.detail.clientRef"><th>Claim / Job #</th><td>{{ ar.detail.clientRef }}</td></tr>
             <tr><th>Date</th><td>{{ usDate(ar.detail.date) }}</td></tr>
             <tr><th>Due</th><td>{{ usDate(ar.detail.dueDate) }}</td></tr>
             <tr v-if="ar.detail.contact.termsDays != null"><th>Terms</th><td>{{ ar.detail.contact.termsDays ? ar.detail.contact.termsDays + ' days' : 'Due on receipt' }}</td></tr>
-          </table>
+          </table></div>
         </div>
         <div class="grid2 invoice-parties">
           <div class="boxed"><span class="muted small">BILL TO</span><br><strong>{{ ar.detail.contact.name }}</strong>
             <div v-if="ar.detail.attention">Attn: {{ ar.detail.attention }}</div>
             <div class="pre-line" v-if="ar.detail.contact.address">{{ ar.detail.contact.address }}</div><div v-if="ar.detail.sendTo || ar.detail.contact.email">{{ ar.detail.sendTo || ar.detail.contact.email }}</div></div>
-          <div>
-            <div v-if="ar.detail.project"><span class="muted small">PROJECT</span><div class="pre-line">{{ ar.detail.project }}</div></div>
+          <div class="boxed" v-if="ar.detail.project || company.invoice_note">
+            <template v-if="ar.detail.project"><span class="muted small">PROJECT</span><div class="pre-line">{{ ar.detail.project }}</div></template>
             <div v-if="company.invoice_note" class="pre-line small invoice-note">{{ company.invoice_note }}</div>
           </div>
         </div>
@@ -952,10 +953,10 @@
             <tr v-if="ar.detail.taxCents"><td colspan="5" class="num">Sales tax {{ ar.detail.taxRate }}% on taxable lines</td><td class="num">{{ money(ar.detail.taxCents) }}</td></tr>
             <tr class="total"><td colspan="5" class="num">Total</td><td class="num">{{ money(ar.detail.totalCents) }}</td></tr>
             <tr v-for="p in ar.detail.payments.filter(p => p.status === 'posted')"><td colspan="5" class="num">Payment {{ p.date }}{{ p.reference ? ' #' + p.reference : '' }}</td><td class="num">({{ money(p.amountCents) }})</td></tr>
-            <tr class="total"><td colspan="5" class="num">Balance due</td><td class="num">{{ money(ar.detail.balanceCents) }}</td></tr>
+            <tr class="total"><td colspan="3" class="invoice-thanks">{{ company.invoice_footer || 'Thank you for your business.' }}</td>
+              <td colspan="2" class="num">Balance due</td><td class="num">{{ money(ar.detail.balanceCents) }}</td></tr>
           </tbody>
         </table>
-        <p v-if="company.invoice_footer" class="pre-line invoice-footer">{{ company.invoice_footer }}</p>
         </template>
         <template v-else>
         <div class="grid2">
