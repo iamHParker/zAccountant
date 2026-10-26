@@ -796,8 +796,10 @@
           <table class="data lines">
             <thead><tr><th>Rate or item</th><th>Date</th><th>Task / description</th><th class="num">Hours / qty</th><th class="num">Rate / price</th><th title="Taxable">Tax</th><th class="num">Amount</th><th>Income account</th><th></th></tr></thead>
             <tbody>
-              <tr v-for="(l, i) in ar.doc.lines">
+              <template v-for="(l, i) in ar.doc.lines">
+              <tr>
                 <td><select v-model="l.itemId" @change="pickItem(l)"><option value="">None</option>
+                  <option v-if="can('admin')" :value="NEW_CONTACT">+ Add new rate…</option>
                   <optgroup label="By the hour"><option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
                   <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
                 <td class="w150"><input type="date" v-model="l.serviceDate"></td>
@@ -810,6 +812,11 @@
                 <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
                 <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
               </tr>
+              <tr v-if="itemOf(l) && itemOf(l).rateCents == null && itemOf(l).kind === 'service'" class="line-note">
+                <td colspan="9" class="small muted">No rate saved for {{ itemOf(l).name }} yet: type it in Rate / price.
+                  <button type="button" class="link" v-if="can('admin') && l.unitPrice" @click="saveLinePrice(l)">Keep {{ l.unitPrice }} as the {{ itemOf(l).name }} rate</button></td>
+              </tr>
+              </template>
             </tbody>
           </table>
           <p class="muted small" v-if="!items.length">Tip: save your rates (Eng Std Rate, Drafting, Equipment rental…) in Settings → Invoice rates and items, then pick them here.</p>
@@ -832,7 +839,7 @@
               </tr>
             </tbody>
           </table>
-          <button type="button" class="small" @click="ar.doc.lines.push({ ...blankLine(), serviceDate: S.kind === 'invoice' ? (ar.doc.lines.at(-1)?.serviceDate || '') : '' })">+ Add line</button>
+          <button type="button" class="small" @click="ar.doc.lines.push(newLine())">+ Add line</button>
           <div class="grid2">
             <label>Memo (optional) <input v-model="ar.doc.memo" maxlength="500"></label>
             <div v-if="S.kind === 'invoice'">
@@ -980,6 +987,22 @@
         <button :class="{ active: ar.panel === 'payments' }" @click="arPanel('payments')">Payments</button>
         <button :class="{ active: ar.panel === 'aging' }" @click="arPanel('aging')">Aging report</button>
         <button :class="{ active: ar.panel === 'projects' }" @click="arPanel('projects')">Projects</button>
+      </div>
+
+      <!-- "+ Add new rate…" on an invoice line: the Settings rate form as a pop-up; saving picks it on that line. -->
+      <div class="overlay" v-if="inv.popupLine" @click.self="cancelItem">
+        <form class="card dialog" @submit.prevent="saveItem">
+          <h2>New rate or item</h2>
+          <div class="grid2">
+            <label>Name <input v-model="inv.item.name" maxlength="80" required placeholder="Eng Std Rate"></label>
+            <label>Billed <select v-model="inv.item.kind"><option value="service">By the hour (hours × rate)</option><option value="expense">Cost passed on (usually 1 × cost)</option></select></label>
+            <label>{{ inv.item.kind === 'service' ? 'Hourly rate' : 'Price (optional)' }} <input v-model="inv.item.rate" inputmode="decimal" class="num" placeholder="0.00"></label>
+            <label>Income account <select v-model="inv.item.accountId" required><option value="">Choose…</option><option v-for="a in incomeAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+          </div>
+          <label class="check"><input type="checkbox" v-model="inv.item.taxable"> Charge sales tax on it</label>
+          <p class="muted small">Saved in Settings → Invoice rates and items, for every invoice from now on.</p>
+          <button class="primary">Add rate</button> <button type="button" @click="cancelItem">Cancel</button>
+        </form>
       </div>
 
       <!-- "+ Add new project…" in the invoice's Project list: a small pop-up; saving picks it on the invoice. -->

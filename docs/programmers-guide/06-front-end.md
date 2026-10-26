@@ -51,6 +51,10 @@ that shows it redraws by itself. You never write "find this element and change i
   include. These only hide; the server refuses anyway.
 - **Money in the browser:** amounts arrive as integer cents. Show them with `money(cents)`. Typed amounts are sent
   as text (`"531.25"`), and the server parses them.
+- **Quick add in a list:** a `<select>` gets a last option with the value `NEW_CONTACT` (`'+new'`), labelled
+  "+ Add new customer… / vendor… / project… / rate…". Its change handler resets the select and opens a small form in
+  `.overlay.top`; saving reloads the list and picks the new record. Invoice lines start from `newLine()` (income
+  account from `localStorage zacc.lastIncome.<companyId>`, else 4100); `saveLinePrice(l)` keeps a typed price as the rate.
 - **Dates:** ISO `'YYYY-MM-DD'` everywhere. `usDate()` shows MM/DD/YYYY on printed documents.
 - **Build number:** `GET /api/auth/me` (and sign-in) return `version` from `appVersion()` in `src/core/platform.js`:
   `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The status bar at the
