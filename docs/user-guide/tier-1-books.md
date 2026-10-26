@@ -158,6 +158,23 @@ In the print window, choose "Save as PDF" to email it.
 number, claim number and project) and a short note filled in. Attach the PDF yourself; zAccountant doesn't send email
 itself yet. On Windows, the button opens whichever program is set under Settings → Apps → Default apps → "mailto".
 
+### Old invoices from before zAccountant
+
+Invoices you sent before you started here that are still unpaid can be brought in, so their payments can be applied
+and the checking account reconciles. On **Sales**, drop the invoice's PDF on **Bring in an old invoice** (or click
+it to choose the file). It must be a PDF with text in it, like the ones Excel saves, not a scanned picture.
+
+- A new invoice opens, filled in from the PDF: number, date, due date (date + terms), Bill To (with the client c/o
+  the attorney), the project block, each line, the tax and the total. A box above it shows the PDF's TOTAL DUE.
+- If the customer isn't saved yet, the customer form pops up with the name and address filled in. Save it.
+- Hours on the PDF are rounded (2.73 h may really be 2 h 44 min). When hours × rate doesn't give the printed subtotal,
+  the line is entered as 1 × the subtotal, with the hours in its description, so the total matches what you sent.
+- Red notes point out what to check: an invoice number already in the books, a line dated in another year, or lines
+  that don't add up to the TOTAL DUE.
+- The lines go to the income account you use (4100 Service Revenue). If you already entered this invoice in your
+  opening balances, don't bring it in again: that would count it twice.
+- Check the form and press **Save**. Then record the payment against it as usual. The PDF itself isn't kept.
+
 ### Getting paid
 
 **Receive payment**: choose the customer, the date, the bank account it went into and the method. Then enter how

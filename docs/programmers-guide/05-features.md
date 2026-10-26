@@ -119,6 +119,15 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   - Billed time can't be changed, deleted or sent back (`zacc_time_billed_final`, and the service says which invoice);
     a bill with a billed cost can't be voided or edited (`zacc_bill_cost_billed`) until that invoice is.
 
+## Old invoices from a PDF (`oldInvoiceService.js`, `src/core/oldInvoice.js`)
+- `POST /companies/:id/invoices/read-pdf` (`invoices`) takes `{ pdf: base64 }` (4 MB) and saves nothing. pdf.js
+  (`pdfjs-dist`, legacy build, eval off) gives positioned words; `rowsFromItems` rebuilds rows and cells by y/x;
+  `parseOldInvoice` reads Homer's Excel layout (INVOICE # / DATE, BILL TO with "X C/o Y", TERMS, Description block
+  minus TAX ID / TX Firm, the Hours…Subtotal rows, Tax Rate, TOTAL DUE) and lists `problems`.
+- `invoiceLine` keeps hours × rate when it rounds to the printed subtotal, else 1 × subtotal (hours in the text), so
+  the total always ties. The browser fills the New invoice form (`readOldInvoice` in `public/app.js`); Save posts it
+  through the normal create route. The PDF is never stored, logged or audited (it names a client).
+
 ## Banking (`bankService.js`, `src/core/bankImport.js`)
 CSV and OFX/QFX statements. Repeated lines are skipped by a fingerprint. Rules suggest an account. Each bank line
 is posted, matched to an existing entry, or excluded. Reconciliation ticks lines until the difference is $0.00,

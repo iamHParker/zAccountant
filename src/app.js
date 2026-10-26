@@ -38,6 +38,7 @@ import { platformRole, appVersion } from './core/platform.js';
 import { streamBackup } from './jobs/backup.js';
 import * as plans from './services/planService.js';
 import * as invoiceSetup from './services/invoiceSetupService.js';
+import * as oldInvoices from './services/oldInvoiceService.js';
 import { featureForPath, FEATURES, PLANS, ADD_ONS } from './core/plans.js';
 import * as backup from './services/backupService.js';
 import { page } from './core/pages.js';
@@ -132,6 +133,7 @@ export function createApp(pool, { log } = {}) {
   app.use(/^\/api\/companies\/[^/]+\/imports(\/preview)?$/, express.json({ limit: '15mb' }));
   app.use(/^\/api\/companies\/[^/]+\/time-entries\/import$/, express.json({ limit: '3mb' }));
   app.use(/^\/api\/companies\/[^/]+\/mileiq\/(preview|import)$/, express.json({ limit: '3mb' })); // a MileIQ report, as text
+  app.use(/^\/api\/companies\/[^/]+\/invoices\/read-pdf$/, express.json({ limit: '6mb' })); // an old invoice PDF, as base64 (4 MB at most)
   app.use(/^\/api\/companies\/[^/]+\/logo$/, express.json({ limit: '2mb' })); // the logo, as base64 (1 MB at most)
   app.use(/^\/api\/companies\/[^/]+\/payments\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a check photo, as base64 (3 MB at most)
   app.use(/^\/api\/companies\/[^/]+\/trip-costs\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a receipt photo, likewise
@@ -569,6 +571,8 @@ export function createApp(pool, { log } = {}) {
     await needSide(db, can, 'contacts', req.params.contactId);
     return arap.updateContact(db, companyId, req.params.contactId, { ...(req.body ?? {}), actor });
   }));
+  // An old invoice PDF (Homer's Excel layout) read into the New invoice form; nothing is saved until the person saves it.
+  api.post('/companies/:companyId/invoices/read-pdf', route('invoices', ({ db, req, companyId }) => oldInvoices.readOldInvoice(db, companyId, req.body ?? {})));
   for (const [path, kind] of [['invoices', 'invoice'], ['bills', 'bill']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
       arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));

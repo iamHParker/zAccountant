@@ -319,7 +319,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
-        showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        pdfOver: false, pdfBusy: false, showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
@@ -1746,6 +1746,34 @@ createApp({
       this.sortLines();
       this.ar.pull = null;
       this.flash(`Added ${lines.length} line${lines.length === 1 ? '' : 's'}. Check the rates, then save.`);
+    },
+    // ---------------------------------------------------------------- Old invoices from a PDF (Homer's Excel layout)
+    dropOldInvoice(e) { this.ar.pdfOver = false; return this.readOldInvoice(e.dataTransfer?.files?.[0]); },
+    chooseOldInvoice(e) { const f = e.target.files?.[0]; e.target.value = ''; return this.readOldInvoice(f); },
+    /** The server reads the PDF; the answer fills a New invoice form. Nothing is saved until Save. */
+    async readOldInvoice(file) {
+      if (!file || this.ar.pdfBusy) return;
+      if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { this.flash('Choose the invoice as a PDF.', 'bad'); return; }
+      this.ar.pdfBusy = true;
+      try {
+        const pdf = await new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = fail; r.readAsDataURL(file); });
+        const r = await this.run(() => api('POST', `/companies/${this.companyId}/invoices/read-pdf`, { pdf }));
+        if (!r) return;
+        this.newDoc();
+        const d = this.ar.doc;
+        Object.assign(d, { number: r.number ?? '', date: r.date ?? d.date, dueDate: r.dueDate ?? '', careOf: r.careOf ?? '', project: r.project ?? '',
+          taxRate: r.taxRate ?? '', contactId: r.customerId ?? '', fromPdf: { file: file.name, totalCents: r.totalCents ?? 0, problems: r.problems ?? [] } });
+        const income = this.newLine().accountId;
+        d.lines = r.lines.map((l) => ({ ...blankLine(), ...l, accountId: income, qtyTyped: true }));
+        if (!d.lines.length) d.lines = [this.newLine()];
+        this.sortLines();
+        // A customer not saved yet: the customer form pops up with the Bill To name and address filled in.
+        if (!r.customerId && r.customerName) {
+          this.quickAddContact('doc');
+          Object.assign(this.ar.contact, { name: r.customerName.slice(0, 120), address: (r.address ?? '').split('\n').join(', ').slice(0, 500), termsDays: r.termsDays ?? this.ar.contact.termsDays });
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } finally { this.ar.pdfBusy = false; }
     },
     newContact() {
       const open = this.ar.showContact && !this.ar.contact.id;
