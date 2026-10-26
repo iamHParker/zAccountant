@@ -328,6 +328,11 @@ list does the same without leaving the invoice (it fills in the project block an
    - **Match**: it's already in your books (for example a customer payment you recorded). Link them so it isn't
      counted twice.
    - **exclude**: not a real transaction. **undo** puts a line back.
+   - **Same payee, many lines** (ATMOS, BLUECOSMO every month): choose the account on one, and every other waiting
+     line from that payee gets the same account ("same as the other ATMOS ENERGY line"). The date and transaction code
+     a card prints before the name are ignored. Check them, then **Add all … with an account chosen** adds them in one go.
+   - **always use this for "atmos"** under the line you chose makes a rule, so next month's statement arrives with
+     that account already chosen.
 3. **Rules** suggest an account when the description contains certain words ("home depot" → Materials). You still
    confirm each one. **edit** changes a rule's words, direction, amount range or account; it affects suggestions from
    then on, never lines already added.

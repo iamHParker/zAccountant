@@ -7,6 +7,7 @@ import { HELP, helpForTab, searchHelp } from '/help.js';
 import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
 import { picturesFromClipboard } from '/paste.js';
 import { clockTime, nextDay } from '/clock.js';
+import { payeeKey, payeeRuleText } from '/payee.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const yearStart = () => today().slice(0, 4) + '-01-01';
@@ -325,7 +326,7 @@ createApp({
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
-      bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
+      bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         imports: [], recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
     };
   },
@@ -1343,6 +1344,7 @@ createApp({
       const base = `/companies/${this.companyId}/bank-accounts/${b.accountId}`;
       b.txs = (await this.run(() => api('GET', `${base}/transactions?status=${b.view}`))) ?? [];
       b.choice = Object.fromEntries(b.txs.map((t) => [t.id, t.suggestedAccountId ?? '']));
+      b.sameAs = {};
       b.matches = {};
       b.rules = (await this.run(() => api('GET', `/companies/${this.companyId}/bank-rules`))) ?? [];
       b.recons = (await this.run(() => api('GET', `${base}/reconciliations`))) ?? [];
@@ -2133,6 +2135,47 @@ createApp({
       if (await this.run(() => api('POST', `/companies/${this.companyId}/bank-transactions/${t.id}/post`, { accountId }))) {
         this.bank.txs = this.bank.txs.filter((x) => x.id !== t.id);
       }
+    },
+    // Choosing an account for one line fills the same account into every other waiting line from the same payee
+    // (ATMOS, BLUECOSMO… repeat each month) that has nothing chosen yet, or was filled the same way before.
+    chooseBankAccount(t) {
+      const b = this.bank; const key = payeeKey(t.description); const out = t.amountCents < 0;
+      delete b.sameAs[t.id];
+      if (!key) return;
+      let n = 0;
+      for (const x of b.txs) {
+        if (x.id === t.id || payeeKey(x.description) !== key || (x.amountCents < 0) !== out) continue;
+        if (b.choice[x.id] && !b.sameAs[x.id]) continue; // chosen by hand or by a rule: leave it
+        b.choice[x.id] = b.choice[t.id];
+        if (b.choice[t.id]) { b.sameAs[x.id] = key; n++; } else delete b.sameAs[x.id];
+      }
+      if (n) this.flash(`Also chose it for ${n} other ${key.toUpperCase()} line${n === 1 ? '' : 's'}. Check them, then Add.`);
+    },
+    bankChosen() { return this.bank.txs.filter((t) => this.bank.choice[t.id]); },
+    async postAllChosen() {
+      const list = this.bankChosen();
+      if (!list.length || !confirm(`Add ${list.length} line${list.length === 1 ? '' : 's'} to the books, each to the account chosen beside it?`)) return;
+      let done = 0;
+      for (const t of list) {
+        const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-transactions/${t.id}/post`, { accountId: this.bank.choice[t.id] }));
+        if (!r) break; // the error is shown; the rest stay waiting
+        this.bank.txs = this.bank.txs.filter((x) => x.id !== t.id);
+        done++;
+      }
+      if (done) this.flash(`Added ${done} line${done === 1 ? '' : 's'} to the books.`);
+    },
+    // A rule for this payee, so next month's statement arrives already filled in.
+    payeeRuleText(t) { return payeeRuleText(t.description); },
+    hasPayeeRule(t) {
+      const text = payeeRuleText(t.description);
+      return !text || this.bank.rules.some((r) => t.description.toLowerCase().includes(r.matchText.toLowerCase()));
+    },
+    async rememberPayee(t) {
+      const body = { matchText: payeeRuleText(t.description), direction: t.amountCents > 0 ? 'in' : 'out', accountId: this.bank.choice[t.id] };
+      const r = await this.run(() => api('POST', `/companies/${this.companyId}/bank-rules`, body));
+      if (!r) return;
+      this.bank.rules = (await this.run(() => api('GET', `/companies/${this.companyId}/bank-rules`))) ?? this.bank.rules;
+      this.flash(`From now on, lines with “${body.matchText}” come in with ${this.acctName(body.accountId)} chosen.`);
     },
     async findBankMatches(t) {
       const m = await this.run(() => api('GET', `/companies/${this.companyId}/bank-transactions/${t.id}/matches`));
