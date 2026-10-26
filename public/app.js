@@ -31,16 +31,16 @@ function lineCents(qty, price) {
   const p = cents(price);
   const f = /^(\d{1,4})\/(\d{1,4})$/.exec(String(qty || '').trim()); // a share like 1/3 (split across jobs)
   if (f) return p == null || Number(f[2]) === 0 ? null : Number((BigInt(f[1]) * BigInt(p) * 2n + BigInt(f[2])) / (2n * BigInt(f[2])));
-  const m = /^(\d{1,9})(?:\.(\d{1,4}))?$/.exec(String(qty || '1').trim());
+  const m = /^(\d{1,9})(?:\.(\d{1,4}))?$/.exec(String(qty || '1').trim().replace(/^\./, '0.').replace(/\.$/, '')); // ".5" is 0.5
   if (p == null || !m) return null;
   const n = (BigInt(m[1]) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0'))) * BigInt(p);
   return Number((n * 2n + 10000n) / 20000n);
 }
 /** Sales tax on taxable cents at a percent like "8.25", half-up. */
 function taxCents(taxable, pct) {
-  const m = /^(\d+)(?:\.(\d{0,4}))?$/.exec(String(pct ?? '').trim());
-  if (!m) return 0;
-  const ppm = BigInt(m[1]) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0'));
+  const m = /^(\d*)(?:\.(\d{0,4}))?$/.exec(String(pct ?? '').trim());
+  if (!m || (!m[1] && !m[2])) return 0;
+  const ppm = BigInt(m[1] || 0) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0'));
   return Number((BigInt(taxable) * ppm * 2n + 1000000n) / 2000000n);
 }
 
@@ -1600,9 +1600,9 @@ createApp({
     },
     /** Miles × rate per mile → cents, half-up, exactly like the server (BigInt). */
     mileageCents(c) {
-      const m = /^\s*(\d{1,6})(?:\.(\d{1,2}))?\s*$/.exec(c.miles ?? ''); const r = /^\s*\$?(\d{0,2})(?:\.(\d{1,4}))?\s*$/.exec(c.mileRate ?? '');
-      if (!m || !r || (!r[1] && !r[2])) return null;
-      const n = (BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'))) * (BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0')));
+      const m = /^\s*(\d{0,6})(?:\.(\d{1,2}))?\s*$/.exec(c.miles ?? ''); const r = /^\s*\$?(\d{0,2})(?:\.(\d{1,4}))?\s*$/.exec(c.mileRate ?? '');
+      if (!m || !r || (!m[1] && !m[2]) || (!r[1] && !r[2])) return null;
+      const n = (BigInt(m[1] || 0) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'))) * (BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0')));
       return Number((n * 2n + 10000n) / 20000n);
     },
     tripPaidFromAccounts() { return this.accounts.filter((a) => a.isActive && (a.cashFlow === 'cash' || a.subtype === 'credit_card' || (a.type === 'equity' && a.key !== 'retained_earnings'))); },

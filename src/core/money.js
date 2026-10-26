@@ -83,9 +83,9 @@ export function applyRate(cents, ppm) {
 /** Convert a percent string like "6.2" or "10.23" into ppm exactly (no floats). */
 export function percentToPpm(pct) {
   const s = String(pct).trim();
-  const m = /^(\d+)(?:\.(\d{0,4}))?$/.exec(s);
-  if (!m) throw new TypeError(`Invalid percent: ${pct} (max 4 decimal places)`);
-  return Number(BigInt(m[1]) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0')));
+  const m = /^(\d*)(?:\.(\d{0,4}))?$/.exec(s); // ".5" is 0.5
+  if (!m || (!m[1] && !m[2])) throw new TypeError(`Invalid percent: ${pct} (max 4 decimal places)`);
+  return Number(BigInt(m[1] || 0) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0')));
 }
 
 /**
@@ -120,12 +120,12 @@ export function sum(list) {
  * 212.4 mi × $0.725 = $153.99 (21240 × 7250 / 10000 = 15399).
  */
 export function mileageAmount(miles, rate) {
-  const m = /^\s*(\d{1,6})(?:\.(\d{1,2}))?\s*$/.exec(String(miles ?? ''));
+  const m = /^\s*(\d{0,6})(?:\.(\d{1,2}))?\s*$/.exec(String(miles ?? '')); // ".5" mile is 0.5
   const r = /^\s*\$?(\d{0,2})(?:\.(\d{1,4}))?\s*$/.exec(String(rate ?? ''));
-  if (!m || !r || (!r[1] && !r[2])) return null;
-  const m100 = BigInt(m[1]) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'));
+  if (!m || !r || (!m[1] && !m[2]) || (!r[1] && !r[2])) return null;
+  const m100 = BigInt(m[1] || 0) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'));
   const r4 = BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0'));
   const cents = Number(divRoundHalfUp(m100 * r4, 10000n));
   const rc = Number(r4) / 100; // cents per mile, e.g. 72.5
-  return { miles: `${m[1]}${m[2] ? `.${m[2]}` : ''}`, rateCentsText: String(Number(rc.toFixed(2))), amountCents: cents };
+  return { miles: `${m[1] || 0}${m[2] ? `.${m[2]}` : ''}`, rateCentsText: String(Number(rc.toFixed(2))), amountCents: cents };
 }

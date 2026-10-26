@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toCents, centsToDecimal, formatMoney, applyRate, percentToPpm, allocate, divRoundHalfUp } from '../src/core/money.js';
+import { toCents, centsToDecimal, formatMoney, applyRate, percentToPpm, allocate, divRoundHalfUp, mileageAmount } from '../src/core/money.js';
 
 test('toCents parses exactly, no floating point', () => {
   assert.equal(toCents('0.1'), 10);
@@ -29,6 +29,10 @@ test('rates and rounding are half-up to the cent', () => {
   assert.equal(percentToPpm('6.2'), 62000);
   assert.equal(percentToPpm('10.23'), 102300);
   assert.equal(percentToPpm('0.88'), 8800);
+  assert.equal(percentToPpm('.5'), 5000);                // typed without the leading 0
+  assert.throws(() => percentToPpm('.'));
+  assert.equal(mileageAmount('.5', '.725').amountCents, 36); // 0.5 mi × $0.725 = 36.25¢ → 36¢
+  assert.equal(mileageAmount('.5', '.725').miles, '0.5');
   assert.equal(applyRate(100000, 62000), 6200);   // 6.2% of $1,000
   assert.equal(applyRate(25, 20000), 1);          // 2% of 25¢ = 0.5¢ -> 1¢ (half-up)
   assert.equal(applyRate(25, 2000), 0);           // 0.2% of 25¢ = 0.05¢ -> 0

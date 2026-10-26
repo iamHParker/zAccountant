@@ -11,6 +11,9 @@ import { runBooksCheck } from '../src/jobs/booksCheck.js';
 test('line amounts are exact (quantity × price, half-up)', () => {
   assert.equal(arap.lineAmount('1', 12345), 12345);
   assert.equal(arap.lineAmount('2.5', 8000), 20000);
+  assert.equal(arap.lineAmount('.5', 15000), 7500);        // ".5" hours is 0.5 × $150 = $75
+  assert.equal(arap.lineAmount('2.', 8000), 16000);
+  assert.equal(arap.cleanQuantity(' .25 '), '0.25');
   assert.equal(arap.lineAmount('0.3333', 100), 33);        // 33.33¢ → 33¢
   assert.equal(arap.lineAmount('1.5', 1), 2);              // 1.5¢ → 2¢ (half-up)
   assert.equal(arap.lineAmount('3', 3333), 9999);

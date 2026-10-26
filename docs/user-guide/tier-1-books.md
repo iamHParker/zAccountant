@@ -132,7 +132,7 @@ phone. Press **+ Add person** to add one.
    - **Date:** the day the work was done or the cost was incurred. The lines keep themselves in date order, oldest
      first: after you change a date, add a line or pull in time and costs, they re-sort (lines with no date go last).
    - **Task / description:** Report, Site visit, Deposition…
-   - **Hours / qty:** hours for a rate; usually 1 for a cost.
+   - **Hours / qty:** hours for a rate (half an hour can be typed .5 or 0.5); usually 1 for a cost.
    - **Rate / price:** change it for a one-off rate (for example 1.25 × your standard rate).
    - **Tax:** tick it if the line is taxable.
    - **Jobs sharing these expenses** (top of the lines): when one trip served several jobs, set the number of

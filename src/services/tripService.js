@@ -23,9 +23,9 @@ export const COST_KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodgin
 
 /** "60", "33.33", "12.5%" → hundredths of a percent (6000, 3333, 1250); null if not a percent from 0 to 100. */
 export function percentToBp(v) {
-  const m = /^\s*(\d{1,3})(?:\.(\d{1,2}))?\s*%?\s*$/.exec(String(v ?? ''));
-  if (!m) return null;
-  const bp = Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0'));
+  const m = /^\s*(\d{0,3})(?:\.(\d{1,2}))?\s*%?\s*$/.exec(String(v ?? ''));
+  if (!m || (!m[1] && !m[2])) return null;
+  const bp = Number(m[1] || 0) * 100 + Number((m[2] ?? '').padEnd(2, '0'));
   return bp <= 10000 ? bp : null;
 }
 /** 6000 → "60", 3333 → "33.33", 1250 → "12.5". */

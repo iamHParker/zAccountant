@@ -11,7 +11,8 @@ drifts. zAccountant never stores or adds dollars as floating point.
   `parseFloat`.
 - **Rates:** a percent string like `"8.25"` becomes integer parts-per-million (`percentToPpm("8.25") = 82500`).
 - **Multiplying:** use BigInt and round once, half-up (`applyRate`, `divRoundHalfUp`). Quantities such as hours keep
-  up to 4 decimals (`lineAmount` in `arapService.js`).
+  up to 4 decimals (`lineAmount` in `arapService.js`). Every number parser takes a missing leading zero: ".5" hours,
+  ".5" miles, "$.725" a mile and ".5" % mean 0.5 (`cleanQuantity` stores ".5" as "0.5"); keep new parsers the same.
 - **Splitting:** `allocate(cents, weights)` splits a total so the parts always add back to the total, giving the
   leftover cents to the largest remainders. Use it for any proration.
 - **Display:** `formatMoney` on the server and `money()` in the browser. The browser copies of `lineCents` and
