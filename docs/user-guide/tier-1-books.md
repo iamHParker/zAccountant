@@ -57,8 +57,10 @@ change anything yet.
 - **Advanced journal entry (Transactions tab):** for anything else, such as depreciation, or a loan payment split
   into principal and interest. Each line is a debit or a credit, and the entry saves only when the "Difference" is
   $0.00. Rule of thumb: money arriving in an account you own is a debit; income is a credit.
-- **Mistakes are never erased.** Press **reverse** on an entry: a new entry cancels it out, and the history stays
-  complete for your accountant. Then enter it again correctly. Entries that belong to something else say where to
+- **Mistakes are never erased.** Press **edit** on an entry you typed (a journal entry, a quick transaction, a recurring
+  one or an imported one): the form opens filled in, you fix it and press **Save correction**. zAccountant reverses the
+  old entry and posts the corrected one in a single step, so your accountant sees both. **reverse** alone cancels an
+  entry without a replacement. Entries that belong to something else say where to
   change them instead (*void on Sales*, *Bills*, *Trips*, *Payroll*, or *Banking (Undo)*), so that record stays right.
   An entry the bank already agrees with (posted or matched in Banking, or ticked in a reconciliation) can't be reversed
   here: undo it in Banking first; a reconciled one stays as it is.
@@ -167,6 +169,8 @@ photo** and the camera opens. **Choose photo** picks one you already took. Add u
   number. The old one stays in the Voided list, marked "Replaced". Bills work the same way.
 - To fix a payment (wrong amount, date or check number), open the **Payments** tab and press **edit** on its row.
 - An invoice that already has a payment can't be edited until the payment is fixed: edit or void the payment first.
+  To change only its **memo**, **due date** or **claim / job number** (the customer asked for their PO on it), press
+  **Change details**: the amounts stay as they are, nothing in the books moves, and the change is in the audit trail.
 - An invoice with no payments can also be **voided** outright. It stays on record, marked void.
 - Edit and Void need the owner's or accountant's permission, because both reverse a saved entry.
 - The **Aging report** shows who owes you and how late, in 30-day groups, and checks that it agrees with Accounts
@@ -267,7 +271,12 @@ address. **+ New project** adds one. To add many at once from your project folde
    confirm each one. **edit** changes a rule's words, direction, amount range or account; it affects suggestions from
    then on, never lines already added.
 4. **Reconcile monthly:** enter the statement date and ending balance, tick every item on the statement, and press
-   finish when the difference is $0.00. Reconciled items are locked.
+   finish when the difference is $0.00. Reconciled items are locked. Found a mistake afterwards (a wrong tick, a
+   mistyped ending balance)? **reopen** beside "Reconciled through" opens the latest one again with its ticks; fix it
+   and finish again. Only the latest, only while its month is open, only for someone who may close the books, and the
+   reason you give is kept in the audit trail. **cancel** on one in progress throws it away.
+5. **Imported the wrong file** (or into the wrong account)? Under **Recent imports**, **undo import** removes its lines
+   still waiting for review, so you can import it again. Lines already added or matched stay; undo those first.
 
 ## 7. Reports
 

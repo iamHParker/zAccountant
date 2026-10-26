@@ -357,6 +357,35 @@ export async function reverseEntry(pool, companyId, entryId, { date, memo, actor
   });
 }
 
+/** Entries the Transactions tab may Edit (the rest belong to an invoice, bill, paycheck, trip or bank line). */
+const CORRECTABLE = ['manual', 'simple', 'recurring', 'import'];
+
+/**
+ * Edit a journal entry (CPA edit sweep, batch 4): reverse it and post the corrected entry, in one step.
+ * Both stay on record; the reversal is dated like any reversal (the original date, or the first open day if that
+ * period is closed), the corrected entry on the date given. An idempotency key belongs to the corrected entry.
+ */
+export async function correctEntry(pool, companyId, entryId, rawEntry, { actor = null, idempotencyKey = null } = {}) {
+  const entry = validateEntry(rawEntry);
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const existing = await findByIdempotencyKey(c, companyId, cleanIdempotencyKey(idempotencyKey));
+    if (existing) return existing;
+    if (typeof entryId !== 'string' || !/^[0-9a-f-]{36}$/i.test(entryId)) throw new LedgerError('Journal entry not found');
+    const { rows: [orig] } = await c.query('SELECT entry_number, source FROM journal_entries WHERE company_id = $1 AND id = $2', [companyId, entryId]);
+    if (!orig) throw new LedgerError('Journal entry not found');
+    if (!CORRECTABLE.includes(orig.source)) {
+      throw new LedgerError('Journal entry is not valid', [orig.source === 'reversal' ? 'a reversal cannot be edited; post a new entry'
+        : `this entry belongs to ${DOCUMENT_ENTRY[orig.source] ?? (orig.source === 'bank' ? 'a bank line (Banking tab)' : orig.source === 'payroll' ? 'a paycheck (Payroll tab)' : 'the system')}; change it there`]);
+    }
+    const rev = await reverseEntry(c, companyId, entryId, { actor, memo: `Correction of entry #${orig.entry_number} (reversal)` });
+    const fixed = await insertEntry(c, companyId, entry, { source: orig.source === 'simple' ? 'simple' : 'manual', actor, idempotencyKey });
+    await appendAudit(c, companyId, { action: 'correct', entity: 'journal_entry', entityId: entryId, actor,
+      payload: { entryNumber: orig.entry_number, reversalNumber: rev.entry_number, correctedNumber: fixed.entry_number } });
+    return { ...fixed, correctsNumber: orig.entry_number, reversalNumber: rev.entry_number };
+  });
+}
+
 const DOCUMENT_ENTRY = { invoice: 'an invoice (Sales tab)', bill: 'a bill (Bills tab)', payment: 'a payment (Sales or Bills tab)', trip: 'a trip cost (Trips tab)' };
 const SOURCES = ['manual', 'simple', 'payroll', 'import', 'reversal', 'bank', 'recurring', 'system', 'invoice', 'bill', 'payment', 'trip'];
 

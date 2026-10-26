@@ -499,6 +499,50 @@ export async function voidDocument(pool, companyId, docId, { date = null, actor 
 }
 
 /**
+ * Change what an invoice or bill says without touching its amounts (CPA edit sweep, batch 4): memo, due date, PO /
+ * reference, project block, attention and send-to. Allowed even when it's paid, because none of these reach the
+ * ledger (the due date moves it in the aging report). Fields left out stay as they are. Audited from/to.
+ */
+export async function updateDocumentDetails(pool, companyId, docId, { memo, dueDate, clientRef, project, attention, sendTo, actor = null } = {}) {
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
+    const { rows: [d] } = await c.query(
+      `SELECT id, kind, number, status, replaced_by_id, to_char(doc_date, 'YYYY-MM-DD') AS doc_date, to_char(due_date, 'YYYY-MM-DD') AS due_date,
+              memo, client_ref, project, attention, send_to FROM documents WHERE company_id = $1 AND id = $2 FOR UPDATE`, [companyId, docId]);
+    if (!d) throw new LedgerError('Invoice or bill not found');
+    const label = `${SIDE[d.kind].label} ${d.number}`;
+    if (d.status === 'void') throw new LedgerError(`${label} is void`);
+    const errors = [];
+    const change = {};
+    if (memo !== undefined) change.memo = text(memo, 500);
+    if (clientRef !== undefined) change.client_ref = text(clientRef, 60);
+    if (dueDate !== undefined) {
+      if (!isIsoDate(dueDate) || dueDate < d.doc_date) errors.push(`due date must be on or after the date (${d.doc_date})`);
+      else change.due_date = dueDate;
+    }
+    if (project !== undefined || attention !== undefined || sendTo !== undefined) {
+      if (d.kind !== 'invoice') errors.push('project, attention and send-to are for invoices');
+      if (project !== undefined) { try { change.project = blockText(project, 300, 'project'); } catch (e) { errors.push(e.message.replace(/^Keep/, 'keep')); } }
+      if (attention !== undefined) change.attention = text(attention, 120);
+      if (sendTo !== undefined) {
+        change.send_to = text(sendTo, 200);
+        if (change.send_to && !EMAIL.test(change.send_to)) errors.push('the send-to email address is not valid');
+      }
+    }
+    if (errors.length) throw new LedgerError(`${label} is not valid`, errors);
+    const cols = Object.keys(change).filter((k) => (change[k] ?? null) !== (d[k] ?? null));
+    if (cols.length) {
+      await c.query(`UPDATE documents SET ${cols.map((k, i) => `${k} = $${i + 3}`).join(', ')} WHERE company_id = $1 AND id = $2`,
+        [companyId, d.id, ...cols.map((k) => change[k])]);
+      await appendAudit(c, companyId, { action: 'update_details', entity: d.kind, entityId: d.id, actor,
+        payload: { number: d.number, ...Object.fromEntries(cols.map((k) => [k, { from: d[k], to: change[k] }])) } });
+    }
+    return getDocument(c, companyId, d.id);
+  });
+}
+
+/**
  * Edit an invoice or bill: void it and post the corrected copy, in one step. The input is the whole corrected
  * document (same fields as createDocument); an empty number keeps the old one. The void is dated like any void
  * (the original date, or the first open day if that period is locked).

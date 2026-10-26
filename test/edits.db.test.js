@@ -149,4 +149,74 @@ test('edits: company, accounts, recurring entries, bank rules, employees', { ski
     assert.equal(back.body.hireDate, '2026-06-01');
     assert.equal(back.body.terminationDate, null);
   });
+
+  // ---------------------------------------------------------------- batch 4: ledger corrections
+  await t.test('journal entry edit = reversal + corrected entry', async () => {
+    const e = (await call('POST', `${c}/entries`, { date: '2026-05-04', memo: 'Depreciation', lines: [{ accountId: A['6300'].id, debit: '500' }, { accountId: A['1000'].id, credit: '500' }] })).body;
+    const fix = await call('PUT', `${c}/entries/${e.id}`, { date: '2026-05-04', memo: 'Depreciation (corrected)', lines: [{ accountId: A['6300'].id, debit: '520' }, { accountId: A['1000'].id, credit: '520' }] });
+    ok(fix);
+    assert.equal(fix.body.correctsNumber, e.entry_number);
+    assert.equal(fix.body.reversalNumber, e.entry_number + 1);
+    refused(await call('PUT', `${c}/entries/${e.id}`, { date: '2026-05-04', memo: 'again', lines: [{ accountId: A['6300'].id, debit: '1' }, { accountId: A['1000'].id, credit: '1' }] }), /already reversed/);
+    const inv = (await call('POST', `${c}/invoices`, { contactId: (await call('POST', `${c}/customers`, { name: 'City of Austin' })).body.id, date: '2026-05-05', lines: [{ accountId: A['4100'].id, amount: '900' }] })).body;
+    refused(await call('PUT', `${c}/entries/${inv.journalEntryId}`, { date: '2026-05-05', memo: 'x', lines: [{ accountId: A['6300'].id, debit: '1' }, { accountId: A['1000'].id, credit: '1' }] }), /invoice/);
+  });
+
+  await t.test('paid invoice: memo, PO and due date change in place; amounts never', async () => {
+    const cust = (await call('POST', `${c}/customers`, { name: 'TxDOT' })).body;
+    const inv = (await call('POST', `${c}/invoices`, { contactId: cust.id, date: '2026-05-06', lines: [{ accountId: A['4100'].id, amount: '1200' }] })).body;
+    ok(await call('POST', `${c}/payments-received`, { contactId: cust.id, date: '2026-05-20', accountId: A['1000'].id, applications: [{ documentId: inv.id, amount: '1200' }] }), 201);
+    const r = await call('PATCH', `${c}/documents/${inv.id}`, { memo: 'Bridge inspection', clientRef: 'PO 4471', dueDate: '2026-06-30' });
+    ok(r);
+    assert.equal(r.body.memo, 'Bridge inspection');
+    assert.equal(r.body.clientRef, 'PO 4471');
+    assert.equal(r.body.totalCents, 120000);
+    assert.equal(r.body.status, 'paid');
+    refused(await call('PATCH', `${c}/documents/${inv.id}`, { dueDate: '2026-05-01' }), /on or after the date/);
+  });
+
+  await t.test('void a whole payroll run, then run the period again', async () => {
+    const w = (await call('POST', `${c}/employees`, { firstName: 'Wes', lastName: 'Kent', workState: 'TX', payFrequency: 'weekly', payType: 'hourly', payRate: '25', w4: { filingStatus: 'single' } })).body;
+    const opts = { payFrequency: 'weekly', periodStart: '2026-05-03', periodEnd: '2026-05-09', payDate: '2026-05-15', paidFromAccountId: A['1000'].id, items: [{ employeeId: w.id, hours: '40' }] };
+    const run = (await call('POST', `${c}/payroll-runs`, opts)).body;
+    refused(await call('POST', `${c}/payroll-runs`, opts), /already paid/);
+    refused(await call('POST', `${c}/payroll-runs/${run.id}/void`, {}), /reason/);
+    const v = await call('POST', `${c}/payroll-runs/${run.id}/void`, { reason: 'wrong hours' });
+    ok(v);
+    assert.equal(v.body.paychecksVoided, 1);
+    assert.equal(v.body.voidReason, 'wrong hours');
+    refused(await call('POST', `${c}/payroll-runs/${run.id}/void`, { reason: 'again' }), /already void/);
+    const again = await call('POST', `${c}/payroll-runs`, { ...opts, items: [{ employeeId: w.id, hours: '38' }] });
+    ok(again, 201);
+    assert.equal(again.body.grossCents, 95000, '38 h x $25');
+    await assert.rejects(db.pool.query('UPDATE payroll_runs SET gross_cents = 1 WHERE id = $1', [run.id]), /append-only/);
+  });
+
+  await t.test('reopen the latest reconciliation; undo a statement import', async () => {
+    const csv = 'Date,Description,Amount\n05/01/2026,DEPOSIT,1000.00\n05/02/2026,SHELL OIL,-40.00\n05/03/2026,HOME DEPOT,-60.00\n';
+    const imp = (await call('POST', `${c}/bank-accounts/${A['1010'].id}/import`, { fileName: 'may.csv', content: csv })).body;
+    assert.equal(imp.new, 3);
+    const lines = (await call('GET', `${c}/bank-accounts/${A['1010'].id}/transactions`)).body;
+    ok(await call('POST', `${c}/bank-transactions/${lines.find((l) => l.description === 'DEPOSIT').id}/post`, { accountId: A['4100'].id }));
+    const imports = (await call('GET', `${c}/bank-accounts/${A['1010'].id}/imports`)).body;
+    assert.deepEqual([imports[0].fileName, imports[0].lines, imports[0].undoable], ['may.csv', 3, 2]);
+    const u = await call('POST', `${c}/bank-imports/${imp.batch}/undo`, {});
+    ok(u);
+    assert.deepEqual(u.body, { removed: 2, kept: 1 });
+    refused(await call('POST', `${c}/bank-imports/${imp.batch}/undo`, {}), /already in the books/);
+    assert.equal((await call('POST', `${c}/bank-accounts/${A['1010'].id}/import`, { fileName: 'may.csv', content: csv })).body.new, 2, 'the undone lines import again');
+
+    const rec = (await call('POST', `${c}/bank-accounts/${A['1010'].id}/reconciliations`, { statementDate: '2026-05-31', endingBalance: '1000' })).body;
+    const sheet = (await call('GET', `${c}/reconciliations/${rec.id}`)).body;
+    ok(await call('POST', `${c}/reconciliations/${rec.id}/lines`, { lineIds: sheet.lines.map((l) => l.id) }));
+    ok(await call('POST', `${c}/reconciliations/${rec.id}/complete`, {}));
+    refused(await call('POST', `${c}/reconciliations/${rec.id}/reopen`, {}), /why/);
+    const re = await call('POST', `${c}/reconciliations/${rec.id}/reopen`, { reason: 'typed the wrong ending balance' });
+    ok(re);
+    assert.equal(re.body.status, 'open');
+    assert.equal(re.body.lines.filter((l) => l.cleared).length, sheet.lines.length, 'the ticks stay');
+    // Cancelling an open reconciliation really removes it (it used to stay behind: the old trigger returned NULL on DELETE).
+    ok(await call('DELETE', `${c}/reconciliations/${rec.id}`, {}));
+    ok(await call('POST', `${c}/bank-accounts/${A['1010'].id}/reconciliations`, { statementDate: '2026-05-31', endingBalance: '1000' }), 201);
+  });
 });

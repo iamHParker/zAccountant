@@ -191,5 +191,18 @@ Batch 3 (employees, migration 030):
   address and SSN.
 - `setEmployeeStatus` (`POST …/terminate` / `…/rehire`, payroll): last day / new start date; `active` drives payroll
   runs and timesheets.
+Batch 4 (ledger corrections, migration 031):
+- `ledgerService.correctEntry` (`PUT …/entries/:id`, post): reverse + corrected entry in one transaction, for
+  `CORRECTABLE` sources (manual, simple, recurring, import); the idempotency key belongs to the corrected entry.
+- `arapService.updateDocumentDetails` (`PATCH …/documents/:id`, invoices/bills): memo, due date, client ref, project,
+  attention, send-to, in place (column grants), even when paid; amounts still only by void + copy.
+- `payrollService.voidRun` (`POST …/payroll-runs/:id/void`, payroll): voids each paycheck (`voidPaycheck`), then sets
+  the run's void columns; trigger `zacc_run_void_once` allows only that, once; `payroll_runs_period` is unique only
+  among runs not voided.
+- `bankService.reopenReconciliation` (`POST …/reconciliations/:id/reopen`, close): latest only, open period only,
+  reason audited; `zacc_recon_final` now allows completed → open for the latest and also returns OLD on DELETE (it
+  returned NULL, so Cancel never deleted an open reconciliation: B7).
+- `bankService.listImports` / `undoImport` (`GET …/bank-accounts/:id/imports`, `POST …/bank-imports/:batch/undo`):
+  deletes the batch's lines still in review or excluded.
 Tests: `test/edits.db.test.js` (HTTP, restricted runtime role).
 
