@@ -79,8 +79,10 @@ const ENTITY_TYPES = [
 ];
 const blankCompany = () => ({ name: '', homeState: 'TX', fiscalYearStartMonth: 1, entityType: '', booksStartDate: `${today().slice(0, 4)}-01-01` });
 // A bill line can name its project and be billed to that client; an invoice line can come from a time entry or such a cost.
+// `row` is a tag for the screen only (never sent): when the lines are sorted by date, each row's boxes move with it.
+let lineRow = 0;
 const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false,
-  jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '' });
+  jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '', row: ++lineRow });
 const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
 const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', jobs: [{ jobId: '', share: '' }] });
 const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
@@ -1741,6 +1743,7 @@ createApp({
       if (lines.some((l) => !l.accountId)) { this.flash('Choose an income account for these lines.', 'bad'); return; }
       // The empty starting line is replaced; lines already typed stay.
       d.lines = [...d.lines.filter((l) => l.accountId || l.unitPrice || l.description), ...lines];
+      this.sortLines();
       this.ar.pull = null;
       this.flash(`Added ${lines.length} line${lines.length === 1 ? '' : 's'}. Check the rates, then save.`);
     },
@@ -1802,6 +1805,13 @@ createApp({
      * A new invoice line starts on the income account used last on this computer (or Service Revenue) and the date of
      * the line above. Bills start empty: their lines are expenses chosen each time.
      */
+    /** Invoice lines in date order, oldest first (Homer, Oct 2026); lines without a date stay at the bottom.
+     *  Runs after a date is changed, a line is added, and before saving. The sort is stable, so same-day lines keep their order. */
+    sortLines() {
+      if (this.S.kind !== 'invoice') return;
+      this.ar.doc.lines.sort((a, b) => (!a.serviceDate) - (!b.serviceDate) || (a.serviceDate < b.serviceDate ? -1 : a.serviceDate > b.serviceDate ? 1 : 0));
+    },
+    addLine() { this.ar.doc.lines.push(this.newLine()); this.sortLines(); },
     newLine() {
       const l = blankLine();
       if (this.S.kind !== 'invoice') return l;
@@ -1820,7 +1830,7 @@ createApp({
       l.accountId = it.accountId; l.taxable = it.taxable;
       if (it.rateCents != null) l.unitPrice = (it.rateCents / 100).toFixed(2);
       if (it.kind === 'expense') { l.quantity = this.shareText(); l.qtyTyped = false; }
-      if (!l.serviceDate) l.serviceDate = this.ar.doc.date;
+      if (!l.serviceDate) { l.serviceDate = this.ar.doc.date; this.sortLines(); }
     },
     /** Expenses split evenly across jobs: "1" for one job, "1/3" for three. Never fewer than 1 job. */
     shareText() { const n = Math.max(1, Math.floor(Number(this.ar.doc.splitJobs) || 1)); return n === 1 ? '1' : `1/${n}`; },
@@ -1908,6 +1918,7 @@ createApp({
     },
     async saveDoc() {
       const d = this.ar.doc;
+      this.sortLines();
       // A line counts once something is typed or picked on it (a new invoice line starts with its income account filled in).
       const lines = d.lines.filter((l) => l.unitPrice || l.description?.trim() || l.itemId || (l.accountId && this.S.kind === 'bill')).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
         unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined,

@@ -129,7 +129,8 @@ phone. Press **+ Add person** to add one.
      under the line says so: type the price in **Rate / price** and press **Keep … as the rate** to save it for next time.
    - **Income account:** new lines start on the income account you used last (4100 Service Revenue the first time).
      4000 Sales is for goods; an engineering firm's fees go to 4100.
-   - **Date:** the day the work was done or the cost was incurred.
+   - **Date:** the day the work was done or the cost was incurred. The lines keep themselves in date order, oldest
+     first: after you change a date, add a line or pull in time and costs, they re-sort (lines with no date go last).
    - **Task / description:** Report, Site visit, Deposition…
    - **Hours / qty:** hours for a rate; usually 1 for a cost.
    - **Rate / price:** change it for a one-off rate (for example 1.25 × your standard rate).
