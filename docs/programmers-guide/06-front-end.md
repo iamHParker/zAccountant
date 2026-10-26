@@ -55,6 +55,8 @@ that shows it redraws by itself. You never write "find this element and change i
   "+ Add new customer… / vendor… / project… / rate…". Its change handler resets the select and opens a small form in
   `.overlay.top`; saving reloads the list and picks the new record. Invoice lines start from `newLine()` (income
   account from `localStorage zacc.lastIncome.<companyId>`, else 4100); `saveLinePrice(l)` keeps a typed price as the rate.
+  `sortLines()` keeps invoice lines oldest-first (on date blur, add, pull-in, save); rows are keyed by the line's
+  screen-only `row` tag so the boxes move with their line.
 - **Dates:** ISO `'YYYY-MM-DD'` everywhere. `usDate()` shows MM/DD/YYYY on printed documents.
 - **Build number:** `GET /api/auth/me` (and sign-in) return `version` from `appVersion()` in `src/core/platform.js`:
   `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The status bar at the

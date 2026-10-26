@@ -796,13 +796,13 @@
           <table class="data lines">
             <thead><tr><th>Rate or item</th><th>Date</th><th>Task / description</th><th class="num">Hours / qty</th><th class="num">Rate / price</th><th title="Taxable">Tax</th><th class="num">Amount</th><th>Income account</th><th></th></tr></thead>
             <tbody>
-              <template v-for="(l, i) in ar.doc.lines">
+              <template v-for="(l, i) in ar.doc.lines" :key="l.row">
               <tr>
                 <td><select v-model="l.itemId" @change="pickItem(l)"><option value="">None</option>
                   <option v-if="can('admin')" :value="NEW_CONTACT">+ Add new rate…</option>
                   <optgroup label="By the hour"><option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
                   <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
-                <td class="w150"><input type="date" v-model="l.serviceDate"></td>
+                <td class="w150"><input type="date" v-model="l.serviceDate" @blur="sortLines"></td>
                 <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit">
                   <span v-if="l.from" class="tag" :title="'Billed once: this line is linked to its ' + (l.timeEntryId ? 'time entry' : 'cost')">from {{ l.from }}</span></td>
                 <td class="w90"><input v-model="l.quantity" @input="l.qtyTyped = true" inputmode="decimal" class="num" title="Hours, a quantity, or a share like 1/3"></td>
@@ -839,7 +839,7 @@
               </tr>
             </tbody>
           </table>
-          <button type="button" class="small" @click="ar.doc.lines.push(newLine())">+ Add line</button>
+          <button type="button" class="small" @click="addLine">+ Add line</button>
           <div class="grid2">
             <label>Memo (optional) <input v-model="ar.doc.memo" maxlength="500"></label>
             <div v-if="S.kind === 'invoice'">
