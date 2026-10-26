@@ -40,6 +40,7 @@ import * as plans from './services/planService.js';
 import * as invoiceSetup from './services/invoiceSetupService.js';
 import { featureForPath, FEATURES, PLANS, ADD_ONS } from './core/plans.js';
 import * as backup from './services/backupService.js';
+import { page } from './core/pages.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -142,9 +143,8 @@ export function createApp(pool, { log } = {}) {
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'no-referrer',
-      // 'unsafe-eval' is needed only because the MVP UI compiles Vue templates in the browser;
-      // it goes away when the UI gets a build step (Sprint 7).
-      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+      // No 'unsafe-eval': the screens are compiled on the server (src/core/pages.js), not in the browser.
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     });
     if (secureCookies()) res.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
@@ -814,8 +814,14 @@ export function createApp(pool, { log } = {}) {
   const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
   app.get('/', (req, res) => res.sendFile('welcome.html', { root: publicDir }));
   app.get('/prices', (req, res) => res.sendFile('prices.html', { root: publicDir }));
-  app.get('/road', (req, res) => res.sendFile('road.html', { root: publicDir }));
-  app.get(['/app', '/app/'], (req, res) => res.sendFile('index.html', { root: publicDir }));
+  // The app and the Road page: the HTML shell, and its screens compiled on the server (src/core/pages.js).
+  const pageRoutes = (paths, file, id, script) => {
+    const load = () => page(`${publicDir}${file}`, id);
+    app.get(paths, (req, res) => res.type('html').send(load().shell));
+    app.get(script, (req, res) => res.type('text/javascript').set('Cache-Control', 'no-cache').send(load().code));
+  };
+  pageRoutes(['/app', '/app/'], 'index.html', 'app', '/app.render.js');
+  pageRoutes('/road', 'road.html', 'road', '/road.render.js');
   app.use(express.static(publicDir, { index: false }));
 
   // Errors -> JSON. User mistakes are 4xx with a readable message; anything else is 500 without internals.

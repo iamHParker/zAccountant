@@ -18,7 +18,7 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 
 ## The product
 - Small-business accounting + payroll, built from Homer's master spec (`docs/spec/`).
-- Stack: Node 22 / Express, PostgreSQL 16, Vue 3 in the browser with **no build step**, hosted on **Railway**.
+- Stack: Node 22 / Express, PostgreSQL 16, Vue 3 with **no build step** (the server compiles the screens in `index.html`, `src/core/pages.js`), hosted on **Railway**.
 - Markets: **TX, CO, CA, DC**. Time zone: **Central (CT)**. Accounting accuracy first; friendly UI second.
 
 ## Dates

@@ -1,7 +1,7 @@
 # 6. The browser side (Vue 3, no build step)
 
-The screens are plain files the server sends as they are. There is no compiler, bundler or `node_modules` in the
-browser. What is in `public/` is exactly what runs.
+The screens are plain files the server sends as they are, except that the server compiles the markup in
+`index.html` and `road.html` into JavaScript (see below). There is no bundler or `node_modules` in the browser.
 
 | File | What it holds |
 |---|---|
@@ -12,6 +12,24 @@ browser. What is in `public/` is exactly what runs.
 | `help.js` | the in-app Help guides (searchable; the ? button opens the guide for the current tab) |
 | `feedback.js` | the Beta feedback recorder and pictures |
 | `templates/` | CSV templates people download for imports |
+
+## The screens are compiled on the server (since Oct 2026)
+
+Vue cannot draw `index.html`'s markup directly; it first turns it into JavaScript (a *render function*). That used
+to happen in each browser, after the browser had read the markup its own way, and iPhone Safari 26 read it
+differently enough to stop with `SyntaxError: Unexpected token '<'` and a blank page. Now `src/core/pages.js` does
+it once on the server, from the file exactly as written, like compiling a Fortran program instead of interpreting it
+on each machine:
+
+- `GET /app` sends `index.html` with the screens cut out (an empty `<div id="app" v-cloak>`), and
+  `GET /app.render.js` sends the compiled screens; `app.js` imports `render` from it. `/road` and `/road.render.js`
+  work the same way for the Road page.
+- It recompiles when the file changes, so edit `index.html` and reload; no restart, still no build step.
+- A template mistake (for example the same attribute twice) throws with its line number, and
+  `test/pages.unit.test.js` fails, instead of a blank page in some browser.
+- The markup is now read by Vue's rules, not the browser's: a `<tr>` straight inside `<table>` no longer gets a
+  hidden `<tbody>`, so write `<tbody>` in the markup when CSS needs one (`tbody.entry` does).
+- The CSP no longer allows `'unsafe-eval'`: nothing in the browser builds code from text any more.
 
 ## How Vue works here, in engineering terms
 
