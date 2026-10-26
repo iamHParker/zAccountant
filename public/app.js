@@ -2073,10 +2073,17 @@ createApp({
       await this[handler]({ target: { files, value: '' } });
     },
     /** Photos picked or taken for the payment being entered: shrunk now, sent after the payment is saved. */
+    // A photo is shrunk in the browser; a PDF (a deposit confirmation, an emailed remittance) goes as it is, 3 MB at most.
+    async payAttachment(f) {
+      if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') return pictureFromFile(f, { maxSide: PHOTO_SIDE });
+      if (f.size > 3_145_728) throw new Error(`${f.name} is larger than 3 MB.`);
+      return new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result).replace(/^data:[^;,]*/, 'data:application/pdf')); r.onerror = fail; r.readAsDataURL(f); });
+    },
+    isPdf(ph) { return typeof ph === 'string' ? ph.startsWith('data:application/pdf') : ph?.type === 'application/pdf'; },
     async addPayPhotos(e) {
       const files = [...(e.target.files ?? [])]; e.target.value = '';
       const pay = this.ar.pay; pay.photoBusy = true;
-      try { for (const f of files) if (pay.photos.length + pay.keptPhotos < 6) pay.photos.push(await pictureFromFile(f, { maxSide: PHOTO_SIDE })); }
+      try { for (const f of files) if (pay.photos.length + pay.keptPhotos < 6) pay.photos.push(await this.payAttachment(f)); }
       catch (err) { this.flash(err.message, 'bad'); } finally { pay.photoBusy = false; }
       if (pay.photos.length + pay.keptPhotos >= 6) this.flash('A payment can have at most 6 photos.');
     },
@@ -2090,8 +2097,8 @@ createApp({
       const v = this.ar.photoView; v.busy = true;
       try {
         for (const f of files) {
-          const picture = await pictureFromFile(f, { maxSide: PHOTO_SIDE });
-          if (!(await this.run(() => api('POST', `${this.arBase()}/payments/${v.payment.id}/photos`, { picture }), 'Photo saved.'))) break;
+          const picture = await this.payAttachment(f);
+          if (!(await this.run(() => api('POST', `${this.arBase()}/payments/${v.payment.id}/photos`, { picture }), this.isPdf(picture) ? 'PDF saved.' : 'Photo saved.'))) break;
         }
       } catch (err) { this.flash(err.message, 'bad'); } finally { v.busy = false; }
       await this.openPhotos(v.payment); this.loadAr();

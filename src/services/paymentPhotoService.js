@@ -1,5 +1,6 @@
 // Photos kept with a payment: the check and the printed remittance (Homer, 2026-10-25). The browser shrinks
-// each picture before sending it (a JPEG data: URL). ⚠️ A check photo carries the payer's bank account and
+// each picture before sending it (a JPEG data: URL). A PDF can be kept the same way (2026-10-26: the bank's deposit
+// confirmation, an emailed remittance), sent as a data:application/pdf URL. ⚠️ A check photo carries the payer's bank account and
 // routing numbers: the audit trail records that a photo was added or removed and its size, never the picture.
 import { withTransaction } from '../db/pool.js';
 import { LedgerError } from '../core/ledger.js';
@@ -26,10 +27,19 @@ export async function listPaymentPhotos(db, companyId, paymentId) {
   return rows.map((r) => ({ id: r.id, type: r.picture_type, bytes: Number(r.bytes), createdAt: r.created_at, createdBy: r.created_by }));
 }
 
+/** A data: URL → { bytes, type }: a PNG or JPEG picture, or a PDF (checked by its first bytes). */
+function readAttachment(dataUrl) {
+  const pdf = /^data:application\/pdf;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl ?? ''));
+  if (!pdf) return readPicture(dataUrl);
+  const bytes = Buffer.from(pdf[1], 'base64');
+  if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') throw new LedgerError('That file is not a PDF');
+  return { bytes, type: 'application/pdf' };
+}
+
 export async function addPaymentPhoto(pool, companyId, paymentId, { picture, actor = null }) {
-  const p = readPicture(picture);
+  const p = readAttachment(picture);
   if (!p) throw new LedgerError('Choose a photo');
-  if (p.bytes.length > MAX_PHOTO_BYTES) throw new LedgerError('The photo is too large (3 MB at most)');
+  if (p.bytes.length > MAX_PHOTO_BYTES) throw new LedgerError(`The ${p.type === 'application/pdf' ? 'PDF' : 'photo'} is too large (3 MB at most)`);
   return withTransaction(pool, async (c) => {
     const pay = await payment(c, companyId, paymentId);
     if (pay.status === 'void') throw new LedgerError('This payment is void; add the photo to the payment that replaced it');
@@ -48,7 +58,8 @@ export async function getPaymentPhoto(db, companyId, paymentId, photoId) {
   const { rows: [r] } = await db.query('SELECT picture, picture_type FROM payment_photos WHERE company_id = $1 AND payment_id = $2 AND id = $3',
     [companyId, paymentId, photoId]);
   if (!r) throw new LedgerError('Photo not found');
-  return { name: `payment-photo.${r.picture_type === 'image/png' ? 'png' : 'jpg'}`, type: r.picture_type, body: r.picture, inline: true };
+  const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf' }[r.picture_type];
+  return { name: `payment-${r.picture_type === 'application/pdf' ? 'document' : 'photo'}.${ext}`, type: r.picture_type, body: r.picture, inline: true };
 }
 
 /** Remove a photo taken by mistake (only from a payment that is not void, so a voided payment keeps its record). */

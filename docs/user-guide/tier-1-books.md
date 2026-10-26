@@ -188,6 +188,8 @@ photo** and the camera opens. **Choose photo** picks one you already took. Add u
 
 - To see them later, or add one you forgot, open the **Payments** tab and press **photos** (or **add photo**) on the
   payment's row. Press a photo to open it full size.
+- A **PDF** can be kept the same way: **📄 Attach PDF** adds the bank's deposit confirmation or a remittance that
+  came by email (3 MB at most). It shows as a PDF tile; press it to open.
 - A photo is a record only. It doesn't deposit the check; take the check to the bank as usual.
 - A check photo shows the customer's bank account numbers. Only people in your company can see it.
 - If you edit the payment, its photos stay with the corrected payment.
