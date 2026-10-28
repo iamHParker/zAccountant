@@ -88,7 +88,13 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.equal(ok(await phone.call('POST', '/api/road/items/cost-air-01/photos', { clientId: 'photo-air-01', picture: PNG }), 201).duplicate, true);
   ok(await phone.call('POST', '/api/road/items', { clientId: 'cost-miles-01', kind: 'cost',
     data: { trip: ref, date: '2026-10-06', kind: 'mileage', miles: '150', mileRate: '0.70', description: 'Site visits' } }), 201);
-  ok(await phone.call('POST', '/api/road/items', { clientId: 'time-drive-01', kind: 'time', data: { trip: ref, date: '2026-10-04', hours: '6', notes: 'Drive SAT to DAL' } }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'time-drive-01', kind: 'time', data: { trip: ref, date: '2026-10-28', hours: '6', notes: 'Drive SAT to DAL' } }), 201);
+  // Sent with the wrong date (Homer, 2026-10-28): changed from the phone while it still waits in the inbox, checked again.
+  const badEdit = await phone.call('PUT', '/api/road/items/time-drive-01', { data: { trip: ref, date: '2026-10-32', hours: '6' } });
+  assert.equal(badEdit.status, 400);
+  assert.match(badEdit.body.details.join(' '), /real date/);
+  assert.equal((await phone.call('PUT', '/api/road/items/time-nope-0001', { data: { trip: ref, date: '2026-10-04', hours: '6' } })).status, 400);
+  ok(await phone.call('PUT', '/api/road/items/time-drive-01', { data: { trip: ref, date: '2026-10-04', hours: '6', notes: 'Drive SAT to DAL' } }));
   // Day 2 from the clock: 7:30 AM to 5:45 PM = 10:15, less 1:15 of breaks = 9:00. The phone's own "hours" is not trusted.
   ok(await phone.call('POST', '/api/road/items', { clientId: 'time-day2-01', kind: 'time',
     data: { trip: ref, date: '2026-10-05', start: '07:30', end: '17:45', breaks: '1:15', hours: '1' } }), 201);
@@ -137,6 +143,10 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   // Accepting twice is refused; a photo for a reviewed cost is refused.
   assert.equal((await desk.call('POST', `${b}/road-items/${air.id}/accept`, accounts)).status, 400);
   assert.equal((await phone.call('POST', '/api/road/items/cost-air-01/photos', { clientId: 'photo-air-02', picture: PNG })).status, 400);
+  // Once in the books the phone can't change it: that is done at the desk.
+  const lateEdit = await phone.call('PUT', '/api/road/items/time-drive-01', { data: { trip: ref, date: '2026-10-05', hours: '6' } });
+  assert.equal(lateEdit.status, 400);
+  assert.match(lateEdit.body.error, /already in the books/);
   // The phone can see they are in the books.
   const st = ok(await phone.call('POST', '/api/road/status', { clientIds: ['trip-dallas-01', 'cost-air-01', 'nope-nope-1'] }));
   assert.deepEqual(st.map((s) => s.status), ['accepted', 'accepted']);

@@ -276,6 +276,12 @@ and the remittance. At your desk, **Sales → Checks from the road** shows it wi
 those invoices. Choose the deposit account and save; the phone's photos are saved with the payment, and the phone
 shows "In the books".
 
+**Fixing something already sent.** Each item on the phone has a **change** link until it is accepted at the desk:
+it opens the same form, filled in (a wrong date, the hours, the amount). **Save** sends the change, and the desk sees
+the corrected item. A new cost or day of travel always starts on today's date; check it if you are entering an
+earlier day. Once an item says *In the books*, the phone can no longer change it; fix it at your desk instead:
+**Trips →** the trip **→ edit** on the cost or the day of travel time (or **Sales** for a check's payment).
+
 The road key can't see your books or change anything already saved; it can only add to the *From the road* box.
 It works for 90 days. Lost the phone? **Trips → Your phone on the road → turn off**.
 

@@ -47,7 +47,7 @@
 
       <!-- A check received (the road is also when deposits get made): it becomes the payment at the desk, on Sales. -->
       <section class="card" v-if="checkForm">
-        <h2>Check received</h2>
+        <h2>{{ checkForm.editId ? 'Change this check' : 'Check received' }}</h2>
         <form @submit.prevent="saveCheck">
           <div class="grid2">
             <label>Date <input type="date" v-model="checkForm.date" required></label>
@@ -64,7 +64,7 @@
             <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
             <button type="button" class="photo-btn" @click="pastePhotos">📋 Paste</button></div>
           <div class="photo-strip" v-if="checkForm.photos.length">
-            <span v-for="(p, i) in checkForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Check"><button type="button" class="link" @click="checkForm.photos.splice(i, 1)">remove</button></span>
+            <span v-for="(p, i) in checkForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Check"><button type="button" class="link" v-if="!photoSent(checkForm, p)" @click="checkForm.photos.splice(i, 1)">remove</button></span>
           </div>
           <button class="primary" :disabled="busy">Save</button> <button type="button" @click="checkForm = null">Cancel</button>
         </form>
@@ -77,7 +77,9 @@
             <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
           </div>
           <p class="bad small" v-if="i.error">{{ i.error }}</p>
-          <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button>
+          <p class="muted small" v-if="i.status === 'accepted'">To change it now, use your desk: Sales → Receive payment.</p>
+          <span><button class="link small" v-if="canChange(i)" @click="changeItem(i)">change</button>
+            <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button></span>
         </div>
       </section>
 
@@ -95,7 +97,7 @@
       </section>
 
       <section class="card" v-if="tripForm">
-        <h2>New trip</h2>
+        <h2>{{ tripForm.editId ? 'Change this trip' : 'New trip' }}</h2>
         <form @submit.prevent="saveTrip">
           <label>Name <input v-model="tripForm.name" maxlength="120" required placeholder="Dallas, Oct 4-6"></label>
           <div class="grid2">
@@ -125,7 +127,7 @@
         </div>
 
         <section class="card" v-if="costForm">
-          <h2>Cost</h2>
+          <h2>{{ costForm.editId ? 'Change this cost' : 'Cost' }}</h2>
           <form @submit.prevent="saveCost">
             <div class="chips">
               <button type="button" v-for="(label, k) in kinds" :class="{ active: costForm.kind === k }" @click="costForm.kind = k">{{ label }}</button>
@@ -146,14 +148,14 @@
               <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
               <button type="button" class="photo-btn" @click="pastePhotos">📋 Paste</button></div>
             <div class="photo-strip" v-if="costForm.photos.length">
-              <span v-for="(p, i) in costForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Receipt"><button type="button" class="link" @click="costForm.photos.splice(i, 1)">remove</button></span>
+              <span v-for="(p, i) in costForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Receipt"><button type="button" class="link" v-if="!photoSent(costForm, p)" @click="costForm.photos.splice(i, 1)">remove</button></span>
             </div>
             <button class="primary" :disabled="busy">Save</button> <button type="button" @click="costForm = null">Cancel</button>
           </form>
         </section>
 
         <section class="card" v-if="timeForm">
-          <h2>Travel time</h2>
+          <h2>{{ timeForm.editId ? 'Change this travel time' : 'Travel time' }}</h2>
           <form @submit.prevent="saveTime()">
             <p class="muted small">One entry per day. Type the hours, or the start and end times and the breaks; the hours are worked out.</p>
             <div class="grid2">
@@ -168,7 +170,7 @@
             <p class="small" :class="clockTime(timeForm.start, timeForm.end, timeForm.breaks)?.error ? 'bad' : 'muted'" v-if="clockTime(timeForm.start, timeForm.end, timeForm.breaks)">
               {{ clockTime(timeForm.start, timeForm.end, timeForm.breaks).error || clockTime(timeForm.start, timeForm.end, timeForm.breaks).text }}</p>
             <label>Notes <input v-model="timeForm.notes" maxlength="300" placeholder="Drive SAT to DAL"></label>
-            <button class="primary">Save</button> <button type="button" @click="saveTime(true)">Save, then next day</button>
+            <button class="primary">Save</button> <button type="button" v-if="!timeForm.editId" @click="saveTime(true)">Save, then next day</button>
             <button type="button" @click="timeForm = null">Cancel</button>
           </form>
         </section>
@@ -182,7 +184,9 @@
               <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
             </div>
             <p class="bad small" v-if="i.error">{{ i.error }}</p>
-            <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button>
+            <p class="muted small" v-if="i.status === 'accepted' && i.kind !== 'trip'">To change it now, use your desk: Trips → this trip → edit.</p>
+            <span><button class="link small" v-if="canChange(i)" @click="changeItem(i)">change</button>
+              <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button></span>
           </div>
         </section>
       </template>
