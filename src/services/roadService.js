@@ -196,6 +196,23 @@ export async function receiveItem(db, key, { clientId, kind, data }) {
   return { clientId, status: 'pending', duplicate: false };
 }
 
+/**
+ * A sent item changed on the phone (Homer, 2026-10-28: a travel day sent with the wrong date). Only while it waits in
+ * the inbox: once accepted it is in the books, and the key can't change the books, so it is fixed at the desk.
+ * The new data is checked again exactly like a new item; the kind can't change.
+ */
+export async function editItem(db, key, clientId, { data }) {
+  if (typeof clientId !== 'string' || !CLIENT_ID.test(clientId)) throw new LedgerError('The item has no id');
+  const { rows: [item] } = await db.query('SELECT id, kind, status FROM road_items WHERE key_id = $1 AND client_id = $2 FOR UPDATE', [key.id, clientId]);
+  if (!item) throw new LedgerError('Send the item before changing it');
+  if (item.status !== 'pending') {
+    throw new LedgerError(item.status === 'accepted' ? 'That is already in the books; change it at your desk' : 'That was dismissed at the desk');
+  }
+  const clean = await cleanItem(db, key, item.kind, data && typeof data === 'object' ? data : {});
+  await db.query('UPDATE road_items SET data = $2 WHERE id = $1', [item.id, JSON.stringify(clean)]);
+  return { clientId, status: 'pending' };
+}
+
 /** A receipt photo for a cost sent from this phone (before it is reviewed). */
 export async function receivePhoto(db, key, itemClientId, { clientId, picture }) {
   if (typeof clientId !== 'string' || !CLIENT_ID.test(clientId)) throw new LedgerError('The photo has no id');

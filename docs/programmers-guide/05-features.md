@@ -113,6 +113,10 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
     The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
     { paymentId }` (`invoices`) links it (`road_items.payment_id`) and copies its photos to `payment_photos`.
+    Changing a sent item: `PUT /api/road/items/:clientId { data }` (`editItem`) re-checks the data like a new item
+    and replaces `road_items.data`, only while `status = 'pending'`; the phone marks the item `edited` and sends the
+    change on its next sync. Accepted items are fixed at the desk (`PATCH …/trips/:tripId/travel-time/:timeEntryId`
+    = `updateTravelTime`, or a trip cost's void + copy).
   - **MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`):** the CSV is laid out
     like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's
     header, reads only typed cells and works the dollars out itself. A drive's `key` is a SHA-256 of when, where, miles

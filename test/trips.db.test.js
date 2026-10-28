@@ -60,6 +60,10 @@ test('trips: costs and travel time shared by project, billed once per project', 
   const t2 = await trips.addTravelTime(pool, co.id, viewer, trip.id, { date: '2026-10-06', start: '06:15', end: '19:05', breaks: '1:15' });
   assert.deepEqual(t2.time.map((x) => [x.date, x.minutes, x.start, x.end]).at(-1), ['2026-10-06', 695, '06:15', '19:05']);
   await assert.rejects(trips.addTravelTime(pool, co.id, viewer, trip.id, { date: '2026-10-06', start: '06:15', end: '07:00', breaks: 'lunch' }), /not valid/);
+  // A day of travel typed with the wrong date is changed in place (the times stay, so do the breaks).
+  const t3 = await trips.updateTravelTime(pool, co.id, viewer, trip.id, t2.time.at(-1).id, { date: '2026-10-05', start: '06:15', end: '19:05', breaks: '1:15' });
+  assert.deepEqual(t3.time.map((x) => [x.date, x.minutes]).at(-1), ['2026-10-05', 695]);
+  await assert.rejects(trips.updateTravelTime(pool, co.id, viewer, trip.id, t2.time.at(-1).id, { date: '2026-10-05', hours: '' }), /not valid/);
   await trips.removeTravelTime(pool, co.id, viewer, trip.id, t2.time.at(-1).id);
 
   const pull = await projects.listUnbilled(pool, co.id, { jobId: big.id });

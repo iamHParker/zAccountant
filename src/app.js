@@ -264,6 +264,7 @@ export function createApp(pool, { log } = {}) {
   };
   roadApi.get('/', roadRoute(({ db, key }) => roadSvc.roadSummary(db, key)));
   roadApi.post('/items', roadRoute(({ db, req, key }) => roadSvc.receiveItem(db, key, req.body ?? {}), 201));
+  roadApi.put('/items/:clientId', roadRoute(({ db, req, key }) => roadSvc.editItem(db, key, req.params.clientId, req.body ?? {})));
   roadApi.post('/items/:clientId/photos', roadRoute(({ db, req, key }) => roadSvc.receivePhoto(db, key, req.params.clientId, req.body ?? {}), 201));
   roadApi.post('/status', roadRoute(({ db, req, key }) => roadSvc.itemStatuses(db, key, req.body?.clientIds)));
   app.use('/api/road', roadApi);
@@ -626,6 +627,8 @@ export function createApp(pool, { log } = {}) {
     trips.addTripCost(db, companyId, req.params.tripId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) }), 201));
   api.post(`${TR}/:tripId/travel-time`, route('bills', ({ db, req, companyId, viewer, actor }) =>
     trips.addTravelTime(db, companyId, viewer, req.params.tripId, req.body ?? {}, { actor }), 201));
+  api.patch(`${TR}/:tripId/travel-time/:timeEntryId`, route('bills', ({ db, req, companyId, viewer, actor }) =>
+    trips.updateTravelTime(db, companyId, viewer, req.params.tripId, req.params.timeEntryId, req.body ?? {}, { actor })));
   api.delete(`${TR}/:tripId/travel-time/:timeEntryId`, route('bills', ({ db, req, companyId, viewer, actor }) =>
     trips.removeTravelTime(db, companyId, viewer, req.params.tripId, req.params.timeEntryId, { actor })));
   // Edit = void + corrected copy, and Void reverses a posted entry: the same permission as for bills ("post").

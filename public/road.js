@@ -83,7 +83,7 @@ createApp({
     };
   },
   computed: {
-    waiting() { return this.items.filter((i) => !i.sentItem || (i.photos ?? []).some((p) => !(i.sentPhotos ?? []).includes(p.clientId))).length; },
+    waiting() { return this.items.filter((i) => this.notSent(i)).length; },
     checkItems() { return this.items.filter((i) => i.kind === 'check').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20); },
     localTrips() { return this.items.filter((i) => i.kind === 'trip' && i.status !== 'dismissed'); },
     /** Trips in zAccountant, less the ones this phone started (an accepted one shows up in both lists). */
@@ -159,6 +159,41 @@ createApp({
     projectLabel(id) { const p = this.summary?.projects?.find((x) => x.id === id); return p ? (p.code ?? p.name) : 'project'; },
     toggleJob(id) { const j = this.tripForm.jobIds; const i = j.indexOf(id); if (i >= 0) j.splice(i, 1); else j.push(id); },
     newTrip() { this.tripForm = { name: '', startDate: today(), endDate: '', jobIds: [], newProjects: '', notes: '' }; this.projectSearch = ''; },
+    /**
+     * Change an item (Homer, 2026-10-28): one still on the phone, or one sent but not yet reviewed at the desk. The same
+     * form opens, filled in; Save sends the change. Once accepted it is in the books, and it's changed at the desk.
+     */
+    canChange(i) { return !['accepted', 'dismissed'].includes(i.status); },
+    changeItem(i) {
+      this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null;
+      const d = i.data; const base = { editId: i.clientId, sentPhotos: [...(i.sentPhotos ?? [])] };
+      if (i.kind === 'trip') {
+        this.tripForm = { ...base, name: d.name, startDate: d.startDate, endDate: d.endDate ?? '', jobIds: [...(d.jobIds ?? [])],
+          newProjects: (d.newProjects ?? []).join('\n'), notes: d.notes ?? '' };
+        this.projectSearch = '';
+      } else if (i.kind === 'cost') {
+        this.costForm = { ...base, kind: d.kind, date: d.date, amount: d.amount ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? lastMileRate(),
+          vendor: d.vendor ?? '', description: d.description === KINDS[d.kind] ? '' : (d.description ?? ''), photos: [...(i.photos ?? [])] };
+      } else if (i.kind === 'time') {
+        this.timeForm = { ...base, date: d.date, hours: d.start ? '' : d.hours, start: d.start ?? '', end: d.end ?? '', breaks: d.breaks ?? '', notes: d.notes ?? '' };
+      } else if (i.kind === 'check') {
+        this.checkForm = { ...base, date: d.date, amount: d.amount, from: d.from ?? '', checkNumber: d.checkNumber ?? '', invoices: d.invoices ?? '',
+          notes: d.notes ?? '', photos: [...(i.photos ?? [])] };
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    /** A photo already sent can't be taken back from the phone (remove it at the desk). */
+    photoSent(form, p) { return (form.sentPhotos ?? []).includes(p.clientId); },
+    /** Save a form: a new item, or the changed one (form.editId) with its new data, sent again when there is signal. */
+    async saveItem(kind, form, data, photos = []) {
+      if (!form.editId) return this.addItem(kind, data, photos);
+      const i = this.items.find((x) => x.clientId === form.editId);
+      if (!i || !this.canChange(i)) { this.flash('That was already reviewed at your desk; change it there.', 'bad'); return null; }
+      Object.assign(i, { data, photos, error: '', edited: i.sentItem });
+      try { await putItem(i); } catch { this.flash('Could not save on this phone. Is its storage full?', 'bad'); return null; }
+      this.sync();
+      return i;
+    },
     async addItem(kind, data, photos = []) {
       const item = { clientId: `${kind}-${newId()}`, kind, data, photos, sentItem: false, sentPhotos: [], status: 'on phone', error: '', createdAt: new Date().toISOString() };
       try { await putItem(item); } catch { this.flash('Could not save on this phone. Is its storage full?', 'bad'); return null; }
@@ -168,15 +203,16 @@ createApp({
     },
     async saveTrip() {
       const f = this.tripForm;
-      const item = await this.addItem('trip', { name: f.name.trim(), startDate: f.startDate, endDate: f.endDate || null, notes: f.notes.trim() || null,
+      const item = await this.saveItem('trip', f, { name: f.name.trim(), startDate: f.startDate, endDate: f.endDate || null, notes: f.notes.trim() || null,
         jobIds: f.jobIds, newProjects: f.newProjects.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) });
       if (!item) return;
       this.tripForm = null;
-      this.tripKey = `c:${item.clientId}`;
-      this.flash('Trip saved on this phone.');
+      if (!f.editId) this.tripKey = `c:${item.clientId}`;
+      this.flash(f.editId ? 'Change saved.' : 'Trip saved on this phone.');
     },
-    lastDate() { return this.tripItems.filter((i) => i.data.date).at(-1)?.data.date ?? today(); },
-    newCost() { this.timeForm = null; this.costForm = { kind: 'other', date: this.lastDate(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [] }; },
+    // A new cost or day of travel starts on today's date (it used to copy the last item's date, which was easy to miss:
+    // Homer, 2026-10-28). For the days after, "Save, then next day".
+    newCost() { this.timeForm = null; this.costForm = { kind: 'other', date: today(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [] }; },
     newCheck() { this.costForm = null; this.timeForm = null; this.checkForm = { date: today(), amount: '', from: '', checkNumber: '', invoices: '', notes: '', photos: [] }; },
     async saveCheck() {
       const f = this.checkForm;
@@ -184,9 +220,9 @@ createApp({
       if (!f.from.trim() && !f.invoices.trim()) { this.flash('Say who paid or which invoice it pays.', 'bad'); return; }
       const data = { date: f.date, amount: f.amount.replace(/[$,]/g, ''), from: f.from.trim() || null, checkNumber: f.checkNumber.trim() || null,
         invoices: f.invoices.trim() || null, notes: f.notes.trim() || null };
-      if (await this.addItem('check', data, f.photos)) { this.checkForm = null; this.flash('Saved on this phone.'); }
+      if (await this.saveItem('check', f, data, f.photos)) { this.checkForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
     },
-    newTime() { this.costForm = null; this.timeForm = { date: this.lastDate(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
+    newTime() { this.costForm = null; this.timeForm = { date: today(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
     clockTime,
     // A screenshot or photo copied to the clipboard: the same as choosing it.
     async pastePhotos() {
@@ -214,7 +250,7 @@ createApp({
       const data = { trip: this.tripRef, date: f.date, kind: f.kind, vendor: f.vendor.trim() || null, description: f.description.trim() || KINDS[f.kind] };
       if (f.kind === 'mileage') Object.assign(data, { miles: f.miles, mileRate: f.mileRate });
       else data.amount = f.amount.replace(/[$,]/g, '');
-      if (await this.addItem('cost', data, f.photos)) { this.costForm = null; this.flash('Saved on this phone.'); }
+      if (await this.saveItem('cost', f, data, f.photos)) { this.costForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
     },
     // One day's travel: the hours, or start and end less breaks. "Save, then next day" keeps the times for the next date.
     async saveTime(next = false) {
@@ -222,9 +258,9 @@ createApp({
       if (clock?.error) { this.flash(clock.error, 'bad'); return; }
       const data = { trip: this.tripRef, date: f.date, notes: f.notes.trim() || null,
         ...(clock ? { start: f.start, end: f.end, breaks: f.breaks, hours: clock.hours } : { hours: f.hours }) };
-      if (!(await this.addItem('time', data))) return;
-      this.timeForm = next ? { ...f, date: nextDay(f.date), hours: clock ? '' : f.hours } : null;
-      this.flash(next ? `Saved on this phone. Now ${this.usDate(nextDay(f.date))}.` : 'Saved on this phone.');
+      if (!(await this.saveItem('time', f, data))) return;
+      this.timeForm = next ? { ...f, editId: null, sentPhotos: [], date: nextDay(f.date), hours: clock ? '' : f.hours } : null;
+      this.flash(next ? `Saved on this phone. Now ${this.usDate(nextDay(f.date))}.` : (f.editId ? 'Change saved.' : 'Saved on this phone.'));
     },
     async removeItem(i) {
       if (!confirm('Remove this from the phone? It has not been sent.')) return;
@@ -242,11 +278,15 @@ createApp({
       const amount = i.data.kind === 'mileage' ? `${i.data.miles} mi × $${i.data.mileRate} = ${money(mileageCents(i.data.miles, i.data.mileRate))}` : money(Math.round(Number(i.data.amount) * 100));
       return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''} · ${amount}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''}`;
     },
+    /** Something of this item still to send: the item, a change to it, or a photo. */
+    notSent(i) {
+      return !i.sentItem || (i.edited && i.status === 'pending') || (this.canChange(i) && (i.photos ?? []).some((p) => !(i.sentPhotos ?? []).includes(p.clientId)));
+    },
     statusText(i) {
       if (i.status === 'accepted') return 'In the books';
       if (i.status === 'dismissed') return 'Dismissed at desk';
       if (i.error) return 'Needs a fix';
-      if (!i.sentItem || (i.photos ?? []).some((p) => !(i.sentPhotos ?? []).includes(p.clientId))) return 'On phone';
+      if (this.notSent(i)) return 'On phone';
       return 'Sent';
     },
     statusClass(i) { return { ok: i.status === 'accepted' || (this.statusText(i) === 'Sent'), warn: this.statusText(i) === 'On phone', bad: Boolean(i.error) }; },
@@ -260,9 +300,14 @@ createApp({
           try {
             if (!i.sentItem) {
               await this.call('POST', '/items', { clientId: i.clientId, kind: i.kind, data: i.data });
-              i.sentItem = true; i.status = 'pending'; i.error = '';
+              i.sentItem = true; i.status = 'pending'; i.error = ''; i.edited = false;
+              await putItem(i);
+            } else if (i.edited && i.status === 'pending') {
+              await this.call('PUT', `/items/${i.clientId}`, { data: i.data });
+              i.edited = false; i.error = '';
               await putItem(i);
             }
+            if (!this.canChange(i)) continue;
             for (const p of i.photos ?? []) {
               if ((i.sentPhotos ??= []).includes(p.clientId)) continue;
               await this.call('POST', `/items/${i.clientId}/photos`, { clientId: p.clientId, picture: p.dataUrl });

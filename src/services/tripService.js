@@ -9,7 +9,7 @@ import { toCents, divRoundHalfUp, mileageAmount } from '../core/money.js';
 import { insertEntry, reverseEntry, cleanIdempotencyKey } from './ledgerService.js';
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
-import { createTimeEntry, deleteTimeEntry } from './timesheetService.js';
+import { createTimeEntry, updateTimeEntry, deleteTimeEntry } from './timesheetService.js';
 import { minutesToHours } from '../core/timesheets.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -337,6 +337,17 @@ export async function addTravelTime(pool, companyId, viewer, tripId, input, { ac
   return withTransaction(pool, async (c) => {
     await getTripRow(c, companyId, tripId);
     await createTimeEntry(c, companyId, viewer, { ...input, jobId: null, tripId }, { actor });
+    return getTrip(c, companyId, tripId);
+  });
+}
+
+/** Change a day of travel time (its date, hours or times, notes): the same rules as a timesheet entry. */
+export async function updateTravelTime(pool, companyId, viewer, tripId, timeEntryId, input, { actor = null } = {}) {
+  return withTransaction(pool, async (c) => {
+    await getTripRow(c, companyId, tripId);
+    const { rows: [t] } = isId(timeEntryId) ? await c.query('SELECT 1 FROM time_entries WHERE company_id = $1 AND id = $2 AND trip_id = $3', [companyId, timeEntryId, tripId]) : { rows: [] };
+    if (!t) throw new LedgerError('Travel time not found');
+    await updateTimeEntry(c, companyId, viewer, timeEntryId, { ...input, jobId: null, tripId }, { actor });
     return getTrip(c, companyId, tripId);
   });
 }

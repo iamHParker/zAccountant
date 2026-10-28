@@ -6,7 +6,7 @@ import { render } from '/app.render.js';
 import { HELP, helpForTab, searchHelp } from '/help.js';
 import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
 import { picturesFromClipboard } from '/paste.js';
-import { clockTime, nextDay } from '/clock.js';
+import { clockTime, hhmm, nextDay } from '/clock.js';
 import { payeeKey, payeeRuleText } from '/payee.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -1699,10 +1699,18 @@ createApp({
       const t = this.trip.travel; const clock = clockTime(t.start, t.end, t.breaks);
       if (clock?.error) { this.flash(clock.error, 'bad'); return; }
       const body = clock ? { date: t.date, start: t.start, end: t.end, breaks: t.breaks, notes: t.notes } : { date: t.date, hours: t.hours, notes: t.notes };
-      const r = await this.run(() => api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, body), 'Travel time saved.');
+      const r = await this.run(() => (t.editId
+        ? api('PATCH', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time/${t.editId}`, body)
+        : api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, body)), 'Travel time saved.');
       if (!r) return;
       this.trip.cur = r;
-      this.trip.travel = next ? { ...t, date: nextDay(t.date), hours: clock ? '' : t.hours } : null;
+      this.trip.travel = next ? { ...t, editId: null, date: nextDay(t.date), hours: clock ? '' : t.hours } : null;
+    },
+    /** Fix a day of travel time (a wrong date, say): the same form, filled in. Breaks are what the times leave over. */
+    editTravel(x) {
+      const span = x.start && x.end ? clockTime(x.start, x.end, '')?.minutes : null;
+      const breaks = span && span > x.minutes ? hhmm(span - x.minutes) : '';
+      Object.assign(this.trip, { travel: { editId: x.id, date: x.date, hours: x.start ? '' : x.hours, start: x.start ?? '', end: x.end ?? '', breaks, notes: x.notes ?? '' }, cost: null });
     },
     async removeTravel(x) {
       if (!confirm(`Delete ${x.hours} h of travel time on ${x.date}?`)) return;
