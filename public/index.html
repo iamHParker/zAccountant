@@ -885,6 +885,14 @@
             </div>
           </div>
           <p class="num">Subtotal {{ money(docTotals.sub) }}<span v-if="docTotals.tax"> · Sales tax {{ money(docTotals.tax) }}</span> · <strong>Total {{ money(docTotals.total) }}</strong></p>
+          <div class="plan-box" v-if="S.kind === 'invoice'">
+            <strong>Payment plan</strong> <span class="muted small">(optional: the total paid in monthly parts; on schedule is never late)</span>
+            <div class="row wrap">
+              <label>Number of payments <input v-model="ar.doc.planCount" inputmode="numeric" class="w80" placeholder="none"></label>
+              <label>First payment due <input type="date" v-model="ar.doc.planFirstDue" :required="!!String(ar.doc.planCount || '').trim()"></label>
+              <span class="muted small" v-if="planPreview(docTotals.total, ar.doc.planCount, ar.doc.planFirstDue)">{{ planPreview(docTotals.total, ar.doc.planCount, ar.doc.planFirstDue) }}</span>
+            </div>
+          </div>
           <button class="primary" :disabled="docTotals.total <= 0 || !ar.doc.contactId">{{ ar.doc.editId ? 'Save changes' : 'Save ' + S.Doc.toLowerCase() }}</button>
           <button type="button" @click="ar.showDoc = false">Cancel</button>
         </form>
@@ -907,7 +915,7 @@
             <thead><tr><th>{{ S.Doc }}</th><th>Date</th><th>Due</th><th class="num">Balance</th><th class="num w150">Payment</th></tr></thead>
             <tbody>
               <tr v-for="d in ar.pay.open">
-                <td>{{ d.number }}</td><td>{{ d.date }}</td><td :class="{ bad: d.status === 'overdue' }">{{ d.dueDate }}</td>
+                <td>{{ d.number }}</td><td>{{ d.date }}</td><td :class="{ bad: d.status === 'overdue' }">{{ dueShown(d) }}</td>
                 <td class="num">{{ money(d.balanceCents) }}</td>
                 <td><input v-model="ar.pay.amounts[d.id]" inputmode="decimal" class="num" placeholder="0.00"></td>
               </tr>
@@ -945,7 +953,7 @@
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="editDoc(ar.detail)">Edit</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="voidDoc(ar.detail)">Void</button>
             <button v-if="can(S.perm) && ar.detail.status !== 'void' && ar.detail.paidCents && !ar.details" @click="startDetails(ar.detail)"
-              title="Memo, due date and claim / job number. The amounts stay as they are.">Change details</button>
+              title="Memo, due date, claim / job number and payment plan. The amounts stay as they are.">Change details</button>
             <button @click="ar.detail = null">Close</button>
           </span>
         </div>
@@ -953,6 +961,10 @@
           <label>Memo <input v-model.trim="ar.details.memo" maxlength="500"></label>
           <label>Due date <input type="date" v-model="ar.details.dueDate" required></label>
           <label>Claim / job number <input v-model.trim="ar.details.clientRef" maxlength="60"></label>
+          <template v-if="S.kind === 'invoice'">
+            <label>Plan: number of payments <input v-model="ar.details.planCount" inputmode="numeric" class="w80" placeholder="none"></label>
+            <label>First payment due <input type="date" v-model="ar.details.planFirstDue"></label>
+          </template>
           <button class="primary">Save</button> <button type="button" @click="ar.details = null">Cancel</button>
           <p class="hint">This {{ S.Doc.toLowerCase() }} has payments, so its amounts stay as they are (void the payment first to change them).
             These details never reach the books; the change is kept in the audit trail.</p>
@@ -967,8 +979,9 @@
             <tr><th>Invoice #</th><td>{{ ar.detail.number }}</td></tr>
             <tr v-if="ar.detail.clientRef"><th>Claim / Job #</th><td>{{ ar.detail.clientRef }}</td></tr>
             <tr><th>Date</th><td>{{ usDate(ar.detail.date) }}</td></tr>
-            <tr><th>Due</th><td>{{ usDate(ar.detail.dueDate) }}</td></tr>
-            <tr v-if="ar.detail.contact.termsDays != null"><th>Terms</th><td>{{ ar.detail.contact.termsDays ? ar.detail.contact.termsDays + ' days' : 'Due on receipt' }}</td></tr>
+            <tr v-if="!ar.detail.plan"><th>Due</th><td>{{ usDate(ar.detail.dueDate) }}</td></tr>
+            <tr v-else-if="ar.detail.plan.next"><th>Next payment</th><td>{{ usDate(ar.detail.plan.next.dueDate) }}</td></tr>
+            <tr v-if="ar.detail.contact.termsDays != null && !ar.detail.plan"><th>Terms</th><td>{{ ar.detail.contact.termsDays ? ar.detail.contact.termsDays + ' days' : 'Due on receipt' }}</td></tr>
           </table></div>
         </div>
         <div class="grid2 invoice-parties">
@@ -994,6 +1007,15 @@
               <td colspan="2" class="num">Balance due</td><td class="num">{{ money(ar.detail.balanceCents) }}</td></tr>
           </tbody>
         </table>
+        <div v-if="ar.detail.plan" class="plan-schedule">
+          <strong>Payment plan:</strong> {{ ar.detail.plan.count }} monthly payments, no interest.
+          <table class="data">
+            <thead><tr><th>#</th><th>Due</th><th class="num">Amount</th><th class="num">Paid</th><th class="num">Still due</th></tr></thead>
+            <tr v-for="p in ar.detail.plan.schedule" :class="{ muted: !p.balanceCents }"><td>{{ p.n }}</td><td>{{ usDate(p.dueDate) }}</td>
+              <td class="num">{{ money(p.amountCents) }}</td><td class="num">{{ p.paidCents ? money(p.paidCents) : '' }}</td>
+              <td class="num" :class="{ bad: p.balanceCents && p.dueDate < todayIso() }">{{ p.balanceCents ? money(p.balanceCents) : 'paid' }}</td></tr>
+          </table>
+        </div>
         </template>
         <template v-else>
         <div class="grid2">
@@ -1128,7 +1150,7 @@
           <thead><tr><th>Number</th><th>{{ S.Who }}</th><th>Date</th><th>Due</th><th class="num">Total</th><th class="num">Balance</th><th>Status</th><th></th></tr></thead>
           <tbody>
             <tr v-for="d in ar.docs" class="click" @click="openDoc(d)">
-              <td>{{ d.number }}</td><td>{{ d.contactName }}</td><td>{{ d.date }}</td><td>{{ d.dueDate }}</td>
+              <td>{{ d.number }}</td><td>{{ d.contactName }}</td><td>{{ d.date }}</td><td>{{ dueShown(d) }}</td>
               <td class="num">{{ money(d.totalCents) }}</td><td class="num">{{ money(d.balanceCents) }}</td>
               <td :class="{ bad: d.status === 'overdue', ok: d.status === 'paid', muted: d.status === 'void' }">{{ d.replacedById ? 'Replaced' : statusLabel(d.status) }}</td>
               <td class="actions" @click.stop><button class="link" @click="openDoc(d)">view</button></td>
