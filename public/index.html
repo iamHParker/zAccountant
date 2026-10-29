@@ -464,6 +464,7 @@
                 </span>
                 <span class="small">This month: in {{ money(home.stats.months.at(-1).incomeCents) }} · out {{ money(home.stats.months.at(-1).expensesCents) }}</span>
               </template>
+              <span v-if="c.id === 'plans' && home.plans" class="small">{{ home.plans.length ? home.plans.length + ' plan' + (home.plans.length === 1 ? '' : 's') + ' · next: ' + home.plans[0].contactName + ' ' + money(home.plans[0].plan.next.amountCents) + ' on ' + usDate(home.plans[0].plan.next.dueDate) + (home.plans.some(d => d.plan.pastDueCents) ? ' · some behind' : '') : 'No plans open' }}</span>
             </button>
             <div class="home-card-tools" v-if="home.editing">
               <button type="button" class="small" @click="moveHomeCard('left', c.id, -1)" title="Move up" aria-label="Move up">↑</button>
@@ -489,6 +490,7 @@
                 </span>
                 <span class="small">This month: in {{ money(home.stats.months.at(-1).incomeCents) }} · out {{ money(home.stats.months.at(-1).expensesCents) }}</span>
               </template>
+              <span v-if="c.id === 'plans' && home.plans" class="small">{{ home.plans.length ? home.plans.length + ' plan' + (home.plans.length === 1 ? '' : 's') + ' · next: ' + home.plans[0].contactName + ' ' + money(home.plans[0].plan.next.amountCents) + ' on ' + usDate(home.plans[0].plan.next.dueDate) + (home.plans.some(d => d.plan.pastDueCents) ? ' · some behind' : '') : 'No plans open' }}</span>
             </button>
             <div class="home-card-tools" v-if="home.editing">
               <button type="button" class="small" @click="moveHomeCard('right', c.id, -1)" title="Move earlier" aria-label="Move earlier">‹</button>
@@ -1045,6 +1047,7 @@
         <button :class="{ active: ar.panel === 'docs' }" @click="arPanel('docs')">{{ S.docs }}</button>
         <button :class="{ active: ar.panel === 'contacts' }" @click="arPanel('contacts')">{{ S.Whos }}</button>
         <button :class="{ active: ar.panel === 'payments' }" @click="arPanel('payments')">Payments</button>
+        <button v-if="S.kind === 'invoice'" :class="{ active: ar.panel === 'plans' }" @click="arPanel('plans')">Payment plans</button>
         <button :class="{ active: ar.panel === 'aging' }" @click="arPanel('aging')">Aging report</button>
         <button :class="{ active: ar.panel === 'projects' }" @click="arPanel('projects')">Projects</button>
       </div>
@@ -1215,6 +1218,63 @@
           <label class="button">📄 Attach PDF<input type="file" accept="application/pdf,.pdf" multiple class="hidden-file" @change="uploadPhotos"></label>
           <span class="muted small" v-if="ar.photoView.busy">Saving photo…</span>
         </div>
+      </div>
+
+      <div class="card" v-if="ar.panel === 'plans' && !ar.planStatement">
+        <h2>Payment plans</h2>
+        <p class="hint">Invoices paid in monthly parts. A customer on schedule is never past due. To start one, fill in Payment plan on the
+          invoice (or <strong>Change details</strong> on an invoice already sent).</p>
+        <p class="hint" v-if="!ar.plans.length">No open invoices on a payment plan.</p>
+        <table class="data" v-else>
+          <thead><tr><th>Customer</th><th>Invoice</th><th>Next payment</th><th class="num">Paid so far</th><th class="num">Balance</th><th></th></tr></thead>
+          <tr v-for="d in ar.plans" :key="d.id">
+            <td>{{ d.contactName }}</td><td><button class="link" @click="openDoc(d)">{{ d.number }}</button></td>
+            <td>{{ d.plan.next ? money(d.plan.next.amountCents) + ' on ' + usDate(d.plan.next.dueDate) + ' (' + d.plan.next.n + ' of ' + d.plan.count + ')' : '' }}
+              <span v-if="d.plan.pastDueCents" class="bad small"> · {{ money(d.plan.pastDueCents) }} behind</span></td>
+            <td class="num">{{ money(d.paidCents) }}</td><td class="num">{{ money(d.balanceCents) }}</td>
+            <td class="actions"><button v-if="can('invoices')" class="primary small" @click="payPlan(d)">Receive payment</button>
+              <button class="small" @click="planStatementFor(d)">Statement</button></td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="card statement print-me" v-if="ar.panel === 'plans' && ar.planStatement">
+        <div class="row no-print"><button @click="printPage">Print / Save PDF</button> <button @click="ar.planStatement = null">Back to plans</button></div>
+        <div class="letterhead">
+          <img v-if="logoUrl()" :src="logoUrl()" alt="" class="invoice-logo">
+          <div class="grow"><strong class="company-name">{{ company.name }}</strong>
+            <div class="pre-line" v-if="company.invoice_address">{{ company.invoice_address }}</div></div>
+          <div><div class="invoice-title">STATEMENT</div>
+          <table class="invoice-box">
+            <tr><th>Date</th><td>{{ usDate(todayIso()) }}</td></tr>
+            <tr><th>Invoice #</th><td>{{ ar.planStatement.number }}</td></tr>
+            <tr v-if="ar.planStatement.plan?.next"><th>Next payment</th><td>{{ usDate(ar.planStatement.plan.next.dueDate) }}</td></tr>
+          </table></div>
+        </div>
+        <div class="grid2 invoice-parties">
+          <div class="boxed"><span class="muted small">STATEMENT FOR</span><br><strong><template v-if="ar.planStatement.careOf">{{ ar.planStatement.careOf }} c/o </template>{{ ar.planStatement.contact.name }}</strong>
+            <div class="pre-line" v-if="ar.planStatement.contact.address">{{ ar.planStatement.contact.address }}</div></div>
+          <div class="boxed" v-if="ar.planStatement.project"><span class="muted small">PROJECT</span><div class="pre-line">{{ ar.planStatement.project }}</div></div>
+        </div>
+        <p>Invoice {{ ar.planStatement.number }} of {{ usDate(ar.planStatement.date) }} for <strong>{{ money(ar.planStatement.totalCents) }}</strong>,
+          paid in {{ ar.planStatement.plan?.count }} monthly payments. No interest is charged on this plan.</p>
+        <h3>Payments received</h3>
+        <table class="data invoice-lines">
+          <thead><tr><th>Date</th><th>Check / reference</th><th class="num">Amount applied</th></tr></thead>
+          <tr v-for="p in ar.planStatement.payments.filter(p => p.status === 'posted')"><td>{{ usDate(p.date) }}</td><td>{{ p.reference || p.method }}</td><td class="num">{{ money(p.amountCents) }}</td></tr>
+          <tr v-if="!ar.planStatement.payments.some(p => p.status === 'posted')"><td colspan="3" class="muted">None yet</td></tr>
+          <tr class="total"><td colspan="2" class="num">Paid so far</td><td class="num">{{ money(ar.planStatement.paidCents) }}</td></tr>
+          <tr class="total"><td colspan="2" class="num">Balance remaining</td><td class="num">{{ money(ar.planStatement.balanceCents) }}</td></tr>
+        </table>
+        <div class="plan-schedule" v-if="ar.planStatement.plan">
+          <h3>Payment schedule</h3>
+          <table class="data invoice-lines">
+            <thead><tr><th>#</th><th>Due</th><th class="num">Amount</th><th class="num">Paid</th><th class="num">Still due</th></tr></thead>
+            <tr v-for="p in ar.planStatement.plan.schedule"><td>{{ p.n }}</td><td>{{ usDate(p.dueDate) }}</td><td class="num">{{ money(p.amountCents) }}</td>
+              <td class="num">{{ p.paidCents ? money(p.paidCents) : '' }}</td><td class="num">{{ p.balanceCents ? money(p.balanceCents) : 'paid' }}</td></tr>
+          </table>
+        </div>
+        <p class="invoice-thanks">{{ company.invoice_footer || 'Thank you for your business.' }}</p>
       </div>
 
       <div class="card statement print-me" v-if="ar.panel === 'aging'">

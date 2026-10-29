@@ -69,7 +69,9 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   `pastDueCents`, `next` and the unpaid `pieces`. `docOut.status` is overdue only when a plan payment is past its date;
   `listContacts` overdue and `getAging` (each piece in its own bucket; CSV row spreads with `byBucket`) follow. A plan
   sets `due_date` to the last payment. It can be added, changed or removed with PATCH (`updateDocumentDetails`): it
-  moves no money. No interest or late fees exist anywhere yet.
+  moves no money. Sales → Payment plans (`ar.panel = 'plans'`) and the Home card `plans` (`loadHomePlans`) filter open
+  invoices with `plan`; Statement prints `getDocument`'s payments and schedule; `payPlan` pre-fills the next payment.
+  No interest or late fees exist anywhere yet.
 - Payment photos (migration 021, `src/services/paymentPhotoService.js`): `payment_photos` (bytea ≤ 3 MB, JPEG/PNG, or a
   PDF since migration 035 such as the bank's deposit confirmation, sent unshrunk as `data:application/pdf`, checked for `%PDF-`;
   6 per payment), routes `…/payments/:id/photos[/:photoId]` (add/remove: the side's permission; view: view_books or the

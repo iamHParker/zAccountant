@@ -171,6 +171,10 @@ monthly, the last on 6/1/2027.
   schedule with what is paid and what is still due. The invoice list shows the next payment's date ("plan 3 of 8").
 - **Change details** on the invoice adds, changes or removes a plan at any time, even after payments came in. It
   moves no money; empty the number of payments to remove it.
+- **Sales → Payment plans** (or the **🗓️ Payment plans** card on Home) lists every open plan with its next payment
+  and anything behind. **Receive payment** opens the payment form with that customer and the next payment filled in.
+  **Statement** shows a page to print or save as PDF for the customer: the payments received and applied, what has been
+  paid so far, the balance remaining and the schedule.
 
 ### Old invoices from before zAccountant
 

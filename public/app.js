@@ -186,6 +186,7 @@ const HOME_CARDS = [
   { id: 'stats', icon: '📊', title: 'Statistics', hint: 'Income, expenses and cash, month by month', perms: ['view_books'] },
   { id: 'invoice', icon: '🧾', title: 'New invoice', hint: 'Bill a customer', perms: ['invoices'], go: { tab: 'sales', then: 'newDoc' } },
   { id: 'paid', icon: '💵', title: 'Customer paid', hint: 'Record a payment received', perms: ['invoices'], go: { tab: 'sales', then: 'startPay' } },
+  { id: 'plans', icon: '🗓️', title: 'Payment plans', hint: 'Next payments, record one, print a statement', perms: ['invoices'], go: { tab: 'sales', then: 'openPlans' } },
   { id: 'bill', icon: '📄', title: 'Enter a bill', hint: 'Something you owe a vendor', perms: ['bills'], go: { tab: 'bills', then: 'newDoc' } },
   { id: 'paybill', icon: '💸', title: 'Pay a bill', hint: 'Record a bill payment', perms: ['bills'], go: { tab: 'bills', then: 'startPay' } },
   { id: 'bank', icon: '🏦', title: 'Banking', hint: 'Review imported bank transactions', perms: ['view_books'], go: { tab: 'bank' } },
@@ -209,7 +210,7 @@ const ENTRY_OWNER = {
 };
 // Entries the Transactions tab can Edit (reverse + corrected copy); same list as CORRECTABLE in ledgerService.js.
 const CORRECTABLE = ['manual', 'simple', 'recurring', 'import'];
-const DEFAULT_HOME = { left: ['stats'], right: ['invoice', 'paid', 'bill', 'bank', 'card', 'trip', 'pnl'] };
+const DEFAULT_HOME = { left: ['stats'], right: ['invoice', 'paid', 'plans', 'bill', 'bank', 'card', 'trip', 'pnl'] };
 
 /** Sunday on or before an ISO date (workweeks run Sunday to Saturday). */
 function weekStartOf(iso) {
@@ -280,7 +281,7 @@ createApp({
       setup: { step: 1, status: null, entityType: '', booksStartDate: '', books: 'fresh', fromImport: false,
         newAcct: { name: '', kind: 'bank' }, balances: {}, busy: false },
       entityTypes: ENTITY_TYPES,
-      home: { layout: null, editing: false, view: 'cards', stats: null, adding: '' },
+      home: { layout: null, editing: false, view: 'cards', stats: null, plans: null, adding: '' },
       accounts: [], dash: null, entries: [], entriesTotal: 0, search: blankSearch(), recurring: [], showRecurring: false, booksCheck: null,
       quick: { kind: 'out', date: today(), memo: '', amount: '', bank: '', other: '', key: newKey() },
       showJE: false, je: { date: today(), memo: '', key: newKey(), repeat: blankRepeat(), lines: [{ accountId: '', debit: '', credit: '' }, { accountId: '', debit: '', credit: '' }] },
@@ -320,7 +321,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
-        pdfOver: false, pdfBusy: false, roadChecks: [], showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
@@ -395,7 +396,8 @@ createApp({
       if (t === 'setup') this.loadSetup();
       if (t === 'bank') this.loadBank();
       if (t === 'trips') this.loadTrips();
-      if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [] }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
+      if (t === 'bills' && this.ar.panel === 'plans') this.ar.panel = 'docs'; // payment plans are for invoices
+      if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [], planStatement: null }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
       if (t === 'accounts') this.loadImports();
       if (t === 'time') this.loadTime(true);
     },
@@ -732,6 +734,7 @@ createApp({
       this.home.layout = saved?.layout ?? structuredClone(DEFAULT_HOME);
       this.home.view = 'cards';
       if (this.homeCards('left').concat(this.homeCards('right')).some((c) => c.id === 'stats')) this.loadStats();
+      if (this.homeCards('left').concat(this.homeCards('right')).some((c) => c.id === 'plans')) this.loadHomePlans();
       if (this.can('admin')) this.setup.status = await api('GET', `/companies/${this.companyId}/setup`).catch(() => null);
     },
     // ---------------------------------------------------------------- Home cards and Statistics
@@ -765,6 +768,7 @@ createApp({
       if (!id) return;
       this.home.layout.right.push(id); this.home.adding = '';
       if (id === 'stats') this.loadStats();
+      if (id === 'plans') this.loadHomePlans();
       this.saveHome();
     },
     resetHome() { this.home.layout = structuredClone(DEFAULT_HOME); this.loadStats(); this.saveHome(); },
@@ -826,6 +830,11 @@ createApp({
     },
     openMileIq() { this.$nextTick(() => { const d = document.querySelector('details.mileiq'); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth' }); } }); },
     scrollToBackup() { this.$nextTick(() => document.querySelector('.backup-card')?.scrollIntoView({ behavior: 'smooth' })); },
+    // The Payment plans card: open invoices on a plan, the next payment first.
+    async loadHomePlans() {
+      const open = (await this.run(() => api('GET', `/companies/${this.companyId}/invoices?status=open`))) ?? [];
+      this.home.plans = open.filter((d) => d.plan?.next).sort((a, b) => a.plan.next.dueDate.localeCompare(b.plan.next.dueDate));
+    },
     async loadStats() { this.home.stats = await this.run(() => api('GET', `/companies/${this.companyId}/reports/statistics?asOf=${today()}`)); },
     /** "2026-10" → "Oct" (or "Oct 2026" with year). */
     monthLabel(ym, year = false) {
@@ -1360,6 +1369,8 @@ createApp({
       ar.contacts = (await this.run(() => api('GET', `${base}/${S.contacts}`))) ?? [];
       ar.jobs = (await this.run(() => api('GET', `${base}/jobs?inactive=1`))) ?? [];
       if (ar.panel === 'docs') ar.docs = (await this.run(() => api('GET', `${base}/${S.docPath}?status=${ar.view}`))) ?? [];
+      if (ar.panel === 'plans') ar.plans = ((await this.run(() => api('GET', `${base}/${S.docPath}?status=open`))) ?? []).filter((d) => d.plan)
+        .sort((a, b) => (a.plan.next?.dueDate ?? '').localeCompare(b.plan.next?.dueDate ?? ''));
       if (ar.panel === 'payments') ar.payments = (await this.run(() => api('GET', `${base}/${S.payPath}`))) ?? [];
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
       if (S.kind === 'invoice') ar.roadChecks = ((await this.run(() => api('GET', `${base}/road-items`))) ?? []).filter((i) => i.kind === 'check');
@@ -1384,7 +1395,17 @@ createApp({
       if (!confirm('Dismiss this check from the road? It will not go into the books.')) return;
       if (await this.run(() => api('POST', `${this.arBase()}/road-items/${i.id}/dismiss`), 'Dismissed.')) this.loadAr();
     },
-    arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.ar.photoView = null; this.loadAr(); },
+    arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.ar.photoView = null; this.ar.planStatement = null; this.loadAr(); },
+    // ---- Payment plans (Sales → Payment plans, and the Home card): each plan, its next payment, a statement.
+    async openPlans() { this.arPanel('plans'); },
+    async planStatementFor(d) { this.ar.planStatement = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
+    /** Receive payment for this customer, with the next plan payment filled in against this invoice. */
+    async payPlan(d) {
+      this.ar.planStatement = null;
+      await this.startPay(d.contactId);
+      const p = this.ar.pay;
+      if (d.plan?.next && p.open.some((x) => x.id === d.id)) p.amounts[d.id] = (Math.min(d.plan.next.amountCents, d.balanceCents) / 100).toFixed(2);
+    },
     // ---------------------------------------------------------------- Projects (the jobs time is entered against)
     activeJobs() { return this.ar.jobs.filter((j) => j.isActive); },
     // Sales → Projects: click Number, Project or Customer to sort; again to reverse. Kept on this computer.
