@@ -1,6 +1,6 @@
 // Payment plans on an invoice (Homer, 2026-10-29): discounted community work paid off in 5 to 10 monthly payments,
 // with no interest. The invoice stays one invoice for its full amount; the plan only says when each part is due, so
-// a customer who is on schedule is never shown as past due. zAccountant charges no interest or late fees at all.
+// a customer who is on schedule is never shown as past due. A plan invoice never gets late charges (src/core/lateCharges.js).
 //
 // A plan is two numbers kept on the invoice: how many payments, and the first due date. The schedule is worked out
 // from them the same way every time: the total split into equal payments, the odd cents going one each to the first

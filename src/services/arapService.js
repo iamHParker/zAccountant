@@ -78,7 +78,7 @@ export function lineAmount(quantity, unitPriceCents) {
 const contactOut = (r) => ({
   id: r.id, kind: r.kind, name: r.name, email: r.email, phone: r.phone, address: r.address, termsDays: r.terms_days,
   is1099: r.is_1099, isActive: r.is_active, openCents: r.open_cents ?? 0, overdueCents: r.overdue_cents ?? 0,
-  groupName: r.group_name ?? null, people: r.people ?? [],
+  groupName: r.group_name ?? null, people: r.people ?? [], isHomeowner: r.is_homeowner ?? false, noLateCharges: r.no_late_charges ?? false,
 });
 
 const MAX_PEOPLE = 50;
@@ -120,6 +120,9 @@ function cleanContact(input, errors, partial = false) {
     if (!Number.isInteger(out.termsDays) || out.termsDays < 0 || out.termsDays > 365) errors.push('payment terms must be 0-365 days');
   }
   if (!partial || input.is1099 !== undefined) out.is1099 = input.is1099 === true;
+  // Late charges: a homeowner gets the longer November/December grace; "no late charges" is never charged.
+  if (!partial || input.isHomeowner !== undefined) out.isHomeowner = input.isHomeowner === true;
+  if (!partial || input.noLateCharges !== undefined) out.noLateCharges = input.noLateCharges === true;
   if (partial && input.isActive !== undefined) out.isActive = input.isActive !== false;
   return out;
 }
@@ -135,14 +138,15 @@ export async function createContact(pool, companyId, { kind, actor = null, ...in
   const errors = [];
   const v = cleanContact(input, errors);
   if (kind === 'customer' && v.is1099) errors.push('1099 applies to vendors only');
+  if (kind === 'vendor' && (v.isHomeowner || v.noLateCharges)) errors.push('homeowner and late charges apply to customers only');
   if (errors.length) throw new LedgerError(`${kind === 'customer' ? 'Customer' : 'Vendor'} is not valid`, errors);
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     if (await nameTaken(c, companyId, kind, v.name)) throw new LedgerError(`There is already a ${kind} named "${v.name}"`);
     const { rows: [r] } = await c.query(
-      `INSERT INTO contacts (company_id, kind, name, email, phone, address, terms_days, is_1099, group_name, people, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [companyId, kind, v.name, v.email, v.phone, v.address, v.termsDays, v.is1099, v.groupName, JSON.stringify(v.people), actor]);
+      `INSERT INTO contacts (company_id, kind, name, email, phone, address, terms_days, is_1099, group_name, people, created_by, is_homeowner, no_late_charges)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [companyId, kind, v.name, v.email, v.phone, v.address, v.termsDays, v.is1099, v.groupName, JSON.stringify(v.people), actor, v.isHomeowner, v.noLateCharges]);
     await appendAudit(c, companyId, { action: 'create', entity: kind, entityId: r.id, actor, payload: v });
     return contactOut(r);
   });
@@ -159,7 +163,9 @@ export async function updateContact(pool, companyId, contactId, { actor = null, 
     if (!old) throw new LedgerError('Contact not found');
     if (v.name && await nameTaken(c, companyId, old.kind, v.name, old.id)) throw new LedgerError(`There is already a ${old.kind} named "${v.name}"`);
     if (old.kind === 'customer' && v.is1099) throw new LedgerError('1099 applies to vendors only');
-    const cols = { name: 'name', email: 'email', phone: 'phone', address: 'address', termsDays: 'terms_days', is1099: 'is_1099', isActive: 'is_active', groupName: 'group_name', people: 'people' };
+    if (old.kind === 'vendor' && (v.isHomeowner || v.noLateCharges)) throw new LedgerError('homeowner and late charges apply to customers only');
+    const cols = { name: 'name', email: 'email', phone: 'phone', address: 'address', termsDays: 'terms_days', is1099: 'is_1099', isActive: 'is_active', groupName: 'group_name', people: 'people',
+      isHomeowner: 'is_homeowner', noLateCharges: 'no_late_charges' };
     const sets = []; const vals = [companyId, contactId];
     for (const [k, col] of Object.entries(cols)) if (v[k] !== undefined) { vals.push(k === 'people' ? JSON.stringify(v[k]) : v[k]); sets.push(`${col} = $${vals.length}`); }
     if (!sets.length) return contactOut(old);
@@ -218,7 +224,7 @@ const docOut = (d, today) => {
     memo: d.memo, project: d.project ?? null, subtotalCents: d.subtotal_cents, taxRate: d.tax_rate, taxCents: d.tax_cents, totalCents: d.total_cents,
     paidCents: paid, balanceCents: balance, status, voidDate: d.void_date, journalEntryId: d.journal_entry_id, entryNumber: d.entry_number ?? null,
     replacedById: d.replaced_by_id ?? null, attention: d.attention ?? null, careOf: d.care_of ?? null, sendTo: d.send_to ?? null, clientRef: d.client_ref ?? null,
-    jobId: d.job_id ?? null,
+    jobId: d.job_id ?? null, noLateCharges: d.no_late_charges ?? false, lateChargeMonth: d.late_charge_month ?? null,
     plan: plan ? { count: plan.count, firstDue: plan.firstDue, schedule: plan.schedule, pastDueCents: plan.pastDueCents, next: plan.next } : null,
   };
 };
@@ -340,7 +346,7 @@ async function billableSources(c, companyId, rawLines) {
 }
 
 /** Create and post an invoice (kind 'invoice') or a bill (kind 'bill'). */
-export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
+export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan, noLateCharges, lateChargeMonth = null, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
   const side = SIDE[kind];
   if (!side) throw new LedgerError('kind must be invoice or bill');
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
@@ -385,6 +391,7 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     }
     const planIn = cleanPlan(plan, date, errors);
     if (planIn && kind !== 'invoice') errors.push('payment plans are for invoices');
+    if (noLateCharges === true && kind !== 'invoice') errors.push('late charges apply to invoices only');
     let num = text(number, 40);
     if (kind === 'bill' && num == null) errors.push("enter the vendor's bill or invoice number");
     if (errors.length) throw new LedgerError(`${side.label} is not valid`, errors);
@@ -433,10 +440,10 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     const je = await insertEntry(c, companyId, entry, { source: kind, sourceRef: docId, actor });
     await c.query(
       `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, project, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by,
-                              attention, send_to, client_ref, job_id, care_of, plan_count, plan_first_due)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+                              attention, send_to, client_ref, job_id, care_of, plan_count, plan_first_due, no_late_charges, late_charge_month)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
       [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor, attn, sendToText, ref, job?.id ?? null, careOfText,
-        planIn?.count ?? null, planIn?.firstDue ?? null]);
+        planIn?.count ?? null, planIn?.firstDue ?? null, kind === 'invoice' && noLateCharges === true, lateChargeMonth]);
     for (const l of clean) {
       await c.query(
         `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable, service_date, item_id,
@@ -446,7 +453,7 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
           l.jobId, l.billable, l.timeEntryId, l.billedLineId, l.tripCostId]);
     }
     await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: kind, entityId: docId, actor,
-      payload: { ...(replacesId ? { replacesId } : {}), number: num, ...(typedNumber ? { typedNumber } : {}), contactId: contact.id, date, dueDate: due, ...(planIn ? { plan: planIn } : {}), subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
+      payload: { ...(replacesId ? { replacesId } : {}), number: num, ...(typedNumber ? { typedNumber } : {}), contactId: contact.id, date, dueDate: due, ...(planIn ? { plan: planIn } : {}), ...(noLateCharges === true ? { noLateCharges: true } : {}), ...(lateChargeMonth ? { lateChargeMonth } : {}), subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
     const saved = await getDocument(c, companyId, docId);
     return typedNumber ? { ...saved, numberWasTaken: typedNumber } : saved;
   });
@@ -525,13 +532,13 @@ export async function voidDocument(pool, companyId, docId, { date = null, actor 
  * reference, project block, attention and send-to. Allowed even when it's paid, because none of these reach the
  * ledger (the due date moves it in the aging report). Fields left out stay as they are. Audited from/to.
  */
-export async function updateDocumentDetails(pool, companyId, docId, { memo, dueDate, clientRef, project, attention, careOf, sendTo, plan, actor = null } = {}) {
+export async function updateDocumentDetails(pool, companyId, docId, { memo, dueDate, clientRef, project, attention, careOf, sendTo, plan, noLateCharges, actor = null } = {}) {
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
     const { rows: [d] } = await c.query(
       `SELECT id, kind, number, status, replaced_by_id, to_char(doc_date, 'YYYY-MM-DD') AS doc_date, to_char(due_date, 'YYYY-MM-DD') AS due_date,
-              memo, client_ref, project, attention, care_of, send_to, plan_count, to_char(plan_first_due, 'YYYY-MM-DD') AS plan_first_due
+              memo, client_ref, project, attention, care_of, send_to, plan_count, to_char(plan_first_due, 'YYYY-MM-DD') AS plan_first_due, no_late_charges
          FROM documents WHERE company_id = $1 AND id = $2 FOR UPDATE`, [companyId, docId]);
     if (!d) throw new LedgerError('Invoice or bill not found');
     const label = `${SIDE[d.kind].label} ${d.number}`;
@@ -562,6 +569,10 @@ export async function updateDocumentDetails(pool, companyId, docId, { memo, dueD
       change.plan_first_due = p?.firstDue ?? null;
       if (p) change.due_date = addMonths(p.firstDue, p.count - 1);
     }
+    if (noLateCharges !== undefined) {
+      if (d.kind !== 'invoice') errors.push('late charges apply to invoices only');
+      change.no_late_charges = noLateCharges === true;
+    }
     if (errors.length) throw new LedgerError(`${label} is not valid`, errors);
     const cols = Object.keys(change).filter((k) => (change[k] ?? null) !== (d[k] ?? null));
     if (cols.length) {
@@ -588,12 +599,14 @@ export async function replaceDocument(pool, companyId, docId, { idempotencyKey =
       if (prior) return { ...(await getDocument(c, companyId, prior.id)), replayed: true };
     }
     if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
-    const { rows: [old] } = await c.query('SELECT kind, number FROM documents WHERE company_id = $1 AND id = $2', [companyId, docId]);
+    const { rows: [old] } = await c.query('SELECT kind, number, no_late_charges, late_charge_month FROM documents WHERE company_id = $1 AND id = $2', [companyId, docId]);
     if (!old) throw new LedgerError('Invoice or bill not found');
     const { rows: [{ id: newId }] } = await c.query('SELECT gen_random_uuid() AS id');
     await voidDocument(c, companyId, docId, { actor, replacedById: newId });
     const number = input.number == null || String(input.number).trim() === '' ? old.number : input.number;
-    return createDocument(c, companyId, { ...input, kind: old.kind, number, idempotencyKey, actor, documentId: newId, replacesId: docId });
+    // The corrected copy of a late-charge invoice is still one (never charged itself, and counts for its month).
+    return createDocument(c, companyId, { ...input, kind: old.kind, number, noLateCharges: input.noLateCharges ?? old.no_late_charges,
+      lateChargeMonth: old.late_charge_month, idempotencyKey, actor, documentId: newId, replacesId: docId });
   });
 }
 

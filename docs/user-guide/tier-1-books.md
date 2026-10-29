@@ -176,6 +176,24 @@ monthly, the last on 6/1/2027.
   **Statement** shows a page to print or save as PDF for the customer: the payments received and applied, what has been
   paid so far, the balance remaining and the schedule.
 
+### Late charges (interest and a late-statement fee)
+
+Off until the owner turns them on in **Settings → Late charges**: the **yearly rate** (APR, for example 6%), the
+**late-statement fee** (for example $35.00), the **grace period** (30 days past the due date) and the longer grace for
+**homeowners** on invoices due in November or December (60 days). Your contract with the customer must allow the rate.
+
+Once a month, open **Sales → Late charges**, pick the date and look at the list before posting anything. For each
+customer it shows the invoices past their grace period, what is past due, one month of interest and the fee. Example:
+$1,200.00 past due at 6% a year is $1,200.00 × 6% ÷ 12 = $6.00 interest, plus the $35.00 fee, for $41.00.
+**Post** makes one ordinary invoice for each customer, dated that day, which you print or email like any other.
+
+- Never charged: invoices on a **payment plan**, customers marked **Never charge this customer late charges** (on the
+  customer's form), and invoices marked **No late charges** (on the invoice, or later with **Change details**).
+- Mark a customer **Homeowner** on their form to give them the longer November/December grace.
+- No interest on interest: a late-charge invoice is never charged itself. A customer is charged once a month at most;
+  voiding that month's late-charge invoice lets you run it again.
+- The charges go to the income account **Late Charges & Finance Charges** (4910), added the first time you post.
+
 ### Old invoices from before zAccountant
 
 Invoices you sent before you started here that are still unpaid can be brought in, so their payments can be applied
@@ -411,7 +429,7 @@ report ties out" when its own check passes. If you ever see ⚠, please send a �
   approves timesheets but doesn't record transactions.
 - **Departments:** group people (Accounting, Engineering, Field). A department's approver approves its timesheets.
   **rename** changes its name (its members stay); **delete** only when nobody is in it.
-- **Invoice letterhead and logo**, **Invoice rates and items:** see section 4.
+- **Invoice letterhead and logo**, **Late charges**, **Invoice rates and items:** see section 4.
 - **Back up your books:** while zAccountant is in alpha testing, keep your own copy.
   - **Download the book file** (owner only) gives one `.zacc` file with everything: transactions, invoices and bills
     line by line, customers, vendors, employees (without Social Security numbers), timesheets, trips, receipt and

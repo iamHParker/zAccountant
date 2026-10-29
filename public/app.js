@@ -113,9 +113,9 @@ const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } 
 // The accounts last used for costs that came in from the Road page.
 const lastRoadAccounts = () => { try { return JSON.parse(localStorage.getItem('zacc.roadAccounts') ?? '{}') ?? {}; } catch { return {}; } };
 const keepRoadAccounts = (v) => { try { localStorage.setItem('zacc.roadAccounts', JSON.stringify(v)); } catch { /* not kept */ } };
-const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', planCount: '', planFirstDue: '', memo: '', project: '', jobId: '', attention: '', careOf: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
+const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', planCount: '', planFirstDue: '', noLateCharges: false, memo: '', project: '', jobId: '', attention: '', careOf: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
-const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, groupName: '', people: [] });
+const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, isHomeowner: false, noLateCharges: false, groupName: '', people: [] });
 const blankPerson = () => ({ name: '', email: '', phone: '' });
 const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', open: [], amounts: {}, photos: [], keptPhotos: 0, photoBusy: false, key: newKey() });
 // Check photos: shrunk in the browser to 2000 pixels on the longer side (enough to read a check), JPEG.
@@ -311,7 +311,7 @@ createApp({
       dep: { agency: null, form: '', date: today(), paidFrom: '', reference: '', key: newKey() },
       employees: [], showNewEmp: false, newEmp: blankEmployee(),
       pc: { employee: null, payDate: today(), hours: '', overtimeHours: '', k401: '', paidFrom: '', result: null },
-      items: [], inv: { item: blankItem(), editId: null, popupLine: null, letterhead: { address: '', note: '', footer: '' }, logoBusy: false, logoOver: false },
+      items: [], inv: { item: blankItem(), editId: null, popupLine: null, letterhead: { address: '', note: '', footer: '' }, late: { apr: '', fee: '', graceDays: 30, holidayGraceDays: 60 }, logoBusy: false, logoOver: false },
       lockDate: '', suiRate: '', famliCount: null, audit: null, futaCr: {},
       imp: { show: false, kind: 'journal', asOf: '', file: null, preview: null, problems: null, busy: false, history: [] },
       importKinds: [
@@ -321,7 +321,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
-        pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
@@ -391,12 +391,12 @@ createApp({
       if (t === 'journal') { this.loadEntries(); this.loadRecurring(); }
       if ((t === 'payroll' || t === 'settings') && this.has('payroll') && (this.can('view_books') || this.can('payroll'))) this.loadEmployees();
       if (t === 'payroll' && this.can('payroll')) this.loadMembers();
-      if (t === 'settings') { this.editProfile(); this.mine = { name: this.auth.user?.name ?? '', current: '', next: '', code: '' }; if (this.passkeys.supported) this.loadPasskeys(); this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) this.loadItems(true); this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
+      if (t === 'settings') { this.editProfile(); this.mine = { name: this.auth.user?.name ?? '', current: '', next: '', code: '' }; if (this.passkeys.supported) this.loadPasskeys(); this.editFutaCr(); this.editLetterhead(); if (this.can('admin')) { this.loadItems(true); this.loadLateSettings(); } this.loadAccess(); if (this.can('view_books') || this.can('admin')) this.loadMembers(); if (this.can('view_books')) this.loadBooksCheck(); }
       if (t === 'home') this.loadDash();
       if (t === 'setup') this.loadSetup();
       if (t === 'bank') this.loadBank();
       if (t === 'trips') this.loadTrips();
-      if (t === 'bills' && this.ar.panel === 'plans') this.ar.panel = 'docs'; // payment plans are for invoices
+      if (t === 'bills' && ['plans', 'late'].includes(this.ar.panel)) this.ar.panel = 'docs'; // payment plans and late charges are for invoices
       if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [], planStatement: null }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
       if (t === 'accounts') this.loadImports();
       if (t === 'time') this.loadTime(true);
@@ -1371,6 +1371,7 @@ createApp({
       if (ar.panel === 'docs') ar.docs = (await this.run(() => api('GET', `${base}/${S.docPath}?status=${ar.view}`))) ?? [];
       if (ar.panel === 'plans') ar.plans = ((await this.run(() => api('GET', `${base}/${S.docPath}?status=open`))) ?? []).filter((d) => d.plan)
         .sort((a, b) => (a.plan.next?.dueDate ?? '').localeCompare(b.plan.next?.dueDate ?? ''));
+      if (ar.panel === 'late') ar.late = await this.run(() => api('GET', `${base}/late-charges/preview?asOf=${ar.lateAsOf}`));
       if (ar.panel === 'payments') ar.payments = (await this.run(() => api('GET', `${base}/${S.payPath}`))) ?? [];
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
       if (S.kind === 'invoice') ar.roadChecks = ((await this.run(() => api('GET', `${base}/road-items`))) ?? []).filter((i) => i.kind === 'check');
@@ -1396,6 +1397,14 @@ createApp({
       if (await this.run(() => api('POST', `${this.arBase()}/road-items/${i.id}/dismiss`), 'Dismissed.')) this.loadAr();
     },
     arPanel(p) { this.ar.panel = p; this.ar.detail = null; this.ar.photoView = null; this.ar.planStatement = null; this.loadAr(); },
+    // ---- Late charges (Sales → Late charges): what a run as of a date would charge, then post it.
+    async postLateCharges() {
+      const l = this.ar.late;
+      if (!l?.count) return;
+      if (!confirm(`Post ${l.count} late-charge invoice${l.count === 1 ? '' : 's'} for ${this.money(l.totalCents)}, dated ${this.usDate(l.asOf)}?`)) return;
+      const r = await this.run(() => api('POST', `${this.arBase()}/late-charges`, { asOf: l.asOf }));
+      if (r) { this.flash(`Posted ${r.invoices.length} late-charge invoice${r.invoices.length === 1 ? '' : 's'} (${r.invoices.map((x) => x.number).join(', ')}).`); this.loadAr(); }
+    },
     // ---- Payment plans (Sales → Payment plans, and the Home card): each plan, its next payment, a statement.
     async openPlans() { this.arPanel('plans'); },
     async planStatementFor(d) { this.ar.planStatement = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
@@ -1841,13 +1850,14 @@ createApp({
     // Edit a customer or vendor: the same form, filled in; saving sends only the form's fields (PATCH).
     editContact(c) {
       this.ar.contact = { id: c.id, name: c.name, email: c.email ?? '', phone: c.phone ?? '', address: c.address ?? '', termsDays: c.termsDays, is1099: !!c.is1099,
-        groupName: c.groupName ?? '', people: (c.people ?? []).map((p) => ({ name: p.name, email: p.email ?? '', phone: p.phone ?? '' })) };
+        isHomeowner: !!c.isHomeowner, noLateCharges: !!c.noLateCharges, groupName: c.groupName ?? '', people: (c.people ?? []).map((p) => ({ name: p.name, email: p.email ?? '', phone: p.phone ?? '' })) };
       this.ar.showContact = true; this.ar.contactPopup = false;
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     async saveContact() {
       const { id, ...fields } = this.ar.contact;
       if (this.S.kind !== 'bill') delete fields.is1099;
+      else { delete fields.isHomeowner; delete fields.noLateCharges; }
       const r = id
         ? await this.run(() => api('PATCH', `${this.arBase()}/contacts/${id}`, fields), `${this.S.Who} updated.`)
         : await this.run(() => api('POST', `${this.arBase()}/${this.S.contacts}`, fields), `${this.S.Who} added.`);
@@ -1963,6 +1973,15 @@ createApp({
       const r = await this.run(() => api('PUT', `/companies/${this.companyId}/letterhead`, this.inv.letterhead), 'Letterhead saved.');
       if (r) { this.company = { ...this.company, invoice_address: r.address, invoice_note: r.note, invoice_footer: r.footer }; this.editLetterhead(); }
     },
+    async loadLateSettings() {
+      const r = await this.run(() => api('GET', `/companies/${this.companyId}/late-charges/settings`));
+      if (r) this.inv.late = { apr: r.apr ?? '', fee: r.feeCents ? (r.feeCents / 100).toFixed(2) : '', graceDays: r.graceDays, holidayGraceDays: r.holidayGraceDays };
+    },
+    async saveLateSettings() {
+      const r = await this.run(() => api('PUT', `/companies/${this.companyId}/late-charges/settings`, this.inv.late),
+        'Late-charge settings saved.');
+      if (r) this.loadLateSettings();
+    },
     logoUrl() { return this.company?.logoVersion ? `/api/companies/${this.companyId}/logo?v=${this.company.logoVersion}` : null; },
     chooseLogo(e) { const file = e.target.files?.[0]; e.target.value = ''; return this.saveLogo(file); },
     dropLogo(e) { this.inv.logoOver = false; return this.saveLogo(e.dataTransfer?.files?.[0]); },
@@ -1985,7 +2004,7 @@ createApp({
       const invoice = this.S.kind === 'invoice';
       const dollars = (c) => (c / 100).toFixed(2);
       this.ar.doc = { ...blankDoc(doc.taxRate ?? ''), editId: doc.id, editNumber: doc.number, contactId: doc.contactId, number: doc.number,
-        date: doc.date, dueDate: doc.plan ? '' : doc.dueDate ?? '', planCount: doc.plan ? String(doc.plan.count) : '', planFirstDue: doc.plan?.firstDue ?? '', memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
+        date: doc.date, dueDate: doc.plan ? '' : doc.dueDate ?? '', planCount: doc.plan ? String(doc.plan.count) : '', planFirstDue: doc.plan?.firstDue ?? '', noLateCharges: !!doc.noLateCharges, memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
         attention: doc.attention ?? '', careOf: doc.careOf ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
           description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true,
@@ -2008,7 +2027,7 @@ createApp({
         project: this.S.kind === 'invoice' ? d.project : undefined, jobId: this.S.kind === 'invoice' ? d.jobId || undefined : undefined,
         taxRate: d.taxRate || undefined, lines };
       if (this.S.kind === 'invoice') Object.assign(body, { attention: d.attention, careOf: d.careOf, sendTo: d.sendTo, clientRef: d.clientRef,
-        plan: String(d.planCount || '').trim() ? { count: d.planCount, firstDue: d.planFirstDue } : undefined });
+        plan: String(d.planCount || '').trim() ? { count: d.planCount, firstDue: d.planFirstDue } : undefined, noLateCharges: !!d.noLateCharges });
       const newPerson = this.S.kind === 'invoice' && d.savePerson && this.docPersonIsNew()
         ? { name: d.attention.trim(), email: d.sendTo.trim(), phone: '' } : null;
       const customer = this.ar.contacts.find((c) => c.id === d.contactId);
@@ -2039,12 +2058,14 @@ createApp({
     openEmail(doc) { window.location.href = this.emailLink(doc); },
     async openDoc(d) { this.ar.details = null; this.ar.detail = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
     startDetails(d) {
-      this.ar.details = { memo: d.memo ?? '', dueDate: d.dueDate, clientRef: d.clientRef ?? '', planCount: d.plan ? String(d.plan.count) : '', planFirstDue: d.plan?.firstDue ?? '' };
+      this.ar.details = { memo: d.memo ?? '', dueDate: d.dueDate, clientRef: d.clientRef ?? '', planCount: d.plan ? String(d.plan.count) : '', planFirstDue: d.plan?.firstDue ?? '',
+        noLateCharges: !!d.noLateCharges };
     },
     async saveDetails() {
       const d = this.ar.detail;
       const { planCount, planFirstDue, ...body } = this.ar.details;
       if (this.S.kind === 'invoice') body.plan = String(planCount || '').trim() ? { count: planCount, firstDue: planFirstDue } : null;
+      else delete body.noLateCharges;
       if (body.plan) delete body.dueDate; // a plan sets the due date to its last payment
       const r = await this.run(() => api('PATCH', `/companies/${this.companyId}/documents/${d.id}`, body), 'Details changed. The amounts stay as they were.');
       if (r) { this.ar.detail = { ...d, ...r }; this.ar.details = null; this.loadAr(); }
