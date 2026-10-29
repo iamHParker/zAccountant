@@ -12,6 +12,7 @@
 // the old record is voided and marked replaced_by_id, and the corrected copy is posted; an invoice keeps its number.
 import { withTransaction } from '../db/pool.js';
 import { LedgerError, isIsoDate, validateEntry, MAX_LINE_CENTS } from '../core/ledger.js';
+import { cleanPlan, planStatus, addMonths } from '../core/paymentPlan.js';
 import { toCents, divRoundHalfUp, applyRate, percentToPpm } from '../core/money.js';
 import { insertEntry, reverseEntry, cleanIdempotencyKey } from './ledgerService.js';
 import { appendAudit } from './audit.js';
@@ -172,19 +173,26 @@ export async function updateContact(pool, companyId, contactId, { actor = null, 
 export async function listContacts(db, companyId, { kind, asOf, includeInactive = false }) {
   if (!['customer', 'vendor'].includes(kind)) throw new LedgerError('kind must be customer or vendor');
   const { rows } = await db.query(
-    `SELECT c.*, COALESCE(sum(b.balance), 0)::bigint AS open_cents,
-            COALESCE(sum(b.balance) FILTER (WHERE b.due_date < $3), 0)::bigint AS overdue_cents
-       FROM contacts c
-       LEFT JOIN (${OPEN_BALANCES}) b ON b.contact_id = c.id
-      WHERE c.company_id = $1 AND c.kind = $2 AND (c.is_active OR $4)
-      GROUP BY c.id ORDER BY lower(c.name)`,
-    [companyId, kind, asOf, includeInactive]);
-  return rows.map(contactOut);
+    `SELECT c.* FROM contacts c WHERE c.company_id = $1 AND c.kind = $2 AND (c.is_active OR $3) ORDER BY lower(c.name)`,
+    [companyId, kind, includeInactive]);
+  // What each owes, and how much of it is past due (on a payment plan, only the plan payments past their date).
+  const { rows: open } = await db.query(`${OPEN_BALANCES} AND d.kind = $2`, [companyId, kind === 'customer' ? 'invoice' : 'bill']);
+  const sums = new Map();
+  for (const b of open) {
+    if (b.balance === 0) continue;
+    const late = b.plan_count
+      ? planStatus(b.total_cents, b.plan_count, b.plan_first_due, b.total_cents - b.balance, asOf).pastDueCents
+      : (asOf && b.due_date < asOf ? b.balance : 0);
+    const t = sums.get(b.contact_id) ?? { open: 0, overdue: 0 };
+    t.open += b.balance; t.overdue += late;
+    sums.set(b.contact_id, t);
+  }
+  return rows.map((r) => contactOut({ ...r, open_cents: sums.get(r.id)?.open ?? 0, overdue_cents: sums.get(r.id)?.overdue ?? 0 }));
 }
 
 // Open balance of every posted document right now ($1 = company).
 const OPEN_BALANCES = `
-  SELECT d.id, d.contact_id, d.due_date, d.total_cents - COALESCE((
+  SELECT d.id, d.contact_id, d.due_date, d.total_cents, d.plan_count, d.plan_first_due, d.total_cents - COALESCE((
            SELECT sum(a.amount_cents) FROM payment_applications a JOIN payments p ON p.id = a.payment_id
             WHERE a.document_id = d.id AND p.status = 'posted'), 0)::bigint AS balance
     FROM documents d WHERE d.company_id = $1 AND d.status = 'posted'`;
@@ -201,13 +209,17 @@ async function getContact(c, companyId, contactId, kind) {
 const docOut = (d, today) => {
   const paid = d.paid_cents ?? 0;
   const balance = d.status === 'void' ? 0 : d.total_cents - paid;
-  const status = d.status === 'void' ? 'void' : balance === 0 ? 'paid' : (today && d.due_date < today ? 'overdue' : (paid > 0 ? 'partial' : 'open'));
+  // On a payment plan, only the plan payments past their own due date make the invoice overdue.
+  const plan = d.plan_count ? planStatus(d.total_cents, d.plan_count, d.plan_first_due, d.status === 'void' ? 0 : paid, today) : null;
+  const late = plan ? plan.pastDueCents > 0 : Boolean(today && d.due_date < today);
+  const status = d.status === 'void' ? 'void' : balance === 0 ? 'paid' : (late ? 'overdue' : (paid > 0 ? 'partial' : 'open'));
   return {
     id: d.id, kind: d.kind, contactId: d.contact_id, contactName: d.contact_name, number: d.number, date: d.doc_date, dueDate: d.due_date,
     memo: d.memo, project: d.project ?? null, subtotalCents: d.subtotal_cents, taxRate: d.tax_rate, taxCents: d.tax_cents, totalCents: d.total_cents,
     paidCents: paid, balanceCents: balance, status, voidDate: d.void_date, journalEntryId: d.journal_entry_id, entryNumber: d.entry_number ?? null,
     replacedById: d.replaced_by_id ?? null, attention: d.attention ?? null, careOf: d.care_of ?? null, sendTo: d.send_to ?? null, clientRef: d.client_ref ?? null,
     jobId: d.job_id ?? null,
+    plan: plan ? { count: plan.count, firstDue: plan.firstDue, schedule: plan.schedule, pastDueCents: plan.pastDueCents, next: plan.next } : null,
   };
 };
 
@@ -328,7 +340,7 @@ async function billableSources(c, companyId, rawLines) {
 }
 
 /** Create and post an invoice (kind 'invoice') or a bill (kind 'bill'). */
-export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
+export async function createDocument(pool, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan, idempotencyKey = null, actor = null, documentId = null, replacesId = null }) {
   const side = SIDE[kind];
   if (!side) throw new LedgerError('kind must be invoice or bill');
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
@@ -371,6 +383,8 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
         if (ppm > 200_000) errors.push('sales tax rate must be 20% or less');
       }
     }
+    const planIn = cleanPlan(plan, date, errors);
+    if (planIn && kind !== 'invoice') errors.push('payment plans are for invoices');
     let num = text(number, 40);
     if (kind === 'bill' && num == null) errors.push("enter the vendor's bill or invoice number");
     if (errors.length) throw new LedgerError(`${side.label} is not valid`, errors);
@@ -397,7 +411,8 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
       if (dup.rows.length) throw new LedgerError(`Bill ${num} from ${contact.name} is already entered`);
     }
     if (auto) await c.query('UPDATE companies SET next_invoice_number = next_invoice_number + 1 WHERE id = $1', [companyId]);
-    const due = dueDate || addDays(date, contact.terms_days);
+    // On a payment plan the invoice is due in full on the last plan payment's date.
+    const due = planIn ? addMonths(planIn.firstDue, planIn.count - 1) : dueDate || addDays(date, contact.terms_days);
 
     const control = await systemAccount(c, companyId, side.control, `This company has no ${kind === 'invoice' ? 'Accounts Receivable' : 'Accounts Payable'} account`);
     const label = `${side.label} ${num} · ${contact.name}`;
@@ -418,9 +433,10 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     const je = await insertEntry(c, companyId, entry, { source: kind, sourceRef: docId, actor });
     await c.query(
       `INSERT INTO documents (id, company_id, kind, contact_id, number, doc_date, due_date, memo, project, subtotal_cents, tax_rate, tax_cents, total_cents, journal_entry_id, idempotency_key, created_by,
-                              attention, send_to, client_ref, job_id, care_of)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
-      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor, attn, sendToText, ref, job?.id ?? null, careOfText]);
+                              attention, send_to, client_ref, job_id, care_of, plan_count, plan_first_due)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
+      [docId, companyId, kind, contact.id, num, date, due, cleanMemoText, projectText, subtotal, rate, tax, total, je.id, idempotencyKey, actor, attn, sendToText, ref, job?.id ?? null, careOfText,
+        planIn?.count ?? null, planIn?.firstDue ?? null]);
     for (const l of clean) {
       await c.query(
         `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable, service_date, item_id,
@@ -430,7 +446,7 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
           l.jobId, l.billable, l.timeEntryId, l.billedLineId, l.tripCostId]);
     }
     await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: kind, entityId: docId, actor,
-      payload: { ...(replacesId ? { replacesId } : {}), number: num, ...(typedNumber ? { typedNumber } : {}), contactId: contact.id, date, dueDate: due, subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
+      payload: { ...(replacesId ? { replacesId } : {}), number: num, ...(typedNumber ? { typedNumber } : {}), contactId: contact.id, date, dueDate: due, ...(planIn ? { plan: planIn } : {}), subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
     const saved = await getDocument(c, companyId, docId);
     return typedNumber ? { ...saved, numberWasTaken: typedNumber } : saved;
   });
@@ -509,13 +525,14 @@ export async function voidDocument(pool, companyId, docId, { date = null, actor 
  * reference, project block, attention and send-to. Allowed even when it's paid, because none of these reach the
  * ledger (the due date moves it in the aging report). Fields left out stay as they are. Audited from/to.
  */
-export async function updateDocumentDetails(pool, companyId, docId, { memo, dueDate, clientRef, project, attention, careOf, sendTo, actor = null } = {}) {
+export async function updateDocumentDetails(pool, companyId, docId, { memo, dueDate, clientRef, project, attention, careOf, sendTo, plan, actor = null } = {}) {
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
     const { rows: [d] } = await c.query(
       `SELECT id, kind, number, status, replaced_by_id, to_char(doc_date, 'YYYY-MM-DD') AS doc_date, to_char(due_date, 'YYYY-MM-DD') AS due_date,
-              memo, client_ref, project, attention, care_of, send_to FROM documents WHERE company_id = $1 AND id = $2 FOR UPDATE`, [companyId, docId]);
+              memo, client_ref, project, attention, care_of, send_to, plan_count, to_char(plan_first_due, 'YYYY-MM-DD') AS plan_first_due
+         FROM documents WHERE company_id = $1 AND id = $2 FOR UPDATE`, [companyId, docId]);
     if (!d) throw new LedgerError('Invoice or bill not found');
     const label = `${SIDE[d.kind].label} ${d.number}`;
     if (d.status === 'void') throw new LedgerError(`${label} is void`);
@@ -536,6 +553,14 @@ export async function updateDocumentDetails(pool, companyId, docId, { memo, dueD
         change.send_to = text(sendTo, 200);
         if (change.send_to && !EMAIL.test(change.send_to)) errors.push('the send-to email address is not valid');
       }
+    }
+    // A payment plan can be added, changed or removed at any time: it moves no money, only says when parts are due.
+    if (plan !== undefined) {
+      if (d.kind !== 'invoice') errors.push('payment plans are for invoices');
+      const p = cleanPlan(plan, d.doc_date, errors);
+      change.plan_count = p?.count ?? null;
+      change.plan_first_due = p?.firstDue ?? null;
+      if (p) change.due_date = addMonths(p.firstDue, p.count - 1);
     }
     if (errors.length) throw new LedgerError(`${label} is not valid`, errors);
     const cols = Object.keys(change).filter((k) => (change[k] ?? null) !== (d[k] ?? null));
@@ -747,7 +772,7 @@ export async function getAging(db, companyId, { kind, asOf }) {
   if (!side) throw new LedgerError('kind must be invoice or bill');
   if (!isIsoDate(asOf)) throw new LedgerError('date must be YYYY-MM-DD');
   const { rows: docs } = await db.query(
-    `SELECT d.id, d.number, d.doc_date, d.due_date, d.total_cents, d.contact_id, ct.name AS contact_name, ct.group_name,
+    `SELECT d.id, d.number, d.doc_date, d.due_date, d.total_cents, d.plan_count, d.plan_first_due, d.contact_id, ct.name AS contact_name, ct.group_name,
             d.total_cents - COALESCE((SELECT sum(a.amount_cents) FROM payment_applications a JOIN payments p ON p.id = a.payment_id
                                        WHERE a.document_id = d.id AND p.pay_date <= $3 AND (p.status = 'posted' OR p.void_date > $3)), 0)::bigint AS balance
        FROM documents d JOIN contacts ct ON ct.id = d.contact_id
@@ -757,13 +782,22 @@ export async function getAging(db, companyId, { kind, asOf }) {
   const totals = Object.fromEntries(AGING_BUCKETS.map((b) => [b.id, 0]));
   for (const d of docs) {
     if (d.balance === 0) continue;
-    const bucket = bucketFor(daysBetween(d.due_date, asOf));
+    // On a payment plan each unpaid plan payment ages from its own due date; the invoice is listed under its oldest.
+    const pieces = d.plan_count
+      ? planStatus(d.total_cents, d.plan_count, d.plan_first_due, d.total_cents - d.balance, asOf).pieces
+      : [{ dueDate: d.due_date, balanceCents: d.balance }];
     let row = byContact.get(d.contact_id);
     if (!row) byContact.set(d.contact_id, row = { contactId: d.contact_id, name: d.contact_name, groupName: d.group_name ?? null, totalCents: 0, documents: [], ...Object.fromEntries(AGING_BUCKETS.map((b) => [b.id, 0])) });
-    row[bucket] += d.balance;
+    for (const p of pieces) {
+      const b = bucketFor(daysBetween(p.dueDate, asOf));
+      row[b] += p.balanceCents;
+      totals[b] += p.balanceCents;
+    }
     row.totalCents += d.balance;
-    totals[bucket] += d.balance;
-    row.documents.push({ id: d.id, number: d.number, date: d.doc_date, dueDate: d.due_date, totalCents: d.total_cents, balanceCents: d.balance, daysPastDue: Math.max(0, daysBetween(d.due_date, asOf)), bucket });
+    const dueDate = pieces[0].dueDate;
+    row.documents.push({ id: d.id, number: d.number, date: d.doc_date, dueDate, totalCents: d.total_cents, balanceCents: d.balance,
+      daysPastDue: Math.max(0, daysBetween(dueDate, asOf)), bucket: bucketFor(daysBetween(dueDate, asOf)), planCount: d.plan_count ?? null,
+      byBucket: d.plan_count ? Object.fromEntries(AGING_BUCKETS.map((b) => [b.id, pieces.filter((p) => bucketFor(daysBetween(p.dueDate, asOf)) === b.id).reduce((t, p) => t + p.balanceCents, 0)])) : null });
   }
   const rows = [...byContact.values()].sort((a, b) => a.name.localeCompare(b.name));
   for (const r of rows) r.documents.sort((a, b) => a.dueDate.localeCompare(b.dueDate));

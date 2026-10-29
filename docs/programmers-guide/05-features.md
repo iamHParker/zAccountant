@@ -63,6 +63,13 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   `send_to`, `client_ref` (claim/job number), `care_of` (an attorney's client: Bill To reads "client c/o contact"; migration 032), set at save like every document field. A typed invoice number already in
   use becomes the next lettered one (`nextLetteredNumber`: 2601 → 2601A … Z, AA …), returned as `numberWasTaken`; an
   automatic number never gets a letter. The ✉ Email button is a `mailto:` link built in the browser.
+- Payment plans (migration 036, `src/core/paymentPlan.js`, Homer 2026-10-29): `documents.plan_count` (2-60) and
+  `plan_first_due` on an invoice. `planSchedule` splits the total evenly (odd cents one each to the first payments),
+  monthly from the first due date (31st → month end); `planStatus` applies what was paid earliest-first and gives
+  `pastDueCents`, `next` and the unpaid `pieces`. `docOut.status` is overdue only when a plan payment is past its date;
+  `listContacts` overdue and `getAging` (each piece in its own bucket; CSV row spreads with `byBucket`) follow. A plan
+  sets `due_date` to the last payment. It can be added, changed or removed with PATCH (`updateDocumentDetails`): it
+  moves no money. No interest or late fees exist anywhere yet.
 - Payment photos (migration 021, `src/services/paymentPhotoService.js`): `payment_photos` (bytea ≤ 3 MB, JPEG/PNG, or a
   PDF since migration 035 such as the bank's deposit confirmation, sent unshrunk as `data:application/pdf`, checked for `%PDF-`;
   6 per payment), routes `…/payments/:id/photos[/:photoId]` (add/remove: the side's permission; view: view_books or the

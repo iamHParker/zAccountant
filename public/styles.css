@@ -224,6 +224,10 @@ ul.checklist li.done { color: var(--muted); }
 /* Payment photos (the check and the remittance). The file box is hidden; its label is the button. */
 input.hidden-file { display: none; }
 .photo-box { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0 12px; }
+.plan-box { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0 12px; }
+input.w80 { width: 80px; }
+.plan-schedule { margin-top: 12px; break-inside: avoid; }
+.plan-schedule table { max-width: 520px; }
 .thumb { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; margin: 6px 8px 0 0; }
 .thumb img { width: 120px; height: 90px; object-fit: cover; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .thumb.big img { width: 260px; height: 190px; object-fit: contain; }

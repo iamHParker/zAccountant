@@ -578,8 +578,8 @@ export function createApp(pool, { log } = {}) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
       arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
-      const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef } = req.body ?? {};
-      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
+      const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan } = req.body ?? {};
+      return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan, idempotencyKey: idemKey(req), actor });
     }, 201));
   }
   api.get('/companies/:companyId/documents/:documentId', route(['view_books', 'invoices', 'bills'], async ({ db, req, companyId, can }) => {
@@ -591,14 +591,14 @@ export function createApp(pool, { log } = {}) {
   // Edit = void + corrected copy in one step, so it needs the same permission as Void.
   api.put('/companies/:companyId/documents/:documentId', route('post', async ({ db, req, companyId, can, actor }) => {
     await needSide(db, can, 'documents', req.params.documentId);
-    const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef } = req.body ?? {};
-    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, idempotencyKey: idemKey(req), actor });
+    const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan } = req.body ?? {};
+    return arap.replaceDocument(db, companyId, req.params.documentId, { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan, idempotencyKey: idemKey(req), actor });
   }));
-  // Details that never reach the ledger (memo, due date, PO, project block, attention, send-to): changed in place, even when paid.
+  // Details that never reach the ledger (memo, due date, PO, project block, attention, send-to, payment plan): changed in place, even when paid.
   api.patch('/companies/:companyId/documents/:documentId', route(['invoices', 'bills'], async ({ db, req, companyId, can, actor }) => {
     if (/^[0-9a-f-]{36}$/i.test(req.params.documentId)) await needSide(db, can, 'documents', req.params.documentId);
-    const { memo, dueDate, clientRef, project, attention, careOf, sendTo } = req.body ?? {};
-    return arap.updateDocumentDetails(db, companyId, req.params.documentId, { memo, dueDate, clientRef, project, attention, careOf, sendTo, actor });
+    const { memo, dueDate, clientRef, project, attention, careOf, sendTo, plan } = req.body ?? {};
+    return arap.updateDocumentDetails(db, companyId, req.params.documentId, { memo, dueDate, clientRef, project, attention, careOf, sendTo, plan, actor });
   }));
   // Billable time and costs not yet on an invoice, for the invoice form's "Pull in unbilled time and costs".
   api.get('/companies/:companyId/unbilled', route('invoices', ({ db, req, companyId }) =>

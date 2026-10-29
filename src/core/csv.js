@@ -83,7 +83,9 @@ export function agingRows(d, { company, title }) {
   for (const r of d.rows) {
     rows.push([r.name, '', '', '', '', ...d.buckets.map((b) => amt(r[b.id])), amt(r.totalCents)]);
     for (const doc of r.documents) {
-      rows.push(['', doc.number, doc.date, doc.dueDate, doc.daysPastDue, ...d.buckets.map((b) => (b.id === doc.bucket ? amt(doc.balanceCents) : '')), amt(doc.balanceCents)]);
+      // An invoice on a payment plan spreads across columns: each unpaid plan payment ages from its own due date.
+      const inBucket = (b) => (doc.byBucket ? (doc.byBucket[b.id] ? amt(doc.byBucket[b.id]) : '') : b.id === doc.bucket ? amt(doc.balanceCents) : '');
+      rows.push(['', doc.planCount ? `${doc.number} (plan)` : doc.number, doc.date, doc.dueDate, doc.daysPastDue, ...d.buckets.map(inBucket), amt(doc.balanceCents)]);
     }
   }
   rows.push(['Total', '', '', '', '', ...d.buckets.map((b) => amt(d.totals[b.id])), amt(d.totals.totalCents)]);

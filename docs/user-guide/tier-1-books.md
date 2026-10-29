@@ -158,6 +158,20 @@ In the print window, choose "Save as PDF" to email it.
 number, claim number and project) and a short note filled in. Attach the PDF yourself; zAccountant doesn't send email
 itself yet. On Windows, the button opens whichever program is set under Settings → Apps → Default apps → "mailto".
 
+### Payment plans (no interest)
+
+For a customer who pays an invoice in monthly parts, such as discounted community work, fill in **Payment plan** at
+the bottom of the invoice: the **number of payments** and the date the **first payment is due**. zAccountant splits the
+total evenly (a cent more on the first ones when it doesn't divide) and shows the schedule: 8 payments of $250.00,
+monthly, the last on 6/1/2027.
+
+- A customer paying on schedule is **never past due**: not on the invoice list, the customer list or the Aging report.
+  Only a payment past its own date counts as late, and the Aging report ages it from that date.
+- Payments are applied to the earliest plan payments first. The invoice view (and the printed invoice) lists the
+  schedule with what is paid and what is still due. The invoice list shows the next payment's date ("plan 3 of 8").
+- **Change details** on the invoice adds, changes or removes a plan at any time, even after payments came in. It
+  moves no money; empty the number of payments to remove it.
+
 ### Old invoices from before zAccountant
 
 Invoices you sent before you started here that are still unpaid can be brought in, so their payments can be applied

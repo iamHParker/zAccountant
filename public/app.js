@@ -113,7 +113,7 @@ const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } 
 // The accounts last used for costs that came in from the Road page.
 const lastRoadAccounts = () => { try { return JSON.parse(localStorage.getItem('zacc.roadAccounts') ?? '{}') ?? {}; } catch { return {}; } };
 const keepRoadAccounts = (v) => { try { localStorage.setItem('zacc.roadAccounts', JSON.stringify(v)); } catch { /* not kept */ } };
-const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', memo: '', project: '', jobId: '', attention: '', careOf: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
+const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', planCount: '', planFirstDue: '', memo: '', project: '', jobId: '', attention: '', careOf: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, groupName: '', people: [] });
 const blankPerson = () => ({ name: '', email: '', phone: '' });
@@ -1964,7 +1964,7 @@ createApp({
       const invoice = this.S.kind === 'invoice';
       const dollars = (c) => (c / 100).toFixed(2);
       this.ar.doc = { ...blankDoc(doc.taxRate ?? ''), editId: doc.id, editNumber: doc.number, contactId: doc.contactId, number: doc.number,
-        date: doc.date, dueDate: doc.dueDate ?? '', memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
+        date: doc.date, dueDate: doc.plan ? '' : doc.dueDate ?? '', planCount: doc.plan ? String(doc.plan.count) : '', planFirstDue: doc.plan?.firstDue ?? '', memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
         attention: doc.attention ?? '', careOf: doc.careOf ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
           description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true,
@@ -1986,7 +1986,8 @@ createApp({
       const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
         project: this.S.kind === 'invoice' ? d.project : undefined, jobId: this.S.kind === 'invoice' ? d.jobId || undefined : undefined,
         taxRate: d.taxRate || undefined, lines };
-      if (this.S.kind === 'invoice') Object.assign(body, { attention: d.attention, careOf: d.careOf, sendTo: d.sendTo, clientRef: d.clientRef });
+      if (this.S.kind === 'invoice') Object.assign(body, { attention: d.attention, careOf: d.careOf, sendTo: d.sendTo, clientRef: d.clientRef,
+        plan: String(d.planCount || '').trim() ? { count: d.planCount, firstDue: d.planFirstDue } : undefined });
       const newPerson = this.S.kind === 'invoice' && d.savePerson && this.docPersonIsNew()
         ? { name: d.attention.trim(), email: d.sendTo.trim(), phone: '' } : null;
       const customer = this.ar.contacts.find((c) => c.id === d.contactId);
@@ -2016,10 +2017,15 @@ createApp({
     },
     openEmail(doc) { window.location.href = this.emailLink(doc); },
     async openDoc(d) { this.ar.details = null; this.ar.detail = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
-    startDetails(d) { this.ar.details = { memo: d.memo ?? '', dueDate: d.dueDate, clientRef: d.clientRef ?? '' }; },
+    startDetails(d) {
+      this.ar.details = { memo: d.memo ?? '', dueDate: d.dueDate, clientRef: d.clientRef ?? '', planCount: d.plan ? String(d.plan.count) : '', planFirstDue: d.plan?.firstDue ?? '' };
+    },
     async saveDetails() {
       const d = this.ar.detail;
-      const r = await this.run(() => api('PATCH', `/companies/${this.companyId}/documents/${d.id}`, this.ar.details), 'Details changed. The amounts stay as they were.');
+      const { planCount, planFirstDue, ...body } = this.ar.details;
+      if (this.S.kind === 'invoice') body.plan = String(planCount || '').trim() ? { count: planCount, firstDue: planFirstDue } : null;
+      if (body.plan) delete body.dueDate; // a plan sets the due date to its last payment
+      const r = await this.run(() => api('PATCH', `/companies/${this.companyId}/documents/${d.id}`, body), 'Details changed. The amounts stay as they were.');
       if (r) { this.ar.detail = { ...d, ...r }; this.ar.details = null; this.loadAr(); }
     },
     async voidDoc(d) {
@@ -2119,6 +2125,16 @@ createApp({
     async voidPay(p) {
       if (!confirm(`Void this ${money(p.amountCents)} payment (for example, a bounced check)? The ${this.S.docs.toLowerCase()} it paid become open again.`)) return;
       if (await this.run(() => api('POST', `${this.arBase()}/payments/${p.id}/void`, {}), 'Payment voided.')) this.loadAr();
+    },
+    // An invoice on a payment plan shows its next payment's date instead of the date it is due in full.
+    dueShown(d) { return d.plan?.next ? `${d.plan.next.dueDate} (plan ${d.plan.next.n} of ${d.plan.count})` : d.dueDate; },
+    todayIso() { return today(); },
+    planPreview(totalCents, count, firstDue) {
+      const n = Number(String(count || '').trim());
+      if (!Number.isInteger(n) || n < 2 || n > 60 || totalCents <= 0) return '';
+      const each = Math.floor(totalCents / n);
+      const last = firstDue ? (() => { const [y, m, d] = firstDue.split('-').map(Number); const t = y * 12 + m - 1 + n - 1; return `${(t % 12) + 1}/${Math.min(d, new Date(Date.UTC(Math.floor(t / 12), (t % 12) + 1, 0)).getUTCDate())}/${Math.floor(t / 12)}`; })() : '';
+      return `${n} payments of ${this.money(each)}${totalCents - each * n ? ' (a cent more on the first ones)' : ''}, monthly${last ? `, the last on ${last}` : ''}. No interest.`;
     },
     statusLabel(s) { return { open: 'Open', partial: 'Partly paid', overdue: 'Overdue', paid: 'Paid', void: 'Void' }[s] ?? s; },
     acctName(id) { const a = this.accounts.find((x) => x.id === id); return a ? `${a.code} · ${a.name}` : ''; },
