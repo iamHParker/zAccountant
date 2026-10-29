@@ -727,6 +727,10 @@
           <label>Address <input v-model="ar.contact.address" placeholder="Street, City, State ZIP"></label>
           <label>Payment terms (days) <input type="number" min="0" max="365" v-model.number="ar.contact.termsDays"></label>
           <label class="check" v-if="S.kind === 'bill'"><input type="checkbox" v-model="ar.contact.is1099"> Gets a 1099-NEC (an individual or partnership you pay for services)</label>
+          <template v-if="S.kind === 'invoice'">
+            <label class="check"><input type="checkbox" v-model="ar.contact.isHomeowner"> Homeowner (longer grace before late charges on invoices due in November or December)</label>
+            <label class="check"><input type="checkbox" v-model="ar.contact.noLateCharges"> Never charge this customer late charges</label>
+          </template>
           <label>Part of (optional) <input v-model="ar.contact.groupName" maxlength="120" list="contact-groups" placeholder="e.g. DWH, for DWH - SATX and DWH - AUS"></label>
           <datalist id="contact-groups"><option v-for="g in contactGroups" :value="g"></option></datalist>
           <p class="muted small">Divisions with the same “Part of” name are also totaled together on the aging report.</p>
@@ -894,6 +898,8 @@
               <label>First payment due <input type="date" v-model="ar.doc.planFirstDue" :required="!!String(ar.doc.planCount || '').trim()"></label>
               <span class="muted small" v-if="planPreview(docTotals.total, ar.doc.planCount, ar.doc.planFirstDue)">{{ planPreview(docTotals.total, ar.doc.planCount, ar.doc.planFirstDue) }}</span>
             </div>
+            <label class="check"><input type="checkbox" v-model="ar.doc.noLateCharges"> No late charges on this invoice
+              <span class="muted small">(an invoice on a payment plan never gets them)</span></label>
           </div>
           <button class="primary" :disabled="docTotals.total <= 0 || !ar.doc.contactId">{{ ar.doc.editId ? 'Save changes' : 'Save ' + S.Doc.toLowerCase() }}</button>
           <button type="button" @click="ar.showDoc = false">Cancel</button>
@@ -966,6 +972,7 @@
           <template v-if="S.kind === 'invoice'">
             <label>Plan: number of payments <input v-model="ar.details.planCount" inputmode="numeric" class="w80" placeholder="none"></label>
             <label>First payment due <input type="date" v-model="ar.details.planFirstDue"></label>
+            <label class="check"><input type="checkbox" v-model="ar.details.noLateCharges"> No late charges</label>
           </template>
           <button class="primary">Save</button> <button type="button" @click="ar.details = null">Cancel</button>
           <p class="hint">This {{ S.Doc.toLowerCase() }} has payments, so its amounts stay as they are (void the payment first to change them).
@@ -1048,6 +1055,7 @@
         <button :class="{ active: ar.panel === 'contacts' }" @click="arPanel('contacts')">{{ S.Whos }}</button>
         <button :class="{ active: ar.panel === 'payments' }" @click="arPanel('payments')">Payments</button>
         <button v-if="S.kind === 'invoice'" :class="{ active: ar.panel === 'plans' }" @click="arPanel('plans')">Payment plans</button>
+        <button v-if="S.kind === 'invoice' && can('invoices')" :class="{ active: ar.panel === 'late' }" @click="arPanel('late')">Late charges</button>
         <button :class="{ active: ar.panel === 'aging' }" @click="arPanel('aging')">Aging report</button>
         <button :class="{ active: ar.panel === 'projects' }" @click="arPanel('projects')">Projects</button>
       </div>
@@ -1236,6 +1244,37 @@
               <button class="small" @click="planStatementFor(d)">Statement</button></td>
           </tr>
         </table>
+      </div>
+
+      <div class="card" v-if="ar.panel === 'late' && ar.late">
+        <h2>Late charges</h2>
+        <p class="hint" v-if="!ar.late.settings.on">Late charges are off. The owner sets the yearly rate and the late-statement fee in
+          <button class="link" @click="tab = 'settings'">Settings → Late charges</button>.</p>
+        <template v-else>
+          <p class="hint">Once a month: {{ ar.late.settings.apr ? ar.late.settings.apr + '% a year (one month of interest on what is past due)' : 'no interest' }}{{ ar.late.settings.feeCents ? ' plus a ' + money(ar.late.settings.feeCents) + ' late-statement fee' : '' }},
+            only on invoices more than {{ ar.late.settings.graceDays }} days past due ({{ ar.late.settings.holidayGraceDays }} for a homeowner's invoice due in November or December).
+            Never on payment plans, on customers or invoices marked "no late charges", or on earlier late charges.
+            Each customer charged gets one invoice; a customer is charged once a month at most.</p>
+          <form class="row wrap" @submit.prevent="loadAr">
+            <label>Charge as of <input type="date" v-model="ar.lateAsOf" required></label> <button>Show</button>
+          </form>
+          <p class="hint" v-if="!ar.late.customers.length">Nothing to charge as of {{ usDate(ar.late.asOf) }}.</p>
+          <table class="data" v-else>
+            <thead><tr><th>Customer</th><th>Past-due invoices</th><th class="num">Past due</th><th class="num">Interest</th><th class="num">Fee</th><th class="num">Charge</th></tr></thead>
+            <tr v-for="x in ar.late.customers" :key="x.contactId">
+              <td>{{ x.name }}<span v-if="x.isHomeowner" class="muted small"> · homeowner</span></td>
+              <td v-if="x.alreadyChargedOn" colspan="5" class="muted">Already charged for this month on invoice {{ x.alreadyChargedOn }}</td>
+              <template v-else>
+                <td class="small">{{ x.invoices.map(d => d.number + ' (due ' + usDate(d.dueDate) + ')').join(', ') }}</td>
+                <td class="num">{{ money(x.pastDueCents) }}</td><td class="num">{{ money(x.interestCents) }}</td><td class="num">{{ money(x.feeCents) }}</td>
+                <td class="num"><strong>{{ money(x.totalCents) }}</strong></td>
+              </template>
+            </tr>
+            <tr v-if="ar.late.count"><td colspan="5"><strong>Total for {{ ar.late.count }} customer{{ ar.late.count === 1 ? '' : 's' }}</strong></td><td class="num"><strong>{{ money(ar.late.totalCents) }}</strong></td></tr>
+          </table>
+          <p v-if="ar.late.count"><button class="primary" @click="postLateCharges">Post {{ ar.late.count }} late-charge invoice{{ ar.late.count === 1 ? '' : 's' }}</button>
+            <span class="muted small">Then open each one in Invoices to print or email it with the customer's statement.</span></p>
+        </template>
       </div>
 
       <div class="card statement print-me" v-if="ar.panel === 'plans' && ar.planStatement">
@@ -2578,6 +2617,21 @@
           </div>
           <label>Closing line <input v-model="inv.letterhead.footer" maxlength="300" placeholder="Thank you for your business"></label>
           <button class="primary">Save letterhead</button>
+        </form>
+      </div>
+
+      <div class="card" v-if="can('admin')">
+        <h2>Late charges</h2>
+        <p class="hint">Interest and a fee on past-due invoices, posted once a month from Sales → Late charges. Leave both empty to charge nothing.
+          Your contract with the customer must allow the rate you charge.</p>
+        <form @submit.prevent="saveLateSettings">
+          <div class="grid2">
+            <label>Yearly rate (APR, %) <input v-model.trim="inv.late.apr" inputmode="decimal" placeholder="none, e.g. 6"></label>
+            <label>Late-statement fee ($) <input v-model.trim="inv.late.fee" inputmode="decimal" placeholder="none, e.g. 35.00"></label>
+            <label>Grace period (days past due) <input type="number" min="0" max="365" v-model.number="inv.late.graceDays"></label>
+            <label>Homeowners, invoices due in Nov or Dec (days) <input type="number" min="0" max="365" v-model.number="inv.late.holidayGraceDays"></label>
+          </div>
+          <button class="primary">Save late charges</button>
         </form>
       </div>
 

@@ -71,7 +71,18 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   sets `due_date` to the last payment. It can be added, changed or removed with PATCH (`updateDocumentDetails`): it
   moves no money. Sales → Payment plans (`ar.panel = 'plans'`) and the Home card `plans` (`loadHomePlans`) filter open
   invoices with `plan`; Statement prints `getDocument`'s payments and schedule; `payPlan` pre-fills the next payment.
-  No interest or late fees exist anywhere yet.
+  A plan invoice never gets late charges.
+- Late charges (migration 037, `src/core/lateCharges.js` pure, `src/services/lateChargeService.js`, Homer 2026-10-29):
+  company `late_apr` (percent text, ≤ 36% typo guard), `late_fee_cents`, `late_grace_days` (30), `late_holiday_grace_days`
+  (60: a homeowner's invoice due in Nov/Dec); contact `is_homeowner`, `no_late_charges`; invoice `no_late_charges`
+  (create, PUT, PATCH) and `late_charge_month` ('YYYY-MM', set only by the run). `chargesFor` takes invoices past
+  `graceEnds` (not plans, not exempt, not late-charge invoices), interest = one month of simple interest on the total,
+  `balance × ppm ÷ 12,000,000` half-up, plus the fee once per customer. Routes: GET/PUT `late-charges/settings`
+  (PUT admin), GET `late-charges/preview?asOf=` and POST `late-charges` ('invoices'). The run posts one ordinary invoice
+  per customer through `createDocument` (lines on the `late_charges` system account, created as 4910 "Late Charges &
+  Finance Charges" the first time); the unique index `documents_late_charge_once` stops a second one in a month, a
+  void frees it, and `replaceDocument` carries `late_charge_month` to the corrected copy. UI: Settings → Late charges,
+  Sales → Late charges (`ar.panel = 'late'`), customer checkboxes, the invoice's "No late charges" box.
 - Payment photos (migration 021, `src/services/paymentPhotoService.js`): `payment_photos` (bytea ≤ 3 MB, JPEG/PNG, or a
   PDF since migration 035 such as the bank's deposit confirmation, sent unshrunk as `data:application/pdf`, checked for `%PDF-`;
   6 per payment), routes `…/payments/:id/photos[/:photoId]` (add/remove: the side's permission; view: view_books or the

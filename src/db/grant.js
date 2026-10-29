@@ -17,7 +17,8 @@ export async function grantRuntimeRole(pool, role) {
                     company_logos, invoice_items, account_tax_categories, payment_photos, trips, trip_jobs, trip_costs, trip_cost_photos,
                     passkeys, auth_challenges, road_keys, road_items, road_photos, mileage_drives, home_layouts TO ${role};
     GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount, futa_credit_reduction, default_sales_tax_rate,
-                  invoice_address, invoice_note, invoice_footer, entity_type, books_start_date, setup_done, name, home_state, fiscal_year_start_month) ON companies TO ${role};
+                  invoice_address, invoice_note, invoice_footer, entity_type, books_start_date, setup_done, name, home_state, fiscal_year_start_month,
+                  late_apr, late_fee_cents, late_grace_days, late_holiday_grace_days) ON companies TO ${role};
     GRANT UPDATE (totp_secret_enc, totp_enabled, totp_last_counter, recovery_codes, failed_logins, locked_until, password_hash, name) ON users TO ${role};
     GRANT UPDATE (mfa_passed, last_seen_at, expires_at) ON sessions TO ${role};
     GRANT UPDATE (posted_count, next_date, is_active, last_error, name, memo, lines, end_date) ON recurring_entries TO ${role};
@@ -26,11 +27,11 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (status, completed_by, completed_at) ON reconciliations TO ${role};
     GRANT DELETE ON reconciliations, reconciliation_lines TO ${role};
     GRANT UPDATE (status, undone_by, undone_at) ON import_batches TO ${role};
-    GRANT UPDATE (name, email, phone, address, terms_days, is_1099, is_active, group_name, people) ON contacts TO ${role};
+    GRANT UPDATE (name, email, phone, address, terms_days, is_1099, is_active, group_name, people, is_homeowner, no_late_charges) ON contacts TO ${role};
     GRANT UPDATE (name, subtype, cash_flow, is_active) ON accounts TO ${role};
     GRANT UPDATE (name) ON departments TO ${role};
     GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at, replaced_by_id) ON documents, payments TO ${role};
-    GRANT UPDATE (memo, due_date, client_ref, project, attention, send_to, care_of, plan_count, plan_first_due) ON documents TO ${role};
+    GRANT UPDATE (memo, due_date, client_ref, project, attention, send_to, care_of, plan_count, plan_first_due, no_late_charges) ON documents TO ${role};
     GRANT UPDATE (void_date, void_reason, voided_by, voided_at) ON payroll_runs TO ${role};
     GRANT DELETE ON bank_transactions TO ${role};
     GRANT DELETE ON sessions TO ${role};
