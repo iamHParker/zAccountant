@@ -143,7 +143,9 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     in one transaction, trips first, and refuses if any is no longer pending; `paidFrom: { itemId: accountId }` puts
     single costs on another card (the browser's `roadCard`: the row's pick, else `zacc.cardByKind` in localStorage,
     else Paid with). The trip's project card searches `ar.jobs` by code, name or customer (`tripJobMatches`), adds the
-    ticked ones or a new job (`POST …/jobs`) and PATCHes the trip with even shares across all (`addTripJobs`). The Trips tab has a trip pull-down
+    ticked ones or a new job (`POST …/jobs`) and PATCHes the trip with even shares across all (`addTripJobs`).
+    `tripShareTable` splits each posted cost by each project's `shareBp`, rounded half-up per cost (as the invoice
+    lines bill it), into Air / Hotel / Rental car / Rest columns by cost `kind`. The Trips tab has a trip pull-down
     (`pickTrip`, newest first) and one Entries grid per trip (`tripGrid`: costs, travel time and the trip's pending
     road items, by date; View | Edit | Delete; a road item's Edit fills the cost or travel form and "Save to books"
     accepts it with the changes).

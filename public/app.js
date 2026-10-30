@@ -1597,6 +1597,28 @@ createApp({
         await this.loadTrips();
       } finally { r.busy = false; }
     },
+    /**
+     * Each project's share of the trip by kind of cost (Homer, 2026-10-30): air, hotel, rental car and the rest.
+     * Worked one cost at a time, rounded half-up, the way the invoice bills it (cost × share on each line).
+     */
+    tripShareTable() {
+      const t = this.trip.cur;
+      const groupOf = (kind) => ({ airfare: 'air', lodging: 'hotel', rental_car: 'car' }[kind] ?? 'rest');
+      const cols = [{ key: 'air', label: 'Air' }, { key: 'hotel', label: 'Hotel' }, { key: 'car', label: 'Rental car' }, { key: 'rest', label: 'Rest' }]
+        .map((c) => ({ ...c, cents: 0 }));
+      const byKey = Object.fromEntries(cols.map((c) => [c.key, c]));
+      const posted = t.costs.filter((x) => x.status === 'posted');
+      for (const x of posted) byKey[groupOf(x.kind)].cents += x.amountCents;
+      const rows = t.jobs.map((j) => {
+        const r = { air: 0, hotel: 0, car: 0, rest: 0, total: 0 };
+        for (const x of posted) {
+          const part = Math.floor((x.amountCents * j.shareBp * 2 + 10000) / 20000);
+          r[groupOf(x.kind)] += part; r.total += part;
+        }
+        return { job: j, ...r };
+      });
+      return { cols, rows };
+    },
     // ---- Projects on a trip: search by number or name ("NM"), tick, add; or add a new project (Homer, 2026-10-30).
     tripJobMatches() {
       const q = this.trip.find.q.trim().toLowerCase();
@@ -1646,7 +1668,9 @@ createApp({
           entry: `${x.description}${x.vendor ? ' · ' + x.vendor : ''}${x.kind === 'mileage' ? ' · ' + x.miles + ' mi × ' + x.mileRateCents + '¢' : ''}` })),
         ...t.time.map((x) => ({ key: `t${x.id}`, type: 'time', x, date: x.date, hours: x.hours, entry: `Travel time${x.notes ? ' · ' + x.notes : ''}` })),
       ];
-      return rows.sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'road') - (b.type === 'road'));
+      rows.sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'road') - (b.type === 'road'));
+      // A dashed line where a new day of the trip starts (Homer, 2026-10-30).
+      return rows.map((g, i) => ({ ...g, newDay: i > 0 && g.date !== rows[i - 1].date }));
     },
     canEditRow(g) {
       if (g.type === 'road') return this.can('bills');
