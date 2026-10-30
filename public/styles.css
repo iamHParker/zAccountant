@@ -349,3 +349,9 @@ button.th-sort:hover { text-decoration: underline; }
 table.lines tr.line-note td { border-top: 0; padding-top: 0; }
 .old-invoice-drop { margin: 4px 0 12px; }
 .pdf-notes ul { margin: 4px 0 0 18px; padding: 0; }
+/* Trips: the trip pull-down and the trip's grid of entries (Homer, 2026-10-30) */
+.trip-pick select { max-width: 100%; }
+.road-pending { border: 1px dashed var(--line, #e5e7eb); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.trip-grid tr.road-row td { background: color-mix(in srgb, var(--accent, #2f7d6d) 8%, transparent); }
+.trip-grid tr.view-row td { border-top: none; padding-top: 0; }
+.trip-grid td.actions { white-space: nowrap; }

@@ -324,7 +324,7 @@ createApp({
         pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
-      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null },
+      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
@@ -1555,6 +1555,85 @@ createApp({
         if (ok) await this.loadTrips();
       } finally { r.busy = false; }
     },
+    /** Accept all: every item of one trip in the inbox (the trip itself first), in one step. */
+    async acceptRoadGroup(items) {
+      const r = this.road;
+      if (items.some((i) => i.kind === 'cost') && (!r.expenseId || !r.paidFromId)) { this.flash('Choose the expense account and what it was paid with first.', 'bad'); return; }
+      const lost = items.find((i) => this.roadNeedsTrip(i) && !r.tripFor[i.id]);
+      if (lost) { this.flash(`Choose a trip for "${this.roadLabel(lost)}" first.`, 'bad'); return; }
+      const costs = items.filter((i) => i.kind === 'cost').reduce((t, i) => t + i.data.amountCents, 0);
+      if (!confirm(`Put all ${items.length} into the books${costs ? ` (${money(costs)} of costs)` : ''}?`)) return;
+      // Items needing a trip chosen here go one at a time; the rest in one step.
+      const chosen = items.filter((i) => i.kind !== 'trip' && r.tripFor[i.id]);
+      const rest = items.filter((i) => !chosen.includes(i));
+      r.busy = true;
+      try {
+        if (r.expenseId) keepRoadAccounts({ expenseId: r.expenseId, paidFromId: r.paidFromId });
+        let ok = !rest.length || await this.run(() => api('POST', `${this.tripBase()}/road-items/accept-all`,
+          { itemIds: rest.map((i) => i.id), expenseAccountId: r.expenseId || undefined, paidFromAccountId: r.paidFromId || undefined }));
+        for (const i of chosen) if (ok) ok = await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/accept`,
+          { tripId: r.tripFor[i.id], expenseAccountId: r.expenseId || undefined, paidFromAccountId: r.paidFromId || undefined }));
+        if (ok) this.flash(`${items.length} item${items.length === 1 ? '' : 's'} put into the books.`);
+        await this.loadTrips();
+      } finally { r.busy = false; }
+    },
+    /** Pick a trip from the pull-down (newest first); empty goes back to the list. */
+    pickTrip(id) { if (id) { Object.assign(this.trip, { form: null, cost: null, editCostId: null, travel: null, viewRow: null }); this.openTrip(id); } else this.closeTripView(); },
+    /** Road items waiting for the open trip (sent from the phone, not in the books yet). */
+    tripRoadItems() { return this.trip.cur ? this.road.items.filter((i) => i.kind !== 'trip' && i.trip?.tripId === this.trip.cur.id) : []; },
+    /** The open trip's grid: costs, travel time and what the phone sent for it, by date. */
+    tripGrid() {
+      const t = this.trip.cur;
+      if (!t) return [];
+      const rows = [
+        ...this.tripRoadItems().map((i) => ({ key: `r${i.id}`, type: 'road', item: i, date: i.data.date,
+          entry: i.kind === 'time' ? `Travel time${i.data.notes ? ' · ' + i.data.notes : ''}` : this.roadLabel(i),
+          cents: i.kind === 'cost' ? i.data.amountCents : null, hours: i.kind === 'time' ? i.hours : null, photos: i.photos.length })),
+        ...t.costs.map((x) => ({ key: `c${x.id}`, type: 'cost', x, date: x.date, cents: x.amountCents, photos: x.photoCount,
+          entry: `${x.description}${x.vendor ? ' · ' + x.vendor : ''}${x.kind === 'mileage' ? ' · ' + x.miles + ' mi × ' + x.mileRateCents + '¢' : ''}` })),
+        ...t.time.map((x) => ({ key: `t${x.id}`, type: 'time', x, date: x.date, hours: x.hours, entry: `Travel time${x.notes ? ' · ' + x.notes : ''}` })),
+      ];
+      return rows.sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'road') - (b.type === 'road'));
+    },
+    canEditRow(g) {
+      if (g.type === 'road') return this.can('bills');
+      if (g.type === 'cost') return g.x.status === 'posted' && !g.x.billed.length && this.can('post');
+      return !g.x.billed.length && this.can('bills');
+    },
+    editRow(g) {
+      this.trip.viewRow = null;
+      if (g.type === 'cost') return this.editTripCost(g.x);
+      if (g.type === 'time') return this.editTravel(g.x);
+      const i = g.item; const d = i.data;
+      if (i.kind === 'cost') {
+        const r = this.road;
+        Object.assign(this.trip, { editCostId: null, travel: null, cost: { ...blankTripCost(d.date), roadItem: i, kind: d.kind ?? 'other', vendor: d.vendor ?? '',
+          description: d.description ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? '', amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : '',
+          expenseAccountId: r.expenseId || this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id || '',
+          paidFromAccountId: r.paidFromId || this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id || '', keptPhotos: i.photos.length } });
+      } else {
+        const hm = (m) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+        Object.assign(this.trip, { cost: null, travel: { roadItem: i, date: d.date, hours: d.start ? '' : hm(d.minutes), start: d.start ?? '', end: d.end ?? '',
+          breaks: d.breakMinutes ? hm(d.breakMinutes) : '', notes: d.notes ?? '' } });
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    deleteRow(g) {
+      if (g.type === 'road') return this.dismissRoad(g.item).then(() => this.openTrip(this.trip.cur.id));
+      if (g.type === 'cost') return this.voidTripCost(g.x);
+      return this.removeTravel(g.x);
+    },
+    viewRow(g) {
+      if (g.type === 'cost') { this.trip.viewRow = null; return this.openTripPhotos(g.x); }
+      this.trip.photoView = null;
+      this.trip.viewRow = this.trip.viewRow === g.key ? null : g.key;
+    },
+    /** A road item changed at the desk goes into the books with its changes ("Save to books"). */
+    async saveRoadEdit(i, data, accounts = {}) {
+      const r = await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/accept`, { data, tripId: this.trip.cur.id, ...accounts }), 'Saved to the books.');
+      if (r) await this.loadTrips();
+      return r;
+    },
     async dismissRoad(i) {
       if (!confirm('Dismiss this? It will not go into the books.')) return;
       if (await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/dismiss`), 'Dismissed.')) this.loadRoad();
@@ -1684,6 +1763,16 @@ createApp({
       const body = { date: c.date, kind: c.kind, vendor: c.vendor, description: c.description, amount: c.amount, miles: c.miles, mileRate: c.mileRate,
         expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId };
       if (c.kind === 'mileage') keepMileRate(c.mileRate);
+      if (c.roadItem) {
+        const { date, kind, vendor, description, amount, miles, mileRate } = body;
+        const done = await this.saveRoadEdit(c.roadItem, { date, kind, vendor, description, amount, miles, mileRate },
+          { expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId });
+        if (!done) return;
+        keepRoadAccounts({ expenseId: c.expenseAccountId, paidFromId: c.paidFromAccountId });
+        for (const picture of c.photos) await this.run(() => api('POST', `${this.tripBase()}/trip-costs/${done.costId}/photos`, { picture }));
+        tr.cost = null;
+        return this.openTrip(tr.cur.id);
+      }
       const r = tr.editCostId
         ? await this.run(() => api('PUT', `${this.tripBase()}/trip-costs/${tr.editCostId}`, body, { 'Idempotency-Key': c.key }), 'Cost corrected.')
         : await this.run(() => api('POST', `${this.tripBase()}/trips/${tr.cur.id}/costs`, body, { 'Idempotency-Key': c.key }), 'Cost saved.');
@@ -1729,6 +1818,10 @@ createApp({
       const t = this.trip.travel; const clock = clockTime(t.start, t.end, t.breaks);
       if (clock?.error) { this.flash(clock.error, 'bad'); return; }
       const body = clock ? { date: t.date, start: t.start, end: t.end, breaks: t.breaks, notes: t.notes } : { date: t.date, hours: t.hours, notes: t.notes };
+      if (t.roadItem) {
+        if (await this.saveRoadEdit(t.roadItem, clock ? body : { ...body, start: '', end: '', breaks: '' })) this.trip.travel = null;
+        return;
+      }
       const r = await this.run(() => (t.editId
         ? api('PATCH', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time/${t.editId}`, body)
         : api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, body)), 'Travel time saved.');

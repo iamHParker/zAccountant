@@ -178,6 +178,27 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
   assert.equal((await desk.call('POST', `${b}/road-items/${chk.id}/accept-check`, { paymentId: pay.id })).status, 400);
 
+  // At the desk, from the trip's grid (Homer, 2026-10-30): change an item before it goes in, then Accept all.
+  const ref2 = { id: tr.tripId };
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'cost-hotel-01', kind: 'cost', data: { trip: ref2, date: '2026-10-05', kind: 'lodging', vendor: 'Hotel', amount: '239.10' } }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'cost-food-01', kind: 'cost', data: { trip: ref2, date: '2026-10-05', kind: 'meals', description: 'Lunch', amount: '21.38' } }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'time-day3-01', kind: 'time', data: { trip: ref2, date: '2026-10-06', hours: '2' } }), 201);
+  const [hotel, food, day3] = ok(await desk.call('GET', `${b}/road-items`));
+  // Edit only (still waiting): the hotel was two nights, $478.20. Checked again like an item from the phone.
+  assert.equal((await desk.call('PATCH', `${b}/road-items/${hotel.id}`, { data: { amount: '-1' } })).status, 400);
+  assert.equal(ok(await desk.call('PATCH', `${b}/road-items/${hotel.id}`, { data: { amount: '478.20', description: 'Hotel, 2 nights' } })).data.amountCents, 47820);
+  // Save to books with a change: the travel day was 2:30, not 2.
+  const t3 = ok(await desk.call('POST', `${b}/road-items/${day3.id}/accept`, { data: { hours: '2:30' }, tripId: tr.tripId }));
+  assert.ok(t3.timeEntryId);
+  // Accept all: both costs in one step; one already reviewed makes the whole step refuse.
+  assert.equal((await desk.call('POST', `${b}/road-items/accept-all`, { itemIds: [hotel.id, food.id, day3.id], ...accounts })).status, 400);
+  const all = ok(await desk.call('POST', `${b}/road-items/accept-all`, { itemIds: [hotel.id, food.id], ...accounts }));
+  assert.equal(all.accepted, 2);
+  const t2 = ok(await desk.call('GET', `${b}/trips/${tr.tripId}`));
+  assert.deepEqual(t2.costs.map((c) => c.amountCents).sort((x, y) => x - y), [2138, 10500, 41230, 47820]);
+  assert.equal(t2.time.find((x) => x.date === '2026-10-06').minutes, 150);
+  assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
+
   // A viewer can't make a road key.
   const viewer = await newUser('viewer@example.com');
   ok(await desk.call('POST', `${b}/members`, { email: 'viewer@example.com', role: 'viewer' }), 201);

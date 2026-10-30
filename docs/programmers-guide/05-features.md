@@ -137,6 +137,13 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     and replaces `road_items.data`, only while `status = 'pending'`; the phone marks the item `edited` and sends the
     change on its next sync. Accepted items are fixed at the desk (`PATCH …/trips/:tripId/travel-time/:timeEntryId`
     = `updateTravelTime`, or a trip cost's void + copy).
+    At the desk (Homer, 2026-10-30): `PATCH …/road-items/:id { data }` (`editRoadItem`) and `accept { data }` re-check
+    desk changes through `deskData` → `cleanItem` (the trip and kind stay; amounts typed in dollars, time as h:mm);
+    `POST …/road-items/accept-all { itemIds, expenseAccountId, paidFromAccountId }` (`acceptRoadItems`) accepts several
+    in one transaction, trips first, and refuses if any is no longer pending. The Trips tab has a trip pull-down
+    (`pickTrip`, newest first) and one Entries grid per trip (`tripGrid`: costs, travel time and the trip's pending
+    road items, by date; View | Edit | Delete; a road item's Edit fills the cost or travel form and "Save to books"
+    accepts it with the changes).
   - **MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`):** the CSV is laid out
     like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's
     header, reads only typed cells and works the dollars out itself. A drive's `key` is a SHA-256 of when, where, miles
