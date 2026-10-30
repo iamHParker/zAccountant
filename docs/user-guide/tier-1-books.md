@@ -290,6 +290,9 @@ is already on an invoice can't be edited or voided until that invoice is.
 6. **Add projects** under the trip's project table: type part of a project number or name (**NM**, **2601**), tick the
    ones the trip served and press **Add to this trip**. If it isn't there, **+ New project…** makes it (number, name,
    customer) and adds it. The trip is then split evenly across all its projects; press **edit** to set other shares.
+   The project table shows each project's share in dollars by kind of cost: **Air**, **Hotel**, **Rental car** and the
+   **Rest** (meals, tolls, mileage, other), with the project's **Total** and a **Whole trip** row. Each cost is split
+   and rounded to the cent on its own, the way the invoice bills it (80% of $1,034.81 airfare = $827.85).
    **delete** on a cost voids it (its entry is reversed, kept on record); on a road entry it dismisses it.
 
 On each project's invoice, **⏱ Pull in unbilled time and costs** lists its share of every trip cost and travel hour.
