@@ -291,9 +291,12 @@ is already on an invoice can't be edited or voided until that invoice is.
    ones the trip served and press **Add to this trip**. If it isn't there, **+ New project…** makes it (number, name,
    customer) and adds it. The trip is then split evenly across all its projects; press **edit** to set other shares.
    In the Entries grid a dashed line marks where each new day of the trip starts.
-   The project table shows each project's share in dollars by kind of cost: **Air**, **Hotel**, **Rental car** and the
-   **Rest** (meals, tolls, mileage, other), with the project's **Total** and a **Whole trip** row. Each cost is split
-   and rounded to the cent on its own, the way the invoice bills it (80% of $1,034.81 airfare = $827.85).
+   The project table holds each project's **percent of each kind of cost**: **Air**, **Hotel**, **Rental car**, **Rest**
+   (meals, tolls, mileage, other) and **Travel time**. Type in the boxes and press **Save shares**: for example one client
+   pays 100% of the air and meals (Rest) and two clients split the hotel and rental car 50/50. The **Total** row shows
+   each column's sum; under 100% leaves the rest unbilled, over 100% is refused. Each invoice's **Pull in unbilled time
+   and costs** then bills every cost at its column's percent (a 0% project gets no line for it). Once a project has
+   billed part of the trip, its percents stay as billed.
    **delete** on a cost voids it (its entry is reversed, kept on record); on a road entry it dismisses it.
 
 On each project's invoice, **⏱ Pull in unbilled time and costs** lists its share of every trip cost and travel hour.

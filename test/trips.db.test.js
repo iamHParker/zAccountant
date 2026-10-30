@@ -143,3 +143,30 @@ test('trips: costs and travel time shared by project, billed once per project', 
     await assert.rejects(ledger.reverseEntry(pool, co.id, (await pool.query('SELECT journal_entry_id FROM trip_costs WHERE id = $1', [fixed.id])).rows[0].journal_entry_id), /Trips tab/);
   });
 });
+
+// Homer, 2026-10-30: one client pays all of the airfare and meals; two clients split the hotel and the rental car.
+test('trips: shares by kind of cost', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
+  const db = await freshDatabase();
+  t.after(() => db.drop());
+  const { pool } = db;
+  const co = await ledger.createCompany(pool, { name: 'Parker Engineering', homeState: 'TX' });
+  const A = Object.fromEntries((await ledger.listAccounts(pool, co.id)).map((a) => [a.code, a.id]));
+  const nm = await time.createJob(pool, co.id, { name: 'NM Bridge', code: '2601' });
+  const tx = await time.createJob(pool, co.id, { name: 'TX Warehouse', code: '2610' });
+  const card = { expenseAccountId: A['6500'], paidFromAccountId: A['2100'] };
+  // Trip share 50/50 (travel time); airfare and other costs 100% NM; hotel and car 50/50 by default.
+  await assert.rejects(trips.createTrip(pool, co.id, { name: 'ABQ', startDate: '2026-10-26',
+    jobs: [{ jobId: nm.id, share: '50', air: '100' }, { jobId: tx.id, share: '50', air: '10' }] }), (e) => /airfare shares add up to 110%/.test(e.details.join(' ')));
+  let trip = await trips.createTrip(pool, co.id, { name: 'ABQ', startDate: '2026-10-26',
+    jobs: [{ jobId: nm.id, share: '50', air: '100', rest: '100' }, { jobId: tx.id, share: '50', air: '0', hotel: '', rest: '0' }] });
+  assert.deepEqual(trip.jobs.map((j) => [j.jobCode, j.share, j.air, j.hotel, j.car, j.rest]).sort(),
+    [['2601', '50', '100', '50', '50', '100'], ['2610', '50', '0', '50', '50', '0']]);
+  for (const [kind, amount] of [['airfare', '1034.81'], ['lodging', '439.85'], ['rental_car', '180.00'], ['meals', '21.38']]) {
+    trip = await trips.addTripCost(pool, co.id, trip.id, { date: '2026-10-26', kind, amount, ...card });
+  }
+  const pull = async (job) => (await projects.listUnbilled(pool, co.id, { jobId: job.id })).tripCosts.map((x) => [x.description, x.share, x.shareCents]);
+  // NM: all the airfare and meals, half the hotel ($219.925 → $219.93) and car.
+  assert.deepEqual(await pull(nm), [['Airfare', '100', 103481], ['Lodging', '50', 21993], ['Rental car', '50', 9000], ['Meals', '100', 2138]]);
+  // TX: only half the hotel and car; no airfare or meals line at all.
+  assert.deepEqual(await pull(tx), [['Lodging', '50', 21993], ['Rental car', '50', 9000]]);
+});

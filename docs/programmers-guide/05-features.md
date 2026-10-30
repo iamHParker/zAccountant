@@ -144,8 +144,10 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     single costs on another card (the browser's `roadCard`: the row's pick, else `zacc.cardByKind` in localStorage,
     else Paid with). The trip's project card searches `ar.jobs` by code, name or customer (`tripJobMatches`), adds the
     ticked ones or a new job (`POST …/jobs`) and PATCHes the trip with even shares across all (`addTripJobs`).
-    `tripShareTable` splits each posted cost by each project's `shareBp`, rounded half-up per cost (as the invoice
-    lines bill it), into Air / Hotel / Rental car / Rest columns by cost `kind`. The Trips tab has a trip pull-down
+    Shares by kind of cost (migration 038): `trip_jobs.air_bp / hotel_bp / car_bp / rest_bp`, NULL = follow `share_bp`
+    (travel time always uses `share_bp`); `COST_SHARE_SQL` picks a cost's share by `kind` in `listUnbilled`; `cleanTrip`
+    checks each column totals ≤ 100% and `updateTrip` keeps a billed project's every share. UI: the editable percent
+    table (`SHARE_COLS`, `trip.shares`, `saveTripShares`). The Trips tab has a trip pull-down
     (`pickTrip`, newest first) and one Entries grid per trip (`tripGrid`: costs, travel time and the trip's pending
     road items, by date; View | Edit | Delete; a road item's Edit fills the cost or travel form and "Save to books"
     accepts it with the changes).
