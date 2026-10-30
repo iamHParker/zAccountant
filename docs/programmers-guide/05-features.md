@@ -147,7 +147,7 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     Shares by kind of cost (migration 038): `trip_jobs.air_bp / hotel_bp / car_bp / rest_bp`, NULL = follow `share_bp`
     (travel time always uses `share_bp`); `COST_SHARE_SQL` picks a cost's share by `kind` in `listUnbilled`; `cleanTrip`
     checks each column totals ≤ 100% and `updateTrip` keeps a billed project's every share. UI: the editable percent
-    table (`SHARE_COLS`, `trip.shares`, `saveTripShares`). The Trips tab has a trip pull-down
+    table (`SHARE_COLS`, `trip.shares`, `saveTripShares`); typing a cell marks it in `trip.shareTouched` and `spreadTripShare` splits what is left of 100% among the column's untyped cells, in hundredths. The Trips tab has a trip pull-down
     (`pickTrip`, newest first) and one Entries grid per trip (`tripGrid`: costs, travel time and the trip's pending
     road items, by date; View | Edit | Delete; a road item's Edit fills the cost or travel form and "Save to books"
     accepts it with the changes).
