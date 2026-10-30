@@ -142,7 +142,8 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     `POST …/road-items/accept-all { itemIds, expenseAccountId, paidFromAccountId }` (`acceptRoadItems`) accepts several
     in one transaction, trips first, and refuses if any is no longer pending; `paidFrom: { itemId: accountId }` puts
     single costs on another card (the browser's `roadCard`: the row's pick, else `zacc.cardByKind` in localStorage,
-    else Paid with). The Trips tab has a trip pull-down
+    else Paid with). The trip's project card searches `ar.jobs` by code, name or customer (`tripJobMatches`), adds the
+    ticked ones or a new job (`POST …/jobs`) and PATCHes the trip with even shares across all (`addTripJobs`). The Trips tab has a trip pull-down
     (`pickTrip`, newest first) and one Entries grid per trip (`tripGrid`: costs, travel time and the trip's pending
     road items, by date; View | Edit | Delete; a road item's Edit fills the cost or travel form and "Save to books"
     accepts it with the changes).

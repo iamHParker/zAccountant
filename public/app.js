@@ -327,7 +327,7 @@ createApp({
         pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
-      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null },
+      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, find: { q: '', pick: {}, newJob: null, customers: [] } },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
@@ -1597,8 +1597,41 @@ createApp({
         await this.loadTrips();
       } finally { r.busy = false; }
     },
+    // ---- Projects on a trip: search by number or name ("NM"), tick, add; or add a new project (Homer, 2026-10-30).
+    tripJobMatches() {
+      const q = this.trip.find.q.trim().toLowerCase();
+      if (!q || !this.trip.cur) return [];
+      const on = new Set(this.trip.cur.jobs.map((j) => j.jobId));
+      return this.ar.jobs.filter((j) => j.isActive && !on.has(j.id)
+        && [j.code, j.name, j.customerName].some((t) => (t ?? '').toLowerCase().includes(q))).slice(0, 40);
+    },
+    /** Add the ticked projects (and any just made); every project on the trip then shares it evenly. */
+    async addTripJobs(extraIds = []) {
+      const t = this.trip.cur; const f = this.trip.find;
+      const ids = [...Object.keys(f.pick).filter((id) => f.pick[id]), ...extraIds];
+      if (!ids.length) return;
+      const all = [...t.jobs.map((j) => j.jobId), ...ids.filter((id) => !t.jobs.some((j) => j.jobId === id))];
+      if (t.jobs.length && !confirm(`Add ${ids.length} project${ids.length === 1 ? '' : 's'} and split the trip evenly across all ${all.length}? You can change the shares with edit.`)) return;
+      const each = Math.floor(10000 / all.length);
+      const jobs = all.map((jobId, i) => ({ jobId, share: ((i === all.length - 1 ? 10000 - each * (all.length - 1) : each) / 100).toFixed(2) }));
+      const r = await this.run(() => api('PATCH', `${this.tripBase()}/trips/${t.id}`, { jobs }), 'Projects added.');
+      if (r) { this.trip.cur = r; Object.assign(f, { q: '', pick: {}, newJob: null }); }
+    },
+    async startTripNewJob() {
+      const f = this.trip.find;
+      const q = f.q.trim();
+      f.newJob = /^[\w-]*\d[\w-]*$/.test(q) ? { code: q, name: '', customerId: '' } : { code: '', name: q, customerId: '' };
+      if (!f.customers.length) f.customers = (await this.run(() => api('GET', `${this.tripBase()}/customers`))) ?? [];
+    },
+    async saveTripNewJob() {
+      const n = this.trip.find.newJob;
+      const j = await this.run(() => api('POST', `${this.tripBase()}/jobs`, { code: n.code, name: n.name, customerId: n.customerId || undefined }), 'Project added.');
+      if (!j) return;
+      this.ar.jobs = (await this.run(() => api('GET', `${this.tripBase()}/jobs?inactive=1`))) ?? this.ar.jobs;
+      await this.addTripJobs([j.id]);
+    },
     /** Pick a trip from the pull-down (newest first); empty goes back to the list. */
-    pickTrip(id) { if (id) { Object.assign(this.trip, { form: null, cost: null, editCostId: null, travel: null, viewRow: null }); this.openTrip(id); } else this.closeTripView(); },
+    pickTrip(id) { if (id) { Object.assign(this.trip, { form: null, cost: null, editCostId: null, travel: null, viewRow: null, find: { q: '', pick: {}, newJob: null, customers: this.trip.find.customers } }); this.openTrip(id); } else this.closeTripView(); },
     /** Road items waiting for the open trip (sent from the phone, not in the books yet). */
     tripRoadItems() { return this.trip.cur ? this.road.items.filter((i) => i.kind !== 'trip' && i.trip?.tripId === this.trip.cur.id) : []; },
     /** The open trip's grid: costs, travel time and what the phone sent for it, by date. */

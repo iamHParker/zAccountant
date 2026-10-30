@@ -1533,9 +1533,27 @@
             <thead><tr><th>Project</th><th class="num">Share</th><th class="num">of {{ money(trip.cur.totalCents) }}</th></tr></thead>
             <tr v-for="j in trip.cur.jobs"><td>{{ jobLabel({ name: j.jobName, code: j.jobCode }) }}<span v-if="j.customerName" class="muted small"> · {{ j.customerName }}</span></td>
               <td class="num">{{ j.share }}%</td><td class="num">{{ money(Math.floor((trip.cur.totalCents * j.shareBp * 2 + 10000) / 20000)) }}</td></tr>
-            <tr v-if="!trip.cur.jobs.length"><td colspan="3" class="hint">No projects yet: press edit to add them and their shares.</td></tr>
+            <tr v-if="!trip.cur.jobs.length"><td colspan="3" class="hint">No projects yet: search for them below, or press edit.</td></tr>
             <tr v-else-if="Number(trip.cur.sharePercent) < 100" class="muted"><td>Not billed</td><td class="num">{{ Number((100 - Number(trip.cur.sharePercent)).toFixed(2)) }}%</td><td></td></tr>
           </table>
+          <div class="trip-find" v-if="can('bills')">
+            <label>Add projects: search by number or name <input v-model="trip.find.q" placeholder="e.g. NM or 2601" @keydown.enter.prevent></label>
+            <div v-if="trip.find.q.trim()">
+              <label class="check" v-for="j in tripJobMatches()" :key="j.id"><input type="checkbox" v-model="trip.find.pick[j.id]">
+                {{ jobLabel(j) }}<span v-if="j.customerName" class="muted small"> · {{ j.customerName }}</span></label>
+              <p class="hint" v-if="!tripJobMatches().length">No project matches “{{ trip.find.q.trim() }}”.</p>
+              <div class="row wrap">
+                <button class="primary small" v-if="Object.values(trip.find.pick).some(Boolean)" @click="addTripJobs()">Add {{ Object.values(trip.find.pick).filter(Boolean).length }} to this trip</button>
+                <button class="small" v-if="!trip.find.newJob" @click="startTripNewJob">+ New project…</button>
+              </div>
+              <form v-if="trip.find.newJob" class="grid2" @submit.prevent="saveTripNewJob">
+                <label>Project number <input v-model.trim="trip.find.newJob.code" maxlength="30" placeholder="2701"></label>
+                <label>Project name <input v-model.trim="trip.find.newJob.name" maxlength="80" required placeholder="NM bridge inspection"></label>
+                <label>Customer (optional) <select v-model="trip.find.newJob.customerId"><option value="">None</option><option v-for="c in trip.find.customers" :value="c.id">{{ c.name }}</option></select></label>
+                <div><button class="primary">Add project to this trip</button> <button type="button" @click="trip.find.newJob = null">Cancel</button></div>
+              </form>
+            </div>
+          </div>
         </div>
 
         <div class="card">

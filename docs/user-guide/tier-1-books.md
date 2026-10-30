@@ -287,6 +287,9 @@ is already on an invoice can't be edited or voided until that invoice is.
    Each waiting cost has its own **Card** picker: put the airfare and hotel on the card with the travel benefits and the
    rest on the **Paid with** card. zAccountant remembers the card you last used for each kind of cost (Airfare, Lodging…)
    on this computer and starts there next time; the grid shows the card each saved cost was paid with.
+6. **Add projects** under the trip's project table: type part of a project number or name (**NM**, **2601**), tick the
+   ones the trip served and press **Add to this trip**. If it isn't there, **+ New project…** makes it (number, name,
+   customer) and adds it. The trip is then split evenly across all its projects; press **edit** to set other shares.
    **delete** on a cost voids it (its entry is reversed, kept on record); on a road entry it dismisses it.
 
 On each project's invoice, **⏱ Pull in unbilled time and costs** lists its share of every trip cost and travel hour.
