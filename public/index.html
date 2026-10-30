@@ -1630,7 +1630,7 @@
           <table class="data trip-grid" v-if="tripGrid().length">
             <thead><tr><th>Date</th><th>Entry</th><th class="num">Cost</th><th></th></tr></thead>
             <template v-for="g in tripGrid()" :key="g.key">
-              <tr :class="{ muted: g.type === 'cost' && g.x.status === 'void', 'road-row': g.type === 'road' }">
+              <tr :class="{ muted: g.type === 'cost' && g.x.status === 'void', 'road-row': g.type === 'road', 'new-day': g.newDay }">
                 <td>{{ usDate(g.date) }}</td>
                 <td>{{ g.entry }}
                   <span v-if="g.type === 'road'" class="tag">from the road · not in books</span>

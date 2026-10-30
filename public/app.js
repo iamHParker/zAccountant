@@ -1668,7 +1668,9 @@ createApp({
           entry: `${x.description}${x.vendor ? ' · ' + x.vendor : ''}${x.kind === 'mileage' ? ' · ' + x.miles + ' mi × ' + x.mileRateCents + '¢' : ''}` })),
         ...t.time.map((x) => ({ key: `t${x.id}`, type: 'time', x, date: x.date, hours: x.hours, entry: `Travel time${x.notes ? ' · ' + x.notes : ''}` })),
       ];
-      return rows.sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'road') - (b.type === 'road'));
+      rows.sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'road') - (b.type === 'road'));
+      // A dashed line where a new day of the trip starts (Homer, 2026-10-30).
+      return rows.map((g, i) => ({ ...g, newDay: i > 0 && g.date !== rows[i - 1].date }));
     },
     canEditRow(g) {
       if (g.type === 'road') return this.can('bills');
