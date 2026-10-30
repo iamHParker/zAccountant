@@ -50,7 +50,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT DELETE ON time_entries TO ${role};
     GRANT UPDATE (name, start_date, end_date, notes, is_active) ON trips TO ${role};
     GRANT UPDATE (layout, updated_at) ON home_layouts TO ${role};
-    GRANT UPDATE (share_bp) ON trip_jobs TO ${role};
+    GRANT UPDATE (share_bp, air_bp, hotel_bp, car_bp, rest_bp) ON trip_jobs TO ${role};
     GRANT DELETE ON trip_jobs, trip_cost_photos TO ${role};
     GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at, replaced_by_id) ON trip_costs TO ${role};
     GRANT UPDATE (category, updated_at, updated_by) ON account_tax_categories TO ${role};

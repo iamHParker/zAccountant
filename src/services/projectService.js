@@ -9,7 +9,7 @@ import { minutesToHours } from '../core/timesheets.js';
 import { divRoundHalfUp } from '../core/money.js';
 import { appendAudit } from './audit.js';
 import { lineAmount } from './arapService.js';
-import { bpToQuantity, bpToPercent } from './tripService.js';
+import { bpToQuantity, bpToPercent, COST_SHARE_SQL } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
@@ -154,9 +154,9 @@ export async function listUnbilled(db, companyId, { jobId = null, customerId = n
       ORDER BY t.work_date, j.name LIMIT 1000`, params);
   const { rows: tripCosts } = await db.query(
     `SELECT tc.id, to_char(tc.cost_date, 'YYYY-MM-DD') AS date, tc.description, tc.vendor AS "vendorName", tc.amount_cents AS "amountCents",
-            j.id AS "jobId", j.name AS "jobName", j.code AS "jobCode", tr.name AS "tripName", tj.share_bp AS "shareBp"
+            j.id AS "jobId", j.name AS "jobName", j.code AS "jobCode", tr.name AS "tripName", ${COST_SHARE_SQL} AS "shareBp"
        FROM trip_costs tc JOIN trips tr ON tr.id = tc.trip_id JOIN trip_jobs tj ON tj.trip_id = tr.id JOIN jobs j ON j.id = tj.job_id
-      WHERE tc.company_id = $1 AND ${jobMatch} AND tj.share_bp > 0 AND tc.status = 'posted'
+      WHERE tc.company_id = $1 AND ${jobMatch} AND ${COST_SHARE_SQL} > 0 AND tc.status = 'posted'
         AND ($4::date IS NULL OR tc.cost_date >= $4) AND ($5::date IS NULL OR tc.cost_date <= $5)
         AND ${notBilledFor('trip_cost_id', 'tc.id')}
       ORDER BY tc.cost_date, tc.created_at, j.name LIMIT 1000`, params);

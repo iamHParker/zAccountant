@@ -185,6 +185,8 @@ const TAB_FEATURE = { payroll: 'payroll', time: 'timesheets' };
 // Home page cards (Homer, 2026-10-25): shortcuts to the common jobs, next to "Record a transaction", that each person
 // adds, removes and moves (kept per person per company: /home-layout). `perms`: any one of them shows the card;
 // `feature`: the plan must include it. `go` runs on a press. The server keeps only the ids; an unknown id is skipped.
+// A trip's share table: each project's percent of each kind of cost; Travel time is the trip share (migration 038).
+const SHARE_COLS = [{ key: 'air', label: 'Air' }, { key: 'hotel', label: 'Hotel' }, { key: 'car', label: 'Rental car' }, { key: 'rest', label: 'Rest' }, { key: 'share', label: 'Travel time' }];
 const HOME_CARDS = [
   { id: 'stats', icon: '📊', title: 'Statistics', hint: 'Income, expenses and cash, month by month', perms: ['view_books'] },
   { id: 'invoice', icon: '🧾', title: 'New invoice', hint: 'Bill a customer', perms: ['invoices'], go: { tab: 'sales', then: 'newDoc' } },
@@ -256,7 +258,7 @@ createApp({
   render,
   data() {
     return {
-      companies: [], companyId: null, company: null, tab: 'home', message: null,
+      SHARE_COLS, companies: [], companyId: null, company: null, tab: 'home', message: null,
       auth: { screen: 'loading', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
       passkeys: { list: [], name: '', code: '', busy: false, supported: canPasskey() },
       members: [], newMember: { email: '', role: 'bookkeeper', departmentId: '' },
@@ -327,7 +329,7 @@ createApp({
         pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
-      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, find: { q: '', pick: {}, newJob: null, customers: [] } },
+      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
@@ -388,6 +390,11 @@ createApp({
     },
   },
   watch: {
+    // The share table follows the saved trip; typing in it is kept until the shares themselves change.
+    'trip.cur'(t) {
+      const sig = t ? JSON.stringify(t.jobs.map((j) => [j.jobId, j.share, j.air, j.hotel, j.car, j.rest])) : '';
+      if (sig !== this.trip.shareSig) { this.trip.shareSig = sig; this.resetTripShares(); }
+    },
     companyId() { this.loadCompany(); },
     tab(t) {
       if (t === 'reports') this.loadReport();
@@ -1597,27 +1604,23 @@ createApp({
         await this.loadTrips();
       } finally { r.busy = false; }
     },
-    /**
-     * Each project's share of the trip by kind of cost (Homer, 2026-10-30): air, hotel, rental car and the rest.
-     * Worked one cost at a time, rounded half-up, the way the invoice bills it (cost × share on each line).
-     */
-    tripShareTable() {
+    // ---- Shares by kind of cost (Homer, 2026-10-30: one client pays all the airfare and meals, two split the hotel).
+    /** The share table as typed: { jobId: { air, hotel, car, rest, share } } in percent. */
+    resetTripShares() {
+      this.trip.shares = Object.fromEntries((this.trip.cur?.jobs ?? []).map((j) => [j.jobId, { air: j.air, hotel: j.hotel, car: j.car, rest: j.rest, share: j.share }]));
+    },
+    tripShareSum(key) {
+      const total = Object.values(this.trip.shares).reduce((t, r) => t + Math.round((Number(r[key]) || 0) * 100), 0);
+      return Number((total / 100).toFixed(2));
+    },
+    tripSharesChanged() {
+      return (this.trip.cur?.jobs ?? []).some((j) => SHARE_COLS.some((c) => Number(this.trip.shares[j.jobId]?.[c.key]) !== Number(j[c.key])));
+    },
+    async saveTripShares() {
       const t = this.trip.cur;
-      const groupOf = (kind) => ({ airfare: 'air', lodging: 'hotel', rental_car: 'car' }[kind] ?? 'rest');
-      const cols = [{ key: 'air', label: 'Air' }, { key: 'hotel', label: 'Hotel' }, { key: 'car', label: 'Rental car' }, { key: 'rest', label: 'Rest' }]
-        .map((c) => ({ ...c, cents: 0 }));
-      const byKey = Object.fromEntries(cols.map((c) => [c.key, c]));
-      const posted = t.costs.filter((x) => x.status === 'posted');
-      for (const x of posted) byKey[groupOf(x.kind)].cents += x.amountCents;
-      const rows = t.jobs.map((j) => {
-        const r = { air: 0, hotel: 0, car: 0, rest: 0, total: 0 };
-        for (const x of posted) {
-          const part = Math.floor((x.amountCents * j.shareBp * 2 + 10000) / 20000);
-          r[groupOf(x.kind)] += part; r.total += part;
-        }
-        return { job: j, ...r };
-      });
-      return { cols, rows };
+      const jobs = t.jobs.map((j) => ({ jobId: j.jobId, ...this.trip.shares[j.jobId] }));
+      const r = await this.run(() => api('PATCH', `${this.tripBase()}/trips/${t.id}`, { jobs }), 'Shares saved.');
+      if (r) { this.trip.cur = r; this.resetTripShares(); }
     },
     // ---- Projects on a trip: search by number or name ("NM"), tick, add; or add a new project (Homer, 2026-10-30).
     tripJobMatches() {
@@ -1782,7 +1785,9 @@ createApp({
     editTrip() {
       const t = this.trip.cur;
       this.trip.form = { name: t.name, startDate: t.startDate, endDate: t.endDate ?? '', notes: t.notes ?? '',
-        jobs: t.jobs.length ? t.jobs.map((j) => ({ jobId: j.jobId, share: j.share })) : [{ jobId: '', share: '' }] };
+        jobs: t.jobs.length ? t.jobs.map((j) => ({ jobId: j.jobId, share: j.share,
+          // Shares by kind that differ from the trip share stay as they are; the rest keep following it.
+          ...Object.fromEntries(['air', 'hotel', 'car', 'rest'].filter((k) => j[k] !== j.share).map((k) => [k, j[k]])) })) : [{ jobId: '', share: '' }] };
       this.trip.editing = true;
     },
     /** Shares typed so far, in percent (for the running total under the table). */

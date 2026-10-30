@@ -29,6 +29,11 @@ export function percentToBp(v) {
   return bp <= 10000 ? bp : null;
 }
 /** 6000 → "60", 3333 → "33.33", 1250 → "12.5". */
+// Shares by kind of cost (migration 038). A NULL column follows the trip share (share_bp); travel time always uses it.
+export const SHARE_GROUPS = ['air', 'hotel', 'car', 'rest'];
+/** SQL: the share (hundredths of a percent) of trip_jobs tj for a trip cost tc, by the cost's kind. */
+export const COST_SHARE_SQL = `CASE tc.kind WHEN 'airfare' THEN coalesce(tj.air_bp, tj.share_bp) WHEN 'lodging' THEN coalesce(tj.hotel_bp, tj.share_bp)
+  WHEN 'rental_car' THEN coalesce(tj.car_bp, tj.share_bp) ELSE coalesce(tj.rest_bp, tj.share_bp) END`;
 export const bpToPercent = (bp) => (bp / 100).toFixed(2).replace(/\.?0+$/, '');
 /** A share as an invoice quantity: 6000 → "0.6", 3333 → "0.3333", 10000 → "1". */
 export function bpToQuantity(bp) {
@@ -80,10 +85,23 @@ async function cleanTrip(c, companyId, input, errors, partial = false) {
       seen.add(j.jobId);
       const bp = percentToBp(j.share);
       if (bp == null) { errors.push(`${names.get(j.jobId)}: the share must be a percent from 0 to 100, like 60 or 33.33`); return; }
-      out.jobs.push({ jobId: j.jobId, shareBp: bp });
+      const row = { jobId: j.jobId, shareBp: bp };
+      // Optional shares by kind of cost: empty = the same as the trip share.
+      for (const g of SHARE_GROUPS) {
+        const v = j[g];
+        if (v == null || String(v).trim() === '') { row[`${g}Bp`] = null; continue; }
+        const gb = percentToBp(v);
+        if (gb == null) errors.push(`${names.get(j.jobId)}: the ${GROUP_LABEL[g]} share must be a percent from 0 to 100`);
+        row[`${g}Bp`] = gb === bp ? null : gb;
+      }
+      out.jobs.push(row);
     });
     const total = out.jobs.reduce((s, j) => s + j.shareBp, 0);
     if (total > 10000) errors.push(`the shares add up to ${bpToPercent(total)}%; they can't be more than 100%`);
+    for (const g of SHARE_GROUPS) {
+      const t = out.jobs.reduce((s, j) => s + (j[`${g}Bp`] ?? j.shareBp), 0);
+      if (t > 10000) errors.push(`the ${GROUP_LABEL[g]} shares add up to ${bpToPercent(t)}%; they can't be more than 100%`);
+    }
   }
   return out;
 }
@@ -91,9 +109,14 @@ async function cleanTrip(c, companyId, input, errors, partial = false) {
 /** 6000 → "60", 3333 → "33.33" */
 const bpText = (bp) => (bp / 100).toFixed(2).replace(/\.?0+$/, '');
 
+const GROUP_LABEL = { air: 'airfare', hotel: 'hotel', car: 'rental car', rest: 'other costs' };
+
 async function saveTripJobs(c, companyId, tripId, jobs) {
   await c.query('DELETE FROM trip_jobs WHERE trip_id = $1', [tripId]);
-  for (const j of jobs) await c.query('INSERT INTO trip_jobs (company_id, trip_id, job_id, share_bp) VALUES ($1,$2,$3,$4)', [companyId, tripId, j.jobId, j.shareBp]);
+  for (const j of jobs) {
+    await c.query('INSERT INTO trip_jobs (company_id, trip_id, job_id, share_bp, air_bp, hotel_bp, car_bp, rest_bp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      [companyId, tripId, j.jobId, j.shareBp, j.airBp ?? null, j.hotelBp ?? null, j.carBp ?? null, j.restBp ?? null]);
+  }
 }
 
 export async function createTrip(pool, companyId, input, { actor = null } = {}) {
@@ -126,12 +149,18 @@ export async function updateTrip(pool, companyId, tripId, input, { actor = null 
         WHERE d.status = 'posted' AND l.job_id IS NOT NULL AND (l.trip_cost_id IN (SELECT id FROM trip_costs WHERE trip_id = $1)
           OR l.time_entry_id IN (SELECT id FROM time_entries WHERE trip_id = $1))`, [tripId]);
       // ...and keeps its share: later "pull in unbilled" lines use the share, so changing it would bill more or less than 100%.
-      const { rows: oldShares } = await c.query('SELECT job_id, share_bp FROM trip_jobs WHERE trip_id = $1', [tripId]);
+      const { rows: oldShares } = await c.query('SELECT job_id, share_bp, air_bp, hotel_bp, car_bp, rest_bp FROM trip_jobs WHERE trip_id = $1', [tripId]);
       for (const b of billed) {
         const now = v.jobs.find((j) => j.jobId === b.job_id);
         const was = oldShares.find((s) => s.job_id === b.job_id);
         if (!now) errors.push(`${b.name} has already billed part of this trip, so it stays on the list`);
         else if (was && now.shareBp !== was.share_bp) errors.push(`${b.name} has already billed part of this trip at ${bpText(was.share_bp)}%, so its share stays ${bpText(was.share_bp)}%`);
+        else if (was) {
+          for (const g of SHARE_GROUPS) {
+            const before = was[`${g}_bp`] ?? was.share_bp; const after = now[`${g}Bp`] ?? now.shareBp;
+            if (before !== after) errors.push(`${b.name} has already billed part of this trip, so its ${GROUP_LABEL[g]} share stays ${bpText(before)}%`);
+          }
+        }
       }
     }
     if (errors.length) throw new LedgerError('Trip is not valid', errors);
@@ -159,7 +188,9 @@ export async function listTrips(db, companyId, { includeClosed = true } = {}) {
 export async function getTrip(db, companyId, tripId) {
   const t = await getTripRow(db, companyId, tripId);
   const { rows: jobs } = await db.query(
-    `SELECT tj.job_id AS "jobId", j.name AS "jobName", j.code AS "jobCode", c.name AS "customerName", tj.share_bp AS "shareBp"
+    `SELECT tj.job_id AS "jobId", j.name AS "jobName", j.code AS "jobCode", c.name AS "customerName", tj.share_bp AS "shareBp",
+            coalesce(tj.air_bp, tj.share_bp) AS "airBp", coalesce(tj.hotel_bp, tj.share_bp) AS "hotelBp",
+            coalesce(tj.car_bp, tj.share_bp) AS "carBp", coalesce(tj.rest_bp, tj.share_bp) AS "restBp"
        FROM trip_jobs tj JOIN jobs j ON j.id = tj.job_id LEFT JOIN contacts c ON c.id = j.customer_id
       WHERE tj.trip_id = $1 ORDER BY tj.share_bp DESC, lower(j.name)`, [t.id]);
   const { rows: costs } = await db.query(
@@ -183,7 +214,7 @@ export async function getTrip(db, companyId, tripId) {
   const posted = costs.filter((x) => x.status === 'posted');
   return {
     id: t.id, name: t.name, startDate: t.start_date, endDate: t.end_date, notes: t.notes, isActive: t.is_active,
-    jobs: jobs.map((j) => ({ ...j, share: bpToPercent(j.shareBp) })), sharePercent: bpToPercent(shareTotal),
+    jobs: jobs.map((j) => ({ ...j, share: bpToPercent(j.shareBp), air: bpToPercent(j.airBp), hotel: bpToPercent(j.hotelBp), car: bpToPercent(j.carBp), rest: bpToPercent(j.restBp) })), sharePercent: bpToPercent(shareTotal),
     costs: costs.map((x) => ({ ...x, amountCents: Number(x.amountCents) })),
     totalCents: posted.reduce((s, x) => s + Number(x.amountCents), 0),
     time: time.map((x) => ({ ...x, hours: minutesToHours(x.minutes) })),
