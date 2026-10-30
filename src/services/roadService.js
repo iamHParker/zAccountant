@@ -420,7 +420,9 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
  * Accept all (Homer, 2026-10-30): several items in one step, all or nothing. Trips go first, so the costs and travel
  * time sent with a new trip land on it. Costs use the one expense account and paid-with account given.
  */
-export async function acceptRoadItems(db, companyId, viewer, { itemIds, expenseAccountId, paidFromAccountId, tripId } = {}, { actor = null } = {}) {
+export async function acceptRoadItems(db, companyId, viewer, { itemIds, expenseAccountId, paidFromAccountId, paidFrom, tripId } = {}, { actor = null } = {}) {
+  // paidFrom: { itemId: accountId } for costs on another card than the rest (airfare and hotel on the travel card).
+  const cardFor = paidFrom && typeof paidFrom === 'object' ? paidFrom : {};
   if (!Array.isArray(itemIds) || !itemIds.length || itemIds.length > 200 || !itemIds.every(isId)) throw new LedgerError('Choose the items to accept');
   return withTransaction(db, async (c) => {
     await lockCompany(c, companyId);
@@ -430,7 +432,8 @@ export async function acceptRoadItems(db, companyId, viewer, { itemIds, expenseA
     if (rows.length !== new Set(itemIds).size) throw new LedgerError('Some of those items were already reviewed (or are checks); refresh and try again');
     const out = [];
     for (const r of rows) {
-      const one = await acceptRoadItem(c, companyId, viewer, r.id, { expenseAccountId, paidFromAccountId, tripId: r.kind === 'trip' ? null : tripId }, { actor });
+      const card = isId(cardFor[r.id]) ? cardFor[r.id] : paidFromAccountId;
+      const one = await acceptRoadItem(c, companyId, viewer, r.id, { expenseAccountId, paidFromAccountId: card, tripId: r.kind === 'trip' ? null : tripId }, { actor });
       out.push({ id: r.id, kind: r.kind, ...one });
     }
     return { accepted: out.length, items: out };

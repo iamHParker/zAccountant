@@ -113,6 +113,9 @@ const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } 
 // The accounts last used for costs that came in from the Road page.
 const lastRoadAccounts = () => { try { return JSON.parse(localStorage.getItem('zacc.roadAccounts') ?? '{}') ?? {}; } catch { return {}; } };
 const keepRoadAccounts = (v) => { try { localStorage.setItem('zacc.roadAccounts', JSON.stringify(v)); } catch { /* not kept */ } };
+// The card last used for each kind of trip cost (Homer, 2026-10-30: airfare and hotels on the card with the upgrades).
+const cardsByKind = () => { try { return JSON.parse(localStorage.getItem('zacc.cardByKind') ?? '{}') ?? {}; } catch { return {}; } };
+const keepCardFor = (kind, id) => { try { if (kind && id) localStorage.setItem('zacc.cardByKind', JSON.stringify({ ...cardsByKind(), [kind]: id })); } catch { /* not kept */ } };
 const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), dueDate: '', planCount: '', planFirstDue: '', noLateCharges: false, memo: '', project: '', jobId: '', attention: '', careOf: '', sendTo: '', clientRef: '', savePerson: true, taxRate, splitJobs: 1, lines: [blankLine()], key: newKey() });
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, isHomeowner: false, noLateCharges: false, groupName: '', people: [] });
@@ -324,8 +327,8 @@ createApp({
         pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
-      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null },
-      road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, busy: false },
+      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, find: { q: '', pick: {}, newJob: null, customers: [] } },
+      road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         imports: [], recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
@@ -1538,14 +1541,28 @@ createApp({
     },
     /** A cost or travel time whose trip isn't in the books yet (or was dismissed) needs a trip chosen here. */
     roadNeedsTrip(i) { return i.kind !== 'trip' && !i.trip?.tripId && i.trip?.tripStatus !== 'pending'; },
+    /** The card a waiting cost goes on: the one picked on its row, else the card last used for its kind, else Paid with. */
+    roadCard(i) {
+      const picked = this.road.cardFor[i.id];
+      if (picked) return picked;
+      const last = cardsByKind()[i.data.kind ?? 'other'];
+      return last && this.tripPaidFromAccounts().some((a) => a.id === last) ? last : this.road.paidFromId;
+    },
+    pickCostKind(k) {
+      const c = this.trip.cost;
+      c.kind = k;
+      const last = cardsByKind()[k];
+      if (!this.trip.editCostId && last && this.tripPaidFromAccounts().some((a) => a.id === last)) c.paidFromAccountId = last;
+    },
     roadPhotoUrl(i, id) { return `/api${this.tripBase()}/road-items/${i.id}/photos/${id}`; },
     async acceptRoad(i) {
       const r = this.road;
       const body = {};
       if (i.kind === 'cost') {
         if (!r.expenseId || !r.paidFromId) { this.flash('Choose the expense account and what it was paid with (top of this box) first.', 'bad'); return; }
-        Object.assign(body, { expenseAccountId: r.expenseId, paidFromAccountId: r.paidFromId });
+        Object.assign(body, { expenseAccountId: r.expenseId, paidFromAccountId: this.roadCard(i) });
         keepRoadAccounts({ expenseId: r.expenseId, paidFromId: r.paidFromId });
+        keepCardFor(i.data.kind ?? 'other', body.paidFromAccountId);
       }
       if (i.kind !== 'trip' && r.tripFor[i.id]) body.tripId = r.tripFor[i.id];
       r.busy = true;
@@ -1569,16 +1586,52 @@ createApp({
       r.busy = true;
       try {
         if (r.expenseId) keepRoadAccounts({ expenseId: r.expenseId, paidFromId: r.paidFromId });
+        // Each cost goes on its own row's card.
+        const cards = Object.fromEntries(items.filter((i) => i.kind === 'cost').map((i) => [i.id, this.roadCard(i)]));
         let ok = !rest.length || await this.run(() => api('POST', `${this.tripBase()}/road-items/accept-all`,
-          { itemIds: rest.map((i) => i.id), expenseAccountId: r.expenseId || undefined, paidFromAccountId: r.paidFromId || undefined }));
+          { itemIds: rest.map((i) => i.id), expenseAccountId: r.expenseId || undefined, paidFromAccountId: r.paidFromId || undefined, paidFrom: cards }));
         for (const i of chosen) if (ok) ok = await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/accept`,
-          { tripId: r.tripFor[i.id], expenseAccountId: r.expenseId || undefined, paidFromAccountId: r.paidFromId || undefined }));
+          { tripId: r.tripFor[i.id], expenseAccountId: r.expenseId || undefined, paidFromAccountId: cards[i.id] || r.paidFromId || undefined }));
+        if (ok) for (const i of items.filter((x) => x.kind === 'cost')) keepCardFor(i.data.kind ?? 'other', cards[i.id]);
         if (ok) this.flash(`${items.length} item${items.length === 1 ? '' : 's'} put into the books.`);
         await this.loadTrips();
       } finally { r.busy = false; }
     },
+    // ---- Projects on a trip: search by number or name ("NM"), tick, add; or add a new project (Homer, 2026-10-30).
+    tripJobMatches() {
+      const q = this.trip.find.q.trim().toLowerCase();
+      if (!q || !this.trip.cur) return [];
+      const on = new Set(this.trip.cur.jobs.map((j) => j.jobId));
+      return this.ar.jobs.filter((j) => j.isActive && !on.has(j.id)
+        && [j.code, j.name, j.customerName].some((t) => (t ?? '').toLowerCase().includes(q))).slice(0, 40);
+    },
+    /** Add the ticked projects (and any just made); every project on the trip then shares it evenly. */
+    async addTripJobs(extraIds = []) {
+      const t = this.trip.cur; const f = this.trip.find;
+      const ids = [...Object.keys(f.pick).filter((id) => f.pick[id]), ...extraIds];
+      if (!ids.length) return;
+      const all = [...t.jobs.map((j) => j.jobId), ...ids.filter((id) => !t.jobs.some((j) => j.jobId === id))];
+      if (t.jobs.length && !confirm(`Add ${ids.length} project${ids.length === 1 ? '' : 's'} and split the trip evenly across all ${all.length}? You can change the shares with edit.`)) return;
+      const each = Math.floor(10000 / all.length);
+      const jobs = all.map((jobId, i) => ({ jobId, share: ((i === all.length - 1 ? 10000 - each * (all.length - 1) : each) / 100).toFixed(2) }));
+      const r = await this.run(() => api('PATCH', `${this.tripBase()}/trips/${t.id}`, { jobs }), 'Projects added.');
+      if (r) { this.trip.cur = r; Object.assign(f, { q: '', pick: {}, newJob: null }); }
+    },
+    async startTripNewJob() {
+      const f = this.trip.find;
+      const q = f.q.trim();
+      f.newJob = /^[\w-]*\d[\w-]*$/.test(q) ? { code: q, name: '', customerId: '' } : { code: '', name: q, customerId: '' };
+      if (!f.customers.length) f.customers = (await this.run(() => api('GET', `${this.tripBase()}/customers`))) ?? [];
+    },
+    async saveTripNewJob() {
+      const n = this.trip.find.newJob;
+      const j = await this.run(() => api('POST', `${this.tripBase()}/jobs`, { code: n.code, name: n.name, customerId: n.customerId || undefined }), 'Project added.');
+      if (!j) return;
+      this.ar.jobs = (await this.run(() => api('GET', `${this.tripBase()}/jobs?inactive=1`))) ?? this.ar.jobs;
+      await this.addTripJobs([j.id]);
+    },
     /** Pick a trip from the pull-down (newest first); empty goes back to the list. */
-    pickTrip(id) { if (id) { Object.assign(this.trip, { form: null, cost: null, editCostId: null, travel: null, viewRow: null }); this.openTrip(id); } else this.closeTripView(); },
+    pickTrip(id) { if (id) { Object.assign(this.trip, { form: null, cost: null, editCostId: null, travel: null, viewRow: null, find: { q: '', pick: {}, newJob: null, customers: this.trip.find.customers } }); this.openTrip(id); } else this.closeTripView(); },
     /** Road items waiting for the open trip (sent from the phone, not in the books yet). */
     tripRoadItems() { return this.trip.cur ? this.road.items.filter((i) => i.kind !== 'trip' && i.trip?.tripId === this.trip.cur.id) : []; },
     /** The open trip's grid: costs, travel time and what the phone sent for it, by date. */
@@ -1610,7 +1663,7 @@ createApp({
         Object.assign(this.trip, { editCostId: null, travel: null, cost: { ...blankTripCost(d.date), roadItem: i, kind: d.kind ?? 'other', vendor: d.vendor ?? '',
           description: d.description ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? '', amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : '',
           expenseAccountId: r.expenseId || this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id || '',
-          paidFromAccountId: r.paidFromId || this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id || '', keptPhotos: i.photos.length } });
+          paidFromAccountId: this.roadCard(i) || this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id || '', keptPhotos: i.photos.length } });
       } else {
         const hm = (m) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
         Object.assign(this.trip, { cost: null, travel: { roadItem: i, date: d.date, hours: d.start ? '' : hm(d.minutes), start: d.start ?? '', end: d.end ?? '',
@@ -1763,12 +1816,14 @@ createApp({
       const body = { date: c.date, kind: c.kind, vendor: c.vendor, description: c.description, amount: c.amount, miles: c.miles, mileRate: c.mileRate,
         expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId };
       if (c.kind === 'mileage') keepMileRate(c.mileRate);
+      if (!c.roadItem) keepCardFor(c.kind, c.paidFromAccountId);
       if (c.roadItem) {
         const { date, kind, vendor, description, amount, miles, mileRate } = body;
         const done = await this.saveRoadEdit(c.roadItem, { date, kind, vendor, description, amount, miles, mileRate },
           { expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId });
         if (!done) return;
-        keepRoadAccounts({ expenseId: c.expenseAccountId, paidFromId: c.paidFromAccountId });
+        keepRoadAccounts({ expenseId: c.expenseAccountId, paidFromId: this.road.paidFromId || c.paidFromAccountId });
+        keepCardFor(c.kind, c.paidFromAccountId);
         for (const picture of c.photos) await this.run(() => api('POST', `${this.tripBase()}/trip-costs/${done.costId}/photos`, { picture }));
         tr.cost = null;
         return this.openTrip(tr.cur.id);
