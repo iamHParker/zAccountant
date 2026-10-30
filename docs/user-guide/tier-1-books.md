@@ -278,6 +278,14 @@ is already on an invoice can't be edited or voided until that invoice is.
    list until it's billed. To correct a cost, press **edit**; the old one is voided and the corrected one takes its
    place, with its photos. A cost already on an invoice can't be changed until that invoice is edited or voided.
 
+5. **Pick a trip** in the **Trip** pull-down at the top of Trips (newest first). Its projects and their shares come
+   first, then one grid of **Entries** by date: each cost and day of travel time with **view | edit | delete**. What
+   your phone sent for the trip is in the same grid, marked **from the road · not in books**. **edit** on one of those
+   opens it in the form; check it, change anything, and **Save to books** puts it in your books with your changes and
+   its receipt photos. **Accept all** puts all of the trip's waiting entries in at once (choose the expense account and
+   what paid for them first). In **From the road**, each trip also has **Accept all** and **Open trip to edit**.
+   **delete** on a cost voids it (its entry is reversed, kept on record); on a road entry it dismisses it.
+
 On each project's invoice, **⏱ Pull in unbilled time and costs** lists its share of every trip cost and travel hour.
 Each line bills the full cost × the share (quantity 0.8 for 80%), so the client can see both. To bill a different
 share on one invoice, type another quantity on that line.

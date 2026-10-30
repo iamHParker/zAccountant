@@ -304,6 +304,36 @@ async function lockItem(c, companyId, itemId) {
   return i;
 }
 
+/**
+ * The item's data with changes typed at the desk (Trips → the trip's grid → Edit, Homer 2026-10-30), checked again
+ * exactly like an item from the phone. The trip it names and its kind stay; amounts are typed in dollars.
+ */
+async function deskData(c, companyId, item, changes) {
+  const d = item.data;
+  const base = item.kind === 'cost'
+    ? { ...d, amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : '' }
+    : item.kind === 'time'
+      ? { ...d, hours: `${Math.floor(d.minutes / 60)}:${String(d.minutes % 60).padStart(2, '0')}`,
+        breaks: d.breakMinutes ? `${Math.floor(d.breakMinutes / 60)}:${String(d.breakMinutes % 60).padStart(2, '0')}` : '' }
+      : { ...d };
+  const merged = { ...base, ...changes, trip: d.trip };
+  if (item.kind === 'time' && changes.hours !== undefined && !changes.start && !changes.end) { delete merged.start; delete merged.end; }
+  return cleanItem(c, { id: item.key_id, companyId }, item.kind, merged);
+}
+
+/** Change an item still waiting in the inbox, at the desk. It is not in the books until accepted. */
+export async function editRoadItem(db, companyId, itemId, { data } = {}, { actor = null } = {}) {
+  return withTransaction(db, async (c) => {
+    await lockCompany(c, companyId);
+    const item = await lockItem(c, companyId, itemId);
+    if (item.kind === 'check') throw new LedgerError('Change a check when you record it as a payment');
+    const clean = await deskData(c, companyId, item, data && typeof data === 'object' ? data : {});
+    await c.query('UPDATE road_items SET data = $2 WHERE id = $1', [item.id, JSON.stringify(clean)]);
+    await appendAudit(c, companyId, { action: 'edit', entity: 'road_item', entityId: item.id, actor, payload: { kind: item.kind, from: item.data, to: clean } });
+    return { id: item.id, kind: item.kind, data: clean, status: 'pending' };
+  });
+}
+
 /** The trip a cost or travel time goes on: the one chosen at the desk, else the one named on the phone. */
 async function tripFor(c, companyId, item, chosen) {
   if (chosen) {
@@ -336,6 +366,13 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
     await lockCompany(c, companyId);
     const item = await lockItem(c, companyId, itemId);
     if (item.kind === 'check') throw new LedgerError('Record a check as a payment: Sales → Checks from the road');
+    // Changes typed at the desk go in with it ("Save to books").
+    if (input.data && typeof input.data === 'object') {
+      const clean = await deskData(c, companyId, item, input.data);
+      await c.query('UPDATE road_items SET data = $2 WHERE id = $1', [item.id, JSON.stringify(clean)]);
+      await appendAudit(c, companyId, { action: 'edit', entity: 'road_item', entityId: item.id, actor, payload: { kind: item.kind, from: item.data, to: clean } });
+      item.data = clean;
+    }
     const d = item.data;
     const done = async (cols) => {
       const sets = Object.keys(cols).map((k, i) => `${k} = $${i + 3}`).join(', ');
@@ -376,6 +413,27 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
         notes: d.notes, tripId, jobId: null }, { actor });
     await done({ time_entry_id: t.id, trip_id: tripId });
     return { accepted: true, tripId, timeEntryId: t.id };
+  });
+}
+
+/**
+ * Accept all (Homer, 2026-10-30): several items in one step, all or nothing. Trips go first, so the costs and travel
+ * time sent with a new trip land on it. Costs use the one expense account and paid-with account given.
+ */
+export async function acceptRoadItems(db, companyId, viewer, { itemIds, expenseAccountId, paidFromAccountId, tripId } = {}, { actor = null } = {}) {
+  if (!Array.isArray(itemIds) || !itemIds.length || itemIds.length > 200 || !itemIds.every(isId)) throw new LedgerError('Choose the items to accept');
+  return withTransaction(db, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows } = await c.query(
+      `SELECT id, kind FROM road_items WHERE company_id = $1 AND id = ANY($2::uuid[]) AND status = 'pending' AND kind <> 'check'
+        ORDER BY (kind = 'trip') DESC, received_at, id`, [companyId, [...new Set(itemIds)]]);
+    if (rows.length !== new Set(itemIds).size) throw new LedgerError('Some of those items were already reviewed (or are checks); refresh and try again');
+    const out = [];
+    for (const r of rows) {
+      const one = await acceptRoadItem(c, companyId, viewer, r.id, { expenseAccountId, paidFromAccountId, tripId: r.kind === 'trip' ? null : tripId }, { actor });
+      out.push({ id: r.id, kind: r.kind, ...one });
+    }
+    return { accepted: out.length, items: out };
   });
 }
 

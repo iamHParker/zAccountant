@@ -627,6 +627,8 @@ export function createApp(pool, { log } = {}) {
   api.get(RI, route(['view_books', 'bills', 'invoices'], ({ db, req, companyId }) => roadSvc.listRoadItems(db, companyId, { status: req.query.status })));
   api.get(`${RI}/:itemId/photos/:photoId`, route(['view_books', 'bills', 'invoices'], async ({ db, req, companyId }) =>
     ({ [FILE]: await roadSvc.getRoadPhoto(db, companyId, req.params.itemId, req.params.photoId) })));
+  api.patch(`${RI}/:itemId`, route('bills', ({ db, req, companyId, actor }) => roadSvc.editRoadItem(db, companyId, req.params.itemId, req.body ?? {}, { actor })));
+  api.post(`${RI}/accept-all`, route('bills', ({ db, req, companyId, viewer, actor }) => roadSvc.acceptRoadItems(db, companyId, viewer, req.body ?? {}, { actor })));
   api.post(`${RI}/:itemId/accept`, route('bills', ({ db, req, companyId, viewer, actor }) => roadSvc.acceptRoadItem(db, companyId, viewer, req.params.itemId, req.body ?? {}, { actor })));
   api.post(`${RI}/:itemId/accept-check`, route('invoices', ({ db, req, companyId, actor }) => roadSvc.acceptRoadCheck(db, companyId, req.params.itemId, req.body ?? {}, { actor })));
   api.post(`${RI}/:itemId/dismiss`, route(['bills', 'invoices'], ({ db, req, companyId, actor }) => roadSvc.dismissRoadItem(db, companyId, req.params.itemId, { actor })));

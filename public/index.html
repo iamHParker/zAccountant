@@ -1352,6 +1352,11 @@
     <section v-if="tab === 'trips'" class="trips">
       <div class="row wrap"><h1>Trips</h1>
         <button class="primary" v-if="can('bills') && !trip.form" @click="newTrip">+ New trip</button>
+        <label class="inline trip-pick" v-if="!trip.form && trip.list.length">Trip
+          <select :value="trip.cur?.id ?? ''" @change="pickTrip($event.target.value)">
+            <option value="">Choose a trip…</option>
+            <option v-for="t in trip.list" :value="t.id">{{ t.name }} · {{ usDate(t.startDate) }} · {{ money(t.totalCents) }}{{ t.isActive ? '' : ' (closed)' }}</option>
+          </select></label>
         <button v-if="trip.cur || trip.form" @click="closeTripView">← All trips</button></div>
       <p class="muted">Keep what a trip cost (airfare, rental car, lodging, tolls, mileage) and the travel time, and which projects it was for.
         Each project's invoice bills its share: Sales → New invoice → ⏱ Pull in unbilled time and costs.</p>
@@ -1396,7 +1401,9 @@
               <select v-model="road.paidFromId"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
           </div>
           <template v-for="g in roadGroups()">
-            <h3>{{ g.name }}</h3>
+            <div class="row wrap"><h3>{{ g.name }}</h3>
+              <button v-if="can('bills') && g.items.length > 1" class="primary small" :disabled="road.busy" @click="acceptRoadGroup(g.items)">Accept all ({{ g.items.length }})</button>
+              <button v-if="g.items[0].trip?.tripId && !g.items.some(i => i.kind === 'trip')" class="small" @click="pickTrip(g.items[0].trip.tripId)">Open trip to edit</button></div>
             <div class="road-item" v-for="i in g.items">
               <div class="row wrap">
                 <span><span class="muted small">{{ usDate(i.kind === 'trip' ? i.data.startDate : i.data.date) }}</span> {{ roadLabel(i) }}</span>
@@ -1416,7 +1423,8 @@
           </template>
         </div>
         <p class="hint" v-if="!trip.list.length">No trips yet.</p>
-        <button v-for="t in trip.list" class="trip-card" :class="{ muted: !t.isActive }" @click="openTrip(t.id)">
+        <p class="hint" v-else>Choose a trip in the pull-down above (newest first) to see its projects and every entry, or open one here.</p>
+        <button v-for="t in trip.list.slice(0, 6)" class="trip-card" :class="{ muted: !t.isActive }" @click="openTrip(t.id)">
           <span class="row"><strong>{{ t.name }}</strong><span class="num">{{ money(t.totalCents) }}</span></span>
           <span class="muted small">{{ usDate(t.startDate) }}{{ t.endDate && t.endDate !== t.startDate ? ' – ' + usDate(t.endDate) : '' }} · {{ t.costCount }} cost{{ t.costCount === 1 ? '' : 's' }}{{ t.isActive ? '' : ' · closed' }}</span>
           <span class="small" v-if="t.projectsText">{{ t.projectsText }}</span>
@@ -1529,10 +1537,12 @@
         </div>
 
         <div class="card">
-          <div class="row wrap"><h2>Costs</h2><button class="primary" v-if="can('bills') && !trip.cost" @click="newTripCost">+ Add cost</button></div>
+          <div class="row wrap"><h2>Entries</h2>
+            <span v-if="can('bills') && !trip.cost && !trip.travel"><button class="primary" @click="newTripCost">+ Add cost</button> <button @click="newTravel">+ Add travel time</button></span></div>
           <form v-if="trip.cost" @submit.prevent="saveTripCost" class="trip-cost-form">
-            <h3>{{ trip.editCostId ? 'Correct this cost' : 'New cost' }}</h3>
+            <h3>{{ trip.cost.roadItem ? 'From the road: check it, then save it to the books' : trip.editCostId ? 'Correct this cost' : 'New cost' }}</h3>
             <p class="muted small" v-if="trip.editCostId">Saving voids the old one and records the corrected one; its receipt photos move with it.</p>
+            <p class="muted small" v-if="trip.cost.roadItem">Sent from your phone and not in the books yet. Saving puts it in the books with your changes and its photos.</p>
             <div class="chips">
               <button type="button" v-for="(label, k) in { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' }"
                 :class="{ active: (trip.cost.kind || 'other') === k }" @click="trip.cost.kind = k">{{ label }}</button>
@@ -1565,20 +1575,64 @@
                 <span class="thumb" v-for="(ph, i) in trip.cost.photos"><img :src="ph" alt="Receipt to save with this cost"><button type="button" class="link" @click="trip.cost.photos.splice(i, 1)">remove</button></span>
               </div>
             </div>
-            <button class="primary">{{ trip.editCostId ? 'Save correction' : 'Save cost' }}</button>
+            <button class="primary">{{ trip.cost.roadItem || trip.editCostId ? 'Save to books' : 'Save cost' }}</button>
             <button type="button" @click="trip.cost = null; trip.editCostId = null">Cancel</button>
           </form>
-          <p class="hint" v-if="!trip.cur.costs.length && !trip.cost">No costs yet.</p>
-          <div v-for="x in trip.cur.costs" class="cost-row" :class="{ muted: x.status === 'void' }">
-            <div class="row"><strong>{{ x.description }}</strong><span class="num">{{ money(x.amountCents) }}</span></div>
-            <div class="small muted">{{ usDate(x.date) }}{{ x.vendor ? ' · ' + x.vendor : '' }}{{ x.kind === 'mileage' ? ' · ' + x.miles + ' mi × ' + x.mileRateCents + '¢' : '' }}
-              · {{ x.expenseAccountName }} · paid with {{ x.paidFromName }}<template v-if="x.status === 'void'"> · {{ x.replacedById ? 'corrected' : 'void' }}</template></div>
-            <div class="small" v-if="x.billed.length">Billed: {{ billedText(x) }}</div>
-            <div class="actions" v-if="x.status === 'posted'">
-              <button class="link" @click="openTripPhotos(x)">{{ x.photoCount ? '📷 ' + x.photoCount + ' photo' + (x.photoCount === 1 ? '' : 's') : '📷 add photo' }}</button>
-              <template v-if="can('post') && !x.billed.length"><button class="link" @click="editTripCost(x)">edit</button> <button class="link" @click="voidTripCost(x)">void</button></template>
+          <form v-if="trip.travel" @submit.prevent="saveTravel()" class="grid2">
+            <p class="small span2" v-if="trip.travel.editId"><strong>Change this day of travel time</strong></p>
+            <p class="small span2" v-if="trip.travel.roadItem"><strong>From the road: check it, then save it to the books</strong></p>
+            <p class="hint small span2">One entry per day. Type the hours, or the start and end times and the breaks (lunch, stops); the hours are worked out.</p>
+            <label>Date <input type="date" v-model="trip.travel.date" required></label>
+            <label v-if="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)?.hours">Hours
+              <input :value="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).hours" class="num" readonly></label>
+            <label v-else>Hours <input v-model="trip.travel.hours" inputmode="decimal" class="num" placeholder="6 or 5:30" :required="!trip.travel.start && !trip.travel.end"></label>
+            <label>Start (optional) <input type="time" v-model="trip.travel.start"></label>
+            <label>End (optional) <input type="time" v-model="trip.travel.end"></label>
+            <label>Breaks (h:mm) <input v-model.trim="trip.travel.breaks" inputmode="decimal" placeholder="0:45"></label>
+            <label>Notes (optional) <input v-model="trip.travel.notes" maxlength="500" placeholder="Drive SAT to Dallas"></label>
+            <p class="small span2" :class="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)?.error ? 'bad' : 'muted'" v-if="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)">
+              {{ clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).error || clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).text }}</p>
+            <div class="span2"><button class="primary">{{ trip.travel.roadItem ? 'Save to books' : 'Save' }}</button> <button type="button" v-if="!trip.travel.editId && !trip.travel.roadItem" @click="saveTravel(true)">Save, then next day</button>
+              <button type="button" @click="trip.travel = null">Cancel</button></div>
+          </form>
+          <div class="road-pending" v-if="tripRoadItems().length && can('bills') && !trip.cost && !trip.travel">
+            <p class="small"><strong>{{ tripRoadItems().length }} from the road, not in the books yet.</strong> Edit one to check it and save it, or put them all in at once.</p>
+            <div class="grid2" v-if="tripRoadItems().some(i => i.kind === 'cost')">
+              <label>Costs go to (expense)
+                <select v-model="road.expenseId"><option value="">Choose…</option><option v-for="a in tripExpenseAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+              <label>Paid with
+                <select v-model="road.paidFromId"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
             </div>
+            <button class="primary" :disabled="road.busy" @click="acceptRoadGroup(tripRoadItems())">Accept all ({{ tripRoadItems().length }})</button>
           </div>
+          <p class="hint" v-if="!tripGrid().length && !trip.cost && !trip.travel">Nothing on this trip yet. Travel time is billed by the same shares, at the hourly rate you pick on the invoice.</p>
+          <table class="data trip-grid" v-if="tripGrid().length">
+            <thead><tr><th>Date</th><th>Entry</th><th class="num">Cost</th><th></th></tr></thead>
+            <template v-for="g in tripGrid()" :key="g.key">
+              <tr :class="{ muted: g.type === 'cost' && g.x.status === 'void', 'road-row': g.type === 'road' }">
+                <td>{{ usDate(g.date) }}</td>
+                <td>{{ g.entry }}
+                  <span v-if="g.type === 'road'" class="tag">from the road · not in books</span>
+                  <span v-if="g.type === 'cost' && g.x.status === 'void'" class="small"> · {{ g.x.replacedById ? 'corrected' : 'void' }}</span>
+                  <span v-if="g.type !== 'road' && g.x.billed.length" class="small muted"> · billed: {{ billedText(g.x) }}</span>
+                  <span v-if="g.photos" class="small muted"> · 📷 {{ g.photos }}</span></td>
+                <td class="num">{{ g.cents != null ? money(g.cents) : g.hours + ' h' }}</td>
+                <td class="actions">
+                  <button class="link" @click="viewRow(g)">view</button>
+                  <template v-if="canEditRow(g)"> | <button class="link" @click="editRow(g)">edit</button> | <button class="link" @click="deleteRow(g)">delete</button></template>
+                </td>
+              </tr>
+              <tr v-if="trip.viewRow === g.key" class="view-row"><td colspan="4">
+                <template v-if="g.type === 'road'">
+                  <div class="small muted">Sent from {{ g.item.keyName }} on {{ usDate(g.item.receivedAt) }}<span v-if="g.item.data.vendor"> · paid to {{ g.item.data.vendor }}</span></div>
+                  <div class="photo-strip" v-if="g.item.photos.length">
+                    <a v-for="id in g.item.photos" :href="roadPhotoUrl(g.item, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(g.item, id)" alt="Receipt photo"></a></div>
+                  <span v-else class="small muted">No photos.</span>
+                </template>
+                <div v-else class="small muted">{{ g.x.start ? g.x.start + '–' + g.x.end + ' · ' : '' }}{{ g.x.userName }}{{ g.x.billable ? '' : ' · not billable' }}</div>
+              </td></tr>
+            </template>
+          </table>
           <div class="photo-view" v-if="trip.photoView">
             <div class="row"><h3>Receipts: {{ trip.photoView.cost.description }}</h3><button class="link" @click="trip.photoView = null">close</button></div>
             <p class="hint" v-if="!trip.photoView.photos.length">No photos yet.</p>
@@ -1592,33 +1646,6 @@
               <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="uploadTripPhotos"></label> <button type="button" @click="pastePhotos('uploadTripPhotos')">📋 Paste</button>
               <span class="muted small" v-if="trip.photoView.busy">Saving photo…</span>
             </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="row wrap"><h2>Travel time</h2><button v-if="can('bills') && !trip.travel" @click="newTravel">+ Add travel time</button></div>
-          <form v-if="trip.travel" @submit.prevent="saveTravel()" class="grid2">
-            <p class="small span2" v-if="trip.travel.editId"><strong>Change this day of travel time</strong></p>
-            <p class="hint small span2">One entry per day. Type the hours, or the start and end times and the breaks (lunch, stops); the hours are worked out.</p>
-            <label>Date <input type="date" v-model="trip.travel.date" required></label>
-            <label v-if="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)?.hours">Hours
-              <input :value="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).hours" class="num" readonly></label>
-            <label v-else>Hours <input v-model="trip.travel.hours" inputmode="decimal" class="num" placeholder="6 or 5:30" :required="!trip.travel.start && !trip.travel.end"></label>
-            <label>Start (optional) <input type="time" v-model="trip.travel.start"></label>
-            <label>End (optional) <input type="time" v-model="trip.travel.end"></label>
-            <label>Breaks (h:mm) <input v-model.trim="trip.travel.breaks" inputmode="decimal" placeholder="0:45"></label>
-            <label>Notes (optional) <input v-model="trip.travel.notes" maxlength="500" placeholder="Drive SAT to Dallas"></label>
-            <p class="small span2" :class="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)?.error ? 'bad' : 'muted'" v-if="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)">
-              {{ clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).error || clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).text }}</p>
-            <div class="span2"><button class="primary">Save</button> <button type="button" v-if="!trip.travel.editId" @click="saveTravel(true)">Save, then next day</button>
-              <button type="button" @click="trip.travel = null">Cancel</button></div>
-          </form>
-          <p class="hint" v-if="!trip.cur.time.length && !trip.travel">No travel time. It's billed by the same shares, at the hourly rate you pick on the invoice.</p>
-          <div v-for="x in trip.cur.time" class="cost-row">
-            <div class="row"><strong>{{ x.notes || 'Travel' }}</strong><span class="num">{{ x.hours }} h</span></div>
-            <div class="small muted">{{ usDate(x.date) }}{{ x.start ? ` · ${x.start}–${x.end}` : '' }} · {{ x.userName }}{{ x.billable ? '' : ' · not billable' }}</div>
-            <div class="small" v-if="x.billed.length">Billed: {{ billedText(x) }}</div>
-            <div class="actions" v-else-if="can('bills')"><button class="link" @click="editTravel(x)">edit</button> <button class="link" @click="removeTravel(x)">delete</button></div>
           </div>
         </div>
       </template>
