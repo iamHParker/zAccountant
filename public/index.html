@@ -1533,13 +1533,13 @@
             <thead><tr><th>Project</th><th class="num" v-for="c in SHARE_COLS">{{ c.label }}</th></tr></thead>
             <tr v-for="j in trip.cur.jobs" :key="j.jobId"><td>{{ jobLabel({ name: j.jobName, code: j.jobCode }) }}<span v-if="j.customerName" class="muted small"> · {{ j.customerName }}</span></td>
               <td class="num" v-for="c in SHARE_COLS">
-                <input v-if="can('bills') && trip.shares[j.jobId]" v-model.trim="trip.shares[j.jobId][c.key]" inputmode="decimal" class="num pct"><span v-else>{{ j[c.key] }}</span>%</td></tr>
+                <input v-if="can('bills') && trip.shares[j.jobId]" v-model.trim="trip.shares[j.jobId][c.key]" @input="spreadTripShare(j.jobId, c.key)" inputmode="decimal" class="num pct"><span v-else>{{ j[c.key] }}</span>%</td></tr>
             <tr v-if="trip.cur.jobs.length" class="muted"><td>Total</td>
               <td class="num" v-for="c in SHARE_COLS" :class="{ bad: tripShareSum(c.key) > 100 }">{{ tripShareSum(c.key) }}%</td></tr>
             <tr v-if="!trip.cur.jobs.length"><td colspan="6" class="hint">No projects yet: search for them below, or press edit.</td></tr>
           </table></div>
           <p class="muted small" v-if="trip.cur.jobs.length">Each project's percent of each kind of cost; invoices bill each cost at its column's percent.
-            Travel time uses the Travel time column. Under 100% leaves the rest unbilled.</p>
+            Travel time uses the Travel time column. Typing a percent splits what is left evenly among the projects you have not typed in yet. Under 100% leaves the rest unbilled.</p>
           <p v-if="can('bills') && tripSharesChanged()"><button class="primary" @click="saveTripShares">Save shares</button>
             <button @click="resetTripShares">Undo</button></p>
           <div class="trip-find" v-if="can('bills')">

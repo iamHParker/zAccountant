@@ -293,7 +293,9 @@ is already on an invoice can't be edited or voided until that invoice is.
    In the Entries grid a dashed line marks where each new day of the trip starts.
    The project table holds each project's **percent of each kind of cost**: **Air**, **Hotel**, **Rental car**, **Rest**
    (meals, tolls, mileage, other) and **Travel time**. Type in the boxes and press **Save shares**: for example one client
-   pays 100% of the air and meals (Rest) and two clients split the hotel and rental car 50/50. The **Total** row shows
+   pays 100% of the air and meals (Rest) and two clients split the hotel and rental car 50/50. When you type a percent,
+   the projects in that column you haven't typed in yet share what is left evenly (three projects, type 50 → the other
+   two become 25 and 25) until you type theirs. The **Total** row shows
    each column's sum; under 100% leaves the rest unbilled, over 100% is refused. Each invoice's **Pull in unbilled time
    and costs** then bills every cost at its column's percent (a 0% project gets no line for it). Once a project has
    billed part of the trip, its percents stay as billed.

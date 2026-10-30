@@ -329,7 +329,7 @@ createApp({
         pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
-      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
+      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
@@ -1608,6 +1608,23 @@ createApp({
     /** The share table as typed: { jobId: { air, hotel, car, rest, share } } in percent. */
     resetTripShares() {
       this.trip.shares = Object.fromEntries((this.trip.cur?.jobs ?? []).map((j) => [j.jobId, { air: j.air, hotel: j.hotel, car: j.car, rest: j.rest, share: j.share }]));
+      this.trip.shareTouched = {};
+    },
+    /**
+     * A percent was typed (Homer, 2026-10-30): the projects in that column not typed in yet split what is left of
+     * 100% evenly, until they are typed in themselves. Worked in hundredths of a percent so the column totals exactly:
+     * one typed at 50 leaves 50.00 for two others → 25.00 + 25.00; for three others → 16.67 + 16.67 + 16.66.
+     */
+    spreadTripShare(jobId, key) {
+      this.trip.shareTouched[`${jobId}:${key}`] = true;
+      const jobs = this.trip.cur?.jobs ?? [];
+      const free = jobs.filter((j) => !this.trip.shareTouched[`${j.jobId}:${key}`]);
+      if (!free.length) return;
+      const typed = jobs.filter((j) => this.trip.shareTouched[`${j.jobId}:${key}`])
+        .reduce((t, j) => t + Math.round((Number(this.trip.shares[j.jobId]?.[key]) || 0) * 100), 0);
+      const left = Math.max(0, 10000 - typed);
+      const each = Math.floor(left / free.length);
+      free.forEach((j, i) => { this.trip.shares[j.jobId][key] = String((each + (i < left - each * free.length ? 1 : 0)) / 100); });
     },
     tripShareSum(key) {
       const total = Object.values(this.trip.shares).reduce((t, r) => t + Math.round((Number(r[key]) || 0) * 100), 0);
