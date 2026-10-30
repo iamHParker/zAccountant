@@ -192,9 +192,13 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.ok(t3.timeEntryId);
   // Accept all: both costs in one step; one already reviewed makes the whole step refuse.
   assert.equal((await desk.call('POST', `${b}/road-items/accept-all`, { itemIds: [hotel.id, food.id, day3.id], ...accounts })).status, 400);
-  const all = ok(await desk.call('POST', `${b}/road-items/accept-all`, { itemIds: [hotel.id, food.id], ...accounts }));
+  // The hotel goes on the travel card (its upgrades), lunch on the usual one.
+  const travelCard = ok(await desk.call('POST', `${b}/accounts`, { code: '2110', name: 'Travel Card', type: 'liability', subtype: 'credit_card' }), 201);
+  const all = ok(await desk.call('POST', `${b}/road-items/accept-all`, { itemIds: [hotel.id, food.id], ...accounts, paidFrom: { [hotel.id]: travelCard.id } }));
   assert.equal(all.accepted, 2);
   const t2 = ok(await desk.call('GET', `${b}/trips/${tr.tripId}`));
+  assert.equal(t2.costs.find((x) => x.amountCents === 47820).paidFromAccountId, travelCard.id);
+  assert.equal(t2.costs.find((x) => x.amountCents === 2138).paidFromAccountId, A['2100']);
   assert.deepEqual(t2.costs.map((c) => c.amountCents).sort((x, y) => x - y), [2138, 10500, 41230, 47820]);
   assert.equal(t2.time.find((x) => x.date === '2026-10-06').minutes, 150);
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);

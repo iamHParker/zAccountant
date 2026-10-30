@@ -1412,6 +1412,8 @@
               <div class="photo-strip" v-if="i.photos.length">
                 <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
               </div>
+              <label v-if="i.kind === 'cost' && can('bills')" class="small card-pick">Card
+                <select :value="roadCard(i)" @change="road.cardFor[i.id] = $event.target.value"><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
               <label v-if="roadNeedsTrip(i)" class="small">Trip for this
                 <select v-model="road.tripFor[i.id]"><option value="">Choose a trip…</option><option v-for="t in trip.list" :value="t.id">{{ t.name }}</option></select></label>
               <div class="row wrap" v-if="can('bills')">
@@ -1545,7 +1547,7 @@
             <p class="muted small" v-if="trip.cost.roadItem">Sent from your phone and not in the books yet. Saving puts it in the books with your changes and its photos.</p>
             <div class="chips">
               <button type="button" v-for="(label, k) in { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' }"
-                :class="{ active: (trip.cost.kind || 'other') === k }" @click="trip.cost.kind = k">{{ label }}</button>
+                :class="{ active: (trip.cost.kind || 'other') === k }" @click="pickCostKind(k)">{{ label }}</button>
             </div>
             <div class="grid2">
               <label>Date <input type="date" v-model="trip.cost.date" required></label>
@@ -1600,7 +1602,7 @@
             <div class="grid2" v-if="tripRoadItems().some(i => i.kind === 'cost')">
               <label>Costs go to (expense)
                 <select v-model="road.expenseId"><option value="">Choose…</option><option v-for="a in tripExpenseAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
-              <label>Paid with
+              <label>Paid with (unless a row picks another card)
                 <select v-model="road.paidFromId"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
             </div>
             <button class="primary" :disabled="road.busy" @click="acceptRoadGroup(tripRoadItems())">Accept all ({{ tripRoadItems().length }})</button>
@@ -1613,6 +1615,9 @@
                 <td>{{ usDate(g.date) }}</td>
                 <td>{{ g.entry }}
                   <span v-if="g.type === 'road'" class="tag">from the road · not in books</span>
+                  <label v-if="g.type === 'road' && g.item.kind === 'cost' && can('bills')" class="small card-pick">Card
+                    <select :value="roadCard(g.item)" @change="road.cardFor[g.item.id] = $event.target.value"><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+                  <span v-if="g.type === 'cost'" class="small muted"> · {{ g.x.paidFromName }}</span>
                   <span v-if="g.type === 'cost' && g.x.status === 'void'" class="small"> · {{ g.x.replacedById ? 'corrected' : 'void' }}</span>
                   <span v-if="g.type !== 'road' && g.x.billed.length" class="small muted"> · billed: {{ billedText(g.x) }}</span>
                   <span v-if="g.photos" class="small muted"> · 📷 {{ g.photos }}</span></td>
