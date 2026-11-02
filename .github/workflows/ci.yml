@@ -4,7 +4,9 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest became 26.04 (Nov 2026), whose pg_dump/pg_restore are newer than the PostgreSQL 16
+    # server and write settings 16 rejects (restore drill test). 24.04 ships the 16 client tools.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -22,8 +24,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # pg_dump / pg_restore must match the PostgreSQL 16 server (a newer runner client writes settings 16 rejects).
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16 && echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
       - run: npm ci
       - run: npm test
       - run: npm audit --audit-level=high
