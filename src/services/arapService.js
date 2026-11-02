@@ -502,8 +502,11 @@ export async function listDocuments(db, companyId, { kind, status = 'open', cont
   return rows.map((d) => docOut(d, today));
 }
 
-/** Void an invoice or bill: its entry is reversed. Payments applied to it must be voided first. */
-export async function voidDocument(pool, companyId, docId, { date = null, actor = null, replacedById = null } = {}) {
+/**
+ * Void an invoice or bill: its entry is reversed. Payments applied to it must be voided first, except when
+ * replaceDocument is correcting it (keepPayments): then the payments move to the corrected copy.
+ */
+export async function voidDocument(pool, companyId, docId, { date = null, actor = null, replacedById = null, keepPayments = false } = {}) {
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
@@ -513,7 +516,7 @@ export async function voidDocument(pool, companyId, docId, { date = null, actor 
     if (d.status === 'void') throw new LedgerError(`${label} is already void`);
     const { rows: paid } = await c.query(
       `SELECT 1 FROM payment_applications a JOIN payments p ON p.id = a.payment_id WHERE a.document_id = $1 AND p.status = 'posted' LIMIT 1`, [d.id]);
-    if (paid.length) throw new LedgerError(`${label} has payments; ${replacedById ? 'edit or void those payments first' : 'void those payments first'}`);
+    if (paid.length && !(keepPayments && replacedById)) throw new LedgerError(`${label} has payments; void those payments first`);
     if (d.kind === 'bill') {
       const { rows: [b] } = await c.query(`SELECT d2.number FROM document_lines src JOIN document_lines l ON l.billed_line_id = src.id JOIN documents d2 ON d2.id = l.document_id
         WHERE src.document_id = $1 AND d2.status = 'posted' LIMIT 1`, [d.id]);
@@ -599,15 +602,44 @@ export async function replaceDocument(pool, companyId, docId, { idempotencyKey =
       if (prior) return { ...(await getDocument(c, companyId, prior.id)), replayed: true };
     }
     if (typeof docId !== 'string' || !UUIDISH.test(docId)) throw new LedgerError('Invoice or bill not found');
-    const { rows: [old] } = await c.query('SELECT kind, number, no_late_charges, late_charge_month FROM documents WHERE company_id = $1 AND id = $2', [companyId, docId]);
+    const { rows: [old] } = await c.query('SELECT kind, number, contact_id, no_late_charges, late_charge_month FROM documents WHERE company_id = $1 AND id = $2', [companyId, docId]);
     if (!old) throw new LedgerError('Invoice or bill not found');
     const { rows: [{ id: newId }] } = await c.query('SELECT gen_random_uuid() AS id');
-    await voidDocument(c, companyId, docId, { actor, replacedById: newId });
+    await voidDocument(c, companyId, docId, { actor, replacedById: newId, keepPayments: true });
     const number = input.number == null || String(input.number).trim() === '' ? old.number : input.number;
     // The corrected copy of a late-charge invoice is still one (never charged itself, and counts for its month).
-    return createDocument(c, companyId, { ...input, kind: old.kind, number, noLateCharges: input.noLateCharges ?? old.no_late_charges,
+    const fixed = await createDocument(c, companyId, { ...input, kind: old.kind, number, noLateCharges: input.noLateCharges ?? old.no_late_charges,
       lateChargeMonth: old.late_charge_month, idempotencyKey, actor, documentId: newId, replacesId: docId });
+    const moved = await movePayments(c, companyId, { from: docId, to: fixed, kind: old.kind, oldContactId: old.contact_id, actor });
+    return moved ? { ...(await getDocument(c, companyId, newId)), ...(fixed.numberWasTaken ? { numberWasTaken: fixed.numberWasTaken } : {}) } : fixed;
   });
+}
+
+/**
+ * Payments already received on an invoice (or made on a bill) follow it to its corrected copy (Homer, 2026-11-02:
+ * a typing error found after the customer had paid part). The payments themselves are not touched: their bank
+ * entries, reconciliation and check photos stay as they are; only which copy they apply to changes. The books are
+ * still right, because the Receivable / Payable account is one total: the void takes the old amount out, the copy
+ * puts the corrected amount in, and the payments already came off that total. The corrected copy must still cover
+ * the payments, belong to the same customer or vendor, and be dated on or before the first one. Audited.
+ */
+async function movePayments(c, companyId, { from, to, kind, oldContactId, actor }) {
+  const { rows: apps } = await c.query(
+    `SELECT a.payment_id, a.amount_cents, to_char(p.pay_date, 'YYYY-MM-DD') AS pay_date FROM payment_applications a JOIN payments p ON p.id = a.payment_id
+      WHERE a.company_id = $1 AND a.document_id = $2 AND p.status = 'posted' ORDER BY p.pay_date`, [companyId, from]);
+  if (!apps.length) return false;
+  const label = `${SIDE[kind].label} ${to.number}`;
+  const paid = apps.reduce((s, a) => s + Number(a.amount_cents), 0);
+  const errors = [];
+  if (to.contactId !== oldContactId) errors.push(`it has payments from ${kind === 'invoice' ? 'this customer' : 'to this vendor'}, so the ${kind === 'invoice' ? 'customer' : 'vendor'} can't change (void the payments first)`);
+  if (to.totalCents < paid) errors.push(`the new total ${fmt(to.totalCents)} is less than the ${fmt(paid)} already paid; void or edit a payment first, or give the money back with a refund`);
+  if (to.date > apps[0].pay_date) errors.push(`the date must be on or before the first payment (${apps[0].pay_date})`);
+  if (errors.length) throw new LedgerError(`${label} is not valid`, errors);
+  await c.query(`UPDATE payment_applications a SET document_id = $3 FROM payments p
+                  WHERE p.id = a.payment_id AND a.company_id = $1 AND a.document_id = $2 AND p.status = 'posted'`, [companyId, from, to.id]);
+  await appendAudit(c, companyId, { action: 'move_payments', entity: kind, entityId: to.id, actor,
+    payload: { number: to.number, fromId: from, toId: to.id, paidCents: paid, payments: apps.map((a) => ({ paymentId: a.payment_id, amountCents: Number(a.amount_cents) })) } });
+  return true;
 }
 
 // ---------------------------------------------------------------- Payments

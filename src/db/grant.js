@@ -32,6 +32,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (name) ON departments TO ${role};
     GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at, replaced_by_id) ON documents, payments TO ${role};
     GRANT UPDATE (memo, due_date, client_ref, project, attention, send_to, care_of, plan_count, plan_first_due, no_late_charges) ON documents TO ${role};
+    GRANT UPDATE (document_id) ON payment_applications TO ${role};   -- only to a corrected copy (trigger, migration 039)
     GRANT UPDATE (void_date, void_reason, voided_by, voided_at) ON payroll_runs TO ${role};
     GRANT DELETE ON bank_transactions TO ${role};
     GRANT DELETE ON sessions TO ${role};

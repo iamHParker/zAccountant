@@ -2197,7 +2197,9 @@ createApp({
     editDoc(doc) {
       const invoice = this.S.kind === 'invoice';
       const dollars = (c) => (c / 100).toFixed(2);
+      const posted = (doc.payments ?? []).filter((p) => p.status === 'posted');
       this.ar.doc = { ...blankDoc(doc.taxRate ?? ''), editId: doc.id, editNumber: doc.number, contactId: doc.contactId, number: doc.number,
+        editPaidCents: doc.paidCents || 0, editFirstPay: posted.map((p) => p.date).sort()[0] ?? '',
         date: doc.date, dueDate: doc.plan ? '' : doc.dueDate ?? '', planCount: doc.plan ? String(doc.plan.count) : '', planFirstDue: doc.plan?.firstDue ?? '', noLateCharges: !!doc.noLateCharges, memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
         attention: doc.attention ?? '', careOf: doc.careOf ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
