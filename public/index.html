@@ -853,7 +853,11 @@
                 <td class="w90"><input v-model="l.quantity" @input="l.qtyTyped = true" inputmode="decimal" class="num" title="Hours, a quantity, or a share like 1/3"></td>
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td><input type="checkbox" v-model="l.taxable" class="auto-w" title="Taxable"></td>
-                <td class="num">{{ money(lineCents(l.quantity, l.unitPrice)) }}</td>
+                <td class="num line-amount" @contextmenu.prevent="openLineAmount(l)" @dblclick="openLineAmount(l)"
+                  title="Right-click or double-click to type the amount (to match rounding, within $1.00 of hours × rate)">
+                  <input v-if="l.amountOpen" v-model.trim="l.amountTyped" inputmode="decimal" class="num w90" @blur="closeLineAmount(l)" @keydown.enter.prevent="closeLineAmount(l)" v-focus>
+                  <template v-else>{{ money(lineAmt(l)) }}<span v-if="lineAdjusted(l)" class="tag" :title="'Typed; hours × rate is ' + money(lineCents(l.quantity, l.unitPrice))">typed</span>
+                    <button v-if="lineAdjusted(l)" type="button" class="link small" @click="l.amountTyped = ''" title="Go back to hours × rate">undo</button></template></td>
                 <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
                 <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
               </tr>
@@ -876,7 +880,11 @@
                 <td class="w90"><input v-model="l.quantity" inputmode="decimal" class="num"></td>
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td v-if="S.kind === 'invoice'"><input type="checkbox" v-model="l.taxable" class="auto-w"></td>
-                <td class="num">{{ money(lineCents(l.quantity, l.unitPrice)) }}</td>
+                <td class="num line-amount" @contextmenu.prevent="openLineAmount(l)" @dblclick="openLineAmount(l)"
+                  title="Right-click or double-click to type the amount (to match rounding, within $1.00 of hours × rate)">
+                  <input v-if="l.amountOpen" v-model.trim="l.amountTyped" inputmode="decimal" class="num w90" @blur="closeLineAmount(l)" @keydown.enter.prevent="closeLineAmount(l)" v-focus>
+                  <template v-else>{{ money(lineAmt(l)) }}<span v-if="lineAdjusted(l)" class="tag" :title="'Typed; hours × rate is ' + money(lineCents(l.quantity, l.unitPrice))">typed</span>
+                    <button v-if="lineAdjusted(l)" type="button" class="link small" @click="l.amountTyped = ''" title="Go back to hours × rate">undo</button></template></td>
                 <td v-if="S.kind === 'bill'"><select v-model="l.jobId" @change="l.billable = !!l.jobId"><option value="">None</option>
                   <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === l.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></td>
                 <td v-if="S.kind === 'bill'"><input type="checkbox" v-model="l.billable" :disabled="!l.jobId" class="auto-w" title="Bill to client"></td>

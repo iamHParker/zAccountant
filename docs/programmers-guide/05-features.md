@@ -101,6 +101,10 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     price by N exactly and rounds once, half-up. The invoice's *Jobs sharing these expenses* box writes `1/N` on
     every expense-kind line except ones whose quantity the user typed (`qtyTyped`). Each invoice rounds on its own,
     so three thirds of $350.00 bill $116.67 each ($350.01 in all).
+  - A line may carry `lineAmount`, its amount typed over quantity × price (Homer 2026-11-02: 4-digit hours rounded
+    2 cents differently on the invoice he sent). `cleanLines` allows it within `MAX_LINE_ADJUST_CENTS` ($1.00) of
+    quantity × price; `amount_cents` stores it. No flag column: a line is "typed" when amount ≠ quantity × price.
+    UI: right-click / double-click the Amount cell (`openLineAmount`, `lineAmt`, `lineAdjusted` in `public/app.js`).
   - Picking a rate fills the line; the line keeps its own copy of the numbers, so changing a rate later never
     changes old invoices.
   - Lines have `service_date` and `item_id`. Invoices have `project` (name and site address).

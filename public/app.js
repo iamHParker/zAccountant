@@ -82,7 +82,7 @@ const blankCompany = () => ({ name: '', homeState: 'TX', fiscalYearStartMonth: 1
 // A bill line can name its project and be billed to that client; an invoice line can come from a time entry or such a cost.
 // `row` is a tag for the screen only (never sent): when the lines are sorted by date, each row's boxes move with it.
 let lineRow = 0;
-const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', taxable: false,
+const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', amountTyped: '', amountOpen: false, taxable: false,
   jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '', row: ++lineRow });
 const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
 const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', jobs: [{ jobId: '', share: '' }] });
@@ -349,7 +349,7 @@ createApp({
     docTotals() {
       const d = this.ar.doc;
       let sub = 0; let taxable = 0;
-      for (const l of d.lines) { const c = lineCents(l.quantity, l.unitPrice) ?? 0; sub += c; if (l.taxable) taxable += c; }
+      for (const l of d.lines) { const c = this.lineAmt(l) ?? 0; sub += c; if (l.taxable) taxable += c; }
       const tax = this.S.kind === 'invoice' && d.taxRate ? taxCents(taxable, d.taxRate) : 0;
       return { sub, tax, total: sub + tax };
     },
@@ -1372,6 +1372,13 @@ createApp({
       b.recon = open ? await this.run(() => api('GET', `/companies/${this.companyId}/reconciliations/${open.id}`)) : null;
     },
     lineCents,
+    /** A line's amount: the one typed over quantity × price (a rounding adjustment), or quantity × price. */
+    lineAmt(l) { const t = String(l.amountTyped ?? '').trim() ? cents(l.amountTyped) : null; return t ?? lineCents(l.quantity, l.unitPrice); },
+    /** True when a typed amount differs from quantity × price. */
+    lineAdjusted(l) { const t = String(l.amountTyped ?? '').trim() ? cents(l.amountTyped) : null; return t != null && t !== lineCents(l.quantity, l.unitPrice); },
+    /** Right-click (or double-click) the amount to type it: Homer's paper invoices round 4-digit hours a cent or two differently. */
+    openLineAmount(l) { if (l.amountTyped === '' || l.amountTyped == null) { const c = lineCents(l.quantity, l.unitPrice); l.amountTyped = c == null ? '' : (c / 100).toFixed(2); } l.amountOpen = true; },
+    closeLineAmount(l) { l.amountOpen = false; if (!this.lineAdjusted(l)) l.amountTyped = ''; },
     // ---------------------------------------------------------------- Sales & Bills
     arBase() { return `/companies/${this.companyId}`; },
     async loadAr() {
@@ -2204,6 +2211,7 @@ createApp({
         attention: doc.attention ?? '', careOf: doc.careOf ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
         lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
           description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true,
+          amountTyped: l.amountCents !== lineCents(l.quantity ?? '1', dollars(l.unitPriceCents)) ? dollars(l.amountCents) : '',
           jobId: l.jobId ?? '', billable: !!l.billable, timeEntryId: l.timeEntryId ?? '', billedLineId: l.billedLineId ?? '', tripCostId: l.tripCostId ?? '',
           from: l.tripCostId || (l.timeEntryId && l.jobId) ? 'a trip' : l.timeEntryId ? 'timesheet' : l.billedLineId ? 'a bill' : '' })) };
       this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null;
@@ -2216,7 +2224,7 @@ createApp({
       this.sortLines();
       // A line counts once something is typed or picked on it (a new invoice line starts with its income account filled in).
       const lines = d.lines.filter((l) => l.unitPrice || l.description?.trim() || l.itemId || (l.accountId && this.S.kind === 'bill')).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
-        unitPrice: l.unitPrice, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined,
+        unitPrice: l.unitPrice, lineAmount: this.lineAdjusted(l) ? l.amountTyped : undefined, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined,
         jobId: l.jobId || undefined, billable: !!l.jobId && l.billable, timeEntryId: l.timeEntryId || undefined, billedLineId: l.billedLineId || undefined,
         tripCostId: l.tripCostId || undefined }));
       const body = { contactId: d.contactId, number: d.number || undefined, date: d.date, dueDate: d.dueDate || undefined, memo: d.memo,
@@ -2534,4 +2542,5 @@ createApp({
       };
     },
   })
+  .directive('focus', { mounted: (el) => { el.focus(); el.select?.(); } })   // the typed-amount box opens ready to type
   .mount('#app');

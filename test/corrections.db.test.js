@@ -131,11 +131,19 @@ test('edit: invoices, bills and payments are corrected by void + replace', { ski
     // A different customer, or a date after the first payment, is refused.
     await assert.rejects(arap.replaceDocument(pool, co.id, fixed.id, { contactId: acme.id, date: '2026-06-17', lines }), (e) => /customer can't change/.test(e.details.join(' ')));
     await assert.rejects(arap.replaceDocument(pool, co.id, fixed.id, { contactId: hw.id, date: '2026-07-03', lines }), (e) => /on or before the first payment \(2026-07-02\)/.test(e.details.join(' ')));
+    // His paper copy rounded the 4-digit hours 2 cents differently: the line amount can be typed, within $1.00.
+    // 1.1667 h × 425.00 = 495.8475 → 495.85; typed 495.87.
+    const typed = await arap.replaceDocument(pool, co.id, fixed.id, { contactId: hw.id, date: '2026-06-17',
+      lines: [lines[0], { ...lines[1], quantity: '2.52' }, { accountId: A['4100'], quantity: '1.1667', unitPrice: '425', lineAmount: '495.87' }] });
+    assert.deepEqual(typed.lines.map((l) => l.amountCents), [42500, 107100, 49587]);
+    assert.deepEqual([typed.totalCents, typed.balanceCents], [199187, 59187]);
+    await assert.rejects(arap.replaceDocument(pool, co.id, typed.id, { contactId: hw.id, date: '2026-06-17',
+      lines: [lines[0], { ...lines[1], quantity: '2.52', lineAmount: '1072.01' }] }), (e) => /at most \$1\.00/.test(e.details.join(' ')));
     // The database refuses a move that isn't to a corrected copy.
     const other = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: hw.id, date: '2026-06-17', lines });
     await assert.rejects(pool.query('UPDATE payment_applications SET document_id = $1 WHERE payment_id = $2', [other.id, p1.id]), /corrected copy/);
-    const audit = await pool.query("SELECT payload FROM audit_log WHERE company_id = $1 AND action = 'move_payments'", [co.id]);
-    assert.equal(audit.rows.length, 1);
+    const audit = await pool.query("SELECT payload FROM audit_log WHERE company_id = $1 AND action = 'move_payments' ORDER BY id", [co.id]);
+    assert.equal(audit.rows.length, 2);
     assert.equal(audit.rows[0].payload.paidCents, 140000);
     const chain = await verifyChain(pool, co.id);
     assert.equal(chain.brokenAt, null);
