@@ -136,6 +136,10 @@ phone. Press **+ Add person** to add one.
    - **Hours / qty:** hours for a rate (half an hour can be typed .5 or 0.5); usually 1 for a cost.
    - **Rate / price:** change it for a one-off rate (for example 1.25 × your standard rate).
    - **Tax:** tick it if the line is taxable.
+   - **Amount:** hours × rate, rounded to the cent. If the invoice you sent rounded a line a cent or two differently,
+     right-click the amount (or double-click it) and type the amount you sent. It can differ from hours × rate by at
+     most $1.00; for a bigger change, fix the hours or rate. A typed amount is marked "typed"; **undo** goes back
+     to hours × rate.
    - **Jobs sharing these expenses** (top of the lines): when one trip served several jobs, set the number of
      jobs (1 by default, never less). Each cost passed on (lodging, rental car, airfare) gets quantity 1/3 for
      3 jobs, so $350 of lodging bills $116.67. Hourly rates aren't split. Write one invoice per job with the same

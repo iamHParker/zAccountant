@@ -254,10 +254,13 @@ const DOC_SELECT = `
 /**
  * Validate the lines of an invoice or bill. Each line: { accountId, description, quantity, unitPrice }
  * (or just { accountId, description, amount }), and taxable: true for invoice lines that carry sales tax.
+ * Optional: lineAmount, the line's amount typed over quantity × price (within $1.00 of it, for rounding).
  * Optional: serviceDate (the day the work was done or the cost incurred) and itemId (the saved rate it came from).
  * A bill line can name its project (jobId) and be marked billable (a cost passed on to that client). An invoice
  * line can say which time entry (timeEntryId) or billable bill line (billedLineId) it bills; each is billed once.
  */
+const MAX_LINE_ADJUST_CENTS = 100;
+
 async function cleanLines(c, companyId, kind, rawLines, errors) {
   if (!Array.isArray(rawLines) || rawLines.length === 0) { errors.push('add at least one line'); return []; }
   if (rawLines.length > MAX_DOC_LINES) { errors.push(`at most ${MAX_DOC_LINES} lines`); return []; }
@@ -305,6 +308,18 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
     if (unit < 0) { errors.push(`${n}: amounts can't be negative`); return null; }
     let amount;
     try { amount = lineAmount(l.quantity ?? '1', unit); } catch (e) { errors.push(`${n}: ${e.message}`); return null; }
+    // A typed line amount (Homer, 2026-11-02: his paper invoice rounded 4-digit hours to a total 2 cents off). It's a
+    // rounding adjustment, so it must stay within $1.00 of quantity × price; a bigger change means the hours or rate.
+    if (l?.lineAmount != null && l.lineAmount !== '') {
+      const typed = money(l.lineAmount, `${n} amount`, errors);
+      if (typed == null) return null;
+      if (typed < 0) { errors.push(`${n}: amounts can't be negative`); return null; }
+      if (Math.abs(typed - amount) > MAX_LINE_ADJUST_CENTS) {
+        errors.push(`${n}: a typed amount can differ from quantity × price (${fmt(amount)}) by at most ${fmt(MAX_LINE_ADJUST_CENTS)}; change the hours or rate instead`);
+        return null;
+      }
+      amount = typed;
+    }
     if (amount > MAX_LINE_CENTS) { errors.push(`${n}: amount is too large`); return null; }
     return { accountId: l.accountId, description: text(l.description, 300), quantity: cleanQuantity(l.quantity), unitPriceCents: unit, amountCents: amount,
       taxable: kind === 'invoice' && l.taxable === true, serviceDate, itemId, jobId, billable, timeEntryId, billedLineId, tripCostId };
