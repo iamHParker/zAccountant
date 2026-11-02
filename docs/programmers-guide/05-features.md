@@ -57,7 +57,12 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
 - Documents are never edited: they are voided (entry reversed) and entered again. **Edit** (`PUT …/documents/:id`,
   `PUT …/payments/:id`, permission `post`) does both in one transaction: `replaceDocument` / `replacePayment` void the
   old record with `replaced_by_id` set to the new id, then post the copy (an invoice keeps its number; the number index
-  skips replaced invoices). Migration 020.
+  skips replaced invoices). Migration 020. An invoice or bill with posted payments can be edited too (Homer,
+  2026-11-02): `movePayments` re-points those `payment_applications` rows at the corrected copy (the payments and
+  their entries are untouched, so bank matches and reconciliations stand) and audits `move_payments`. The copy must
+  keep the contact, cover what was paid, and be dated on or before the first payment. The runtime role may UPDATE
+  only `payment_applications.document_id`, and trigger `payment_applications_move` (migration 039) allows it only
+  from a voided document to its `replaced_by_id` copy, with the overpay check. Plain Void still needs payments voided.
 - Divisions and adjusters (migration 022): `contacts.group_name` ("Part of"; `getAging` returns `groups` totals) and
   `contacts.people` (jsonb `[{name,email,phone}]`, ≤ 50, checked by `cleanPeople`). Invoices carry `attention`,
   `send_to`, `client_ref` (claim/job number), `care_of` (an attorney's client: Bill To reads "client c/o contact"; migration 032), set at save like every document field. A typed invoice number already in

@@ -236,7 +236,11 @@ photo** and the camera opens. **Choose photo** picks one you already took. Add u
   **Save changes**. Behind the scenes the old invoice is voided and the corrected one takes its place with the same
   number. The old one stays in the Voided list, marked "Replaced". Bills work the same way.
 - To fix a payment (wrong amount, date or check number), open the **Payments** tab and press **edit** on its row.
-- An invoice that already has a payment can't be edited until the payment is fixed: edit or void the payment first.
+- An invoice that already has payments can still be edited with **Edit** (a wrong hour count found after the customer
+  paid part). The payments move to the corrected invoice exactly as they are: the bank deposits, check photos and
+  reconciliation are not touched, and the balance due is the new total less what was paid. Three rules: the new
+  total can't be less than what has been paid, the customer stays the same, and the invoice date must be on or before
+  the first payment. If the corrected total is smaller than what was paid, fix or void a payment first.
   To change only its **memo**, **due date** or **claim / job number** (the customer asked for their PO on it), press
   **Change details**: the amounts stay as they are, nothing in the books moves, and the change is in the audit trail.
 - An invoice with no payments can also be **voided** outright. It stays on record, marked void.

@@ -52,8 +52,12 @@ test('edit: invoices, bills and payments are corrected by void + replace', { ski
     const inv = (await arap.listDocuments(pool, co.id, { kind: 'invoice', status: 'open' })).find((d) => d.number === '1001');
     const pay = await arap.createPayment(pool, co.id, { kind: 'received', contactId: smith.id, date: '2026-04-01', accountId: A['1000'], method: 'check', reference: '501',
       applications: [{ documentId: inv.id, amount: '1000' }] });
-    await assert.rejects(arap.replaceDocument(pool, co.id, inv.id, { contactId: smith.id, date: '2026-03-02', lines: [{ accountId: A['4100'], amount: '1200' }] }),
-      /edit or void those payments first/);
+    // An edit that would leave the invoice smaller than what was paid is refused, and changes nothing.
+    await assert.rejects(arap.replaceDocument(pool, co.id, inv.id, { contactId: smith.id, date: '2026-03-02', lines: [{ accountId: A['4100'], amount: '900' }] }),
+      (e) => /less than the \$1,000\.00 already paid/.test(e.details?.join(' ') ?? e.message));
+    assert.equal((await arap.getDocument(pool, co.id, inv.id)).status, 'partial');
+    // Plain void still waits for the payment.
+    await assert.rejects(arap.voidDocument(pool, co.id, inv.id), /void those payments first/);
     // The check and the remittance stub are photographed with the payment.
     await photos.addPaymentPhoto(pool, co.id, pay.id, { picture: JPEG, actor: 'owner@x' });
     await photos.addPaymentPhoto(pool, co.id, pay.id, { picture: JPEG, actor: 'owner@x' });
@@ -92,6 +96,47 @@ test('edit: invoices, bills and payments are corrected by void + replace', { ski
     const fixedBill = await arap.replaceDocument(pool, co.id, bill.id, { contactId: v.id, date: '2026-04-02', lines: [{ accountId: A['6250'], amount: '330' }] });
     assert.deepEqual([fixedBill.kind, fixedBill.number, fixedBill.totalCents], ['bill', 'L-88', 33000]);
     assert.equal((await arap.getAging(pool, co.id, { kind: 'bill', asOf: '2026-12-31' })).totals.totalCents, 33000);
+    const chain = await verifyChain(pool, co.id);
+    assert.equal(chain.brokenAt, null);
+    assert.deepEqual(chain.ledgerMismatches, []);
+  });
+
+  // Homer, 2026-11-02 (invoice 26-018): a typing error found after the customer had paid part of the invoice.
+  // Edit corrects it in place of the old copy; the payments move to the corrected copy, untouched.
+  await t.test('an invoice with payments is corrected; its payments follow it', async () => {
+    const hw = await arap.createContact(pool, co.id, { kind: 'customer', name: 'Hollywood Ventures' });
+    const lines = [{ accountId: A['4100'], quantity: '1', unitPrice: '425' }, { accountId: A['4100'], quantity: '2.42', unitPrice: '425' }];
+    const inv = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: hw.id, number: '26-018', date: '2026-06-17', lines });
+    assert.equal(inv.totalCents, 145350);        // 425.00 + 2.42 × 425.00 = 425.00 + 1,028.50
+    const before = await arBal();
+    const p1 = await arap.createPayment(pool, co.id, { kind: 'received', contactId: hw.id, date: '2026-07-02', accountId: A['1000'], applications: [{ documentId: inv.id, amount: '1000' }] });
+    const p2 = await arap.createPayment(pool, co.id, { kind: 'received', contactId: hw.id, date: '2026-08-02', accountId: A['1000'], applications: [{ documentId: inv.id, amount: '400' }] });
+    // The second line was really 2.24 hours: 2.24 × 425.00 = 952.00, total 1,377.00, balance 1,377.00 − 1,400.00 paid… too small:
+    await assert.rejects(arap.replaceDocument(pool, co.id, inv.id, { contactId: hw.id, date: '2026-06-17', lines: [lines[0], { ...lines[1], quantity: '2.24' }] }),
+      (e) => /less than the \$1,400\.00 already paid/.test(e.details.join(' ')));
+    // …2.52 hours: 2.52 × 425.00 = 1,071.00, total 1,496.00, balance 1,496.00 − 1,400.00 = 96.00.
+    const fixed = await arap.replaceDocument(pool, co.id, inv.id, { contactId: hw.id, date: '2026-06-17', lines: [lines[0], { ...lines[1], quantity: '2.52' }] });
+    assert.deepEqual([fixed.number, fixed.totalCents, fixed.paidCents, fixed.balanceCents], ['26-018', 149600, 140000, 9600]);
+    assert.deepEqual(fixed.payments.map((p) => [p.id, p.amountCents]), [[p1.id, 100000], [p2.id, 40000]]);
+    // The payments are the same records, still posted; the old copy is void and shows none.
+    for (const p of [p1, p2]) {
+      const now = await arap.getPayment(pool, co.id, p.id);
+      assert.deepEqual([now.status, now.journalEntryId, now.applications.map((a) => a.documentId)], ['posted', p.journalEntryId, [fixed.id]]);
+    }
+    const old = await arap.getDocument(pool, co.id, inv.id);
+    assert.deepEqual([old.status, old.replacedById, old.payments.length], ['void', fixed.id, 0]);
+    // Receivable moved only by the correction: +42.50 (1,496.00 − 1,453.50).
+    assert.equal(await arBal(), before - 140000 + 4250);
+    assert.equal((await arap.getAging(pool, co.id, { kind: 'invoice', asOf: '2026-12-31' })).ties, true);
+    // A different customer, or a date after the first payment, is refused.
+    await assert.rejects(arap.replaceDocument(pool, co.id, fixed.id, { contactId: acme.id, date: '2026-06-17', lines }), (e) => /customer can't change/.test(e.details.join(' ')));
+    await assert.rejects(arap.replaceDocument(pool, co.id, fixed.id, { contactId: hw.id, date: '2026-07-03', lines }), (e) => /on or before the first payment \(2026-07-02\)/.test(e.details.join(' ')));
+    // The database refuses a move that isn't to a corrected copy.
+    const other = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: hw.id, date: '2026-06-17', lines });
+    await assert.rejects(pool.query('UPDATE payment_applications SET document_id = $1 WHERE payment_id = $2', [other.id, p1.id]), /corrected copy/);
+    const audit = await pool.query("SELECT payload FROM audit_log WHERE company_id = $1 AND action = 'move_payments'", [co.id]);
+    assert.equal(audit.rows.length, 1);
+    assert.equal(audit.rows[0].payload.paidCents, 140000);
     const chain = await verifyChain(pool, co.id);
     assert.equal(chain.brokenAt, null);
     assert.deepEqual(chain.ledgerMismatches, []);

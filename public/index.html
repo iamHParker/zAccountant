@@ -752,6 +752,10 @@
       <div class="card" v-if="ar.showDoc">
         <h2>{{ ar.doc.editId ? 'Edit ' + S.Doc.toLowerCase() + ' ' + ar.doc.editNumber : 'New ' + S.Doc.toLowerCase() }}</h2>
         <p class="hint" v-if="ar.doc.editId">Saving voids the old {{ S.Doc.toLowerCase() }} and records this corrected one in its place{{ S.kind === 'invoice' ? ', with the same number unless you change it' : '' }}. The old one stays in history, marked replaced.</p>
+        <p class="hint" v-if="ar.doc.editId && ar.doc.editPaidCents">{{ money(ar.doc.editPaidCents) }} has already been {{ S.kind === 'invoice' ? 'received' : 'paid' }} on this {{ S.Doc.toLowerCase() }}.
+          Those payments move to the corrected copy as they are (bank deposits and photos untouched), so the new total must be at least {{ money(ar.doc.editPaidCents) }},
+          the {{ S.kind === 'invoice' ? 'customer' : 'vendor' }} stays the same, and the date must be on or before the first payment ({{ usDate(ar.doc.editFirstPay) }}).
+          <template v-if="docTotals.total > 0">New balance due: <strong>{{ money(docTotals.total - ar.doc.editPaidCents) }}</strong>.</template></p>
         <div class="hint pdf-notes" v-if="ar.doc.fromPdf">
           Filled in from <strong>{{ ar.doc.fromPdf.file }}</strong>. The PDF's TOTAL DUE is <strong>{{ money(ar.doc.fromPdf.totalCents) }}</strong>; check the
           customer, the lines and the income account, then save.
@@ -958,7 +962,8 @@
             <button v-if="S.kind === 'invoice' && ar.detail.status !== 'void'" @click="openEmail(ar.detail)"
               :title="'Opens your email program' + (ar.detail.sendTo ? ' addressed to ' + ar.detail.sendTo : '') + '. Attach the PDF yourself.'">✉ Email</button>
             <button v-if="can(S.perm) && ar.detail.balanceCents > 0 && ar.detail.status !== 'void'" @click="startPay(ar.detail.contactId)">{{ S.payVerb }}</button>
-            <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="editDoc(ar.detail)">Edit</button>
+            <button v-if="can('post') && ar.detail.status !== 'void'" @click="editDoc(ar.detail)"
+              :title="ar.detail.paidCents ? 'Fix a line or amount. The payments already received stay with the corrected copy.' : ''">Edit</button>
             <button v-if="can('post') && ar.detail.status !== 'void' && !ar.detail.paidCents" @click="voidDoc(ar.detail)">Void</button>
             <button v-if="can(S.perm) && ar.detail.status !== 'void' && ar.detail.paidCents && !ar.details" @click="startDetails(ar.detail)"
               title="Memo, due date, claim / job number and payment plan. The amounts stay as they are.">Change details</button>
@@ -975,8 +980,8 @@
             <label class="check"><input type="checkbox" v-model="ar.details.noLateCharges"> No late charges</label>
           </template>
           <button class="primary">Save</button> <button type="button" @click="ar.details = null">Cancel</button>
-          <p class="hint">This {{ S.Doc.toLowerCase() }} has payments, so its amounts stay as they are (void the payment first to change them).
-            These details never reach the books; the change is kept in the audit trail.</p>
+          <p class="hint">These details never reach the books; the change is kept in the audit trail.
+            To fix a line or an amount, use Edit: the payments stay with the corrected copy.</p>
         </form>
         <template v-if="S.kind === 'invoice'">
         <div class="letterhead">
