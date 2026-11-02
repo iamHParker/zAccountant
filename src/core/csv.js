@@ -147,3 +147,19 @@ export function w2Rows(d, { company, title }) {
   rows.push([`W-3 total (${d.w3.forms} forms)`, ...cells(d.w3)]);
   return rows;
 }
+
+/** Trips by employee → rows: each person, their trips, every cost and day of travel time, trip subtotals, person totals. */
+export function tripsByEmployeeRows(d, { company, title }) {
+  const rows = [[company], [title], [`${d.from} to ${d.to}`], []];
+  rows.push(['Employee', 'Trip', 'Date', 'Kind', 'Description', 'Paid to', 'Paid with', 'Amount', 'Travel hours', 'Receipt photos']);
+  for (const p of d.people) {
+    for (const t of p.trips) {
+      for (const x of t.costs) rows.push([p.name, t.name, x.date, x.kindLabel, x.description, x.vendor ?? '', x.paidFromName, amt(x.amountCents), '', x.photoIds.length || '']);
+      for (const x of t.time) rows.push([p.name, t.name, x.date, 'Travel time', x.notes ?? '', '', '', '', { n: x.hours }, '']);
+      rows.push([p.name, `Trip total: ${t.name}`, '', '', '', '', '', amt(t.costCents), { n: t.hours }, t.photoCount || '']);
+    }
+    rows.push([`Total for ${p.name}`, `${p.tripCount} trip${p.tripCount === 1 ? '' : 's'}`, '', '', '', '', '', amt(p.costCents), { n: p.hours }, ''], []);
+  }
+  rows.push(['All employees', `${d.totals.tripCount} trip${d.totals.tripCount === 1 ? '' : 's'}`, '', '', '', '', '', amt(d.totals.costCents), { n: d.totals.hours }, '']);
+  return rows;
+}

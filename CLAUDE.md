@@ -87,8 +87,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 - Projects = `jobs` (+ site address; not plan-gated). Bill lines: project + "bill to client"; invoice "Pull in unbilled
   time and costs" links each line to its time entry / bill line, billed once (trigger, migration 023,
   `src/services/projectService.js`). Projects from pasted folder names (`src/core/projects.js`).
-- Trips (migration 024, `src/services/tripService.js`): projects with % shares; costs post their own entry (void + copy
-  to edit; mileage = miles × typed rate); travel time = time entry with `trip_id`; billed once per project.
+- Trips (024/040, `tripService.js`): % shares per project; costs post own entry (void + copy to edit); travel time =
+  time entry with `trip_id`; billed once per project; travelers (`trip_travelers`, `traveler_id`); Trips by Employee.
 - Passkeys (migration 025, `src/security/webauthn.js`): Face ID / Windows Hello sign-in = both steps; adding one needs a
   fresh authenticator code. Settings card + sign-in button.
 - Road page `/road` (migration 026, `src/services/roadService.js`, `public/road.*`): phone key (Bearer, hash only,

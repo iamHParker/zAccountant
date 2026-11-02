@@ -363,3 +363,23 @@ table.lines tr.line-note td { border-top: 0; padding-top: 0; }
 .trip-grid tr.new-day td { border-top: 2px dashed var(--muted, #6b7385); }
 .trip-shares td { white-space: nowrap; }
 .trip-shares input.pct { display: inline-block; width: 64px; margin: 0 2px 0 0; text-align: right; padding: 2px 4px; }
+
+/* Trips for every employee (migration 040): who went, the grid's typing row, and the Trips by Employee tree. */
+.trips fieldset.travelers { border: 1px solid var(--line, #d9dde5); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+.trips fieldset.travelers label.check { display: inline-flex; margin-right: 16px; }
+.trip-grid td.who { white-space: nowrap; }
+.trip-grid tr.not-who td { opacity: 0.55; }
+.trip-grid tr.quick-row td { background: color-mix(in srgb, var(--accent, #2f7d6d) 5%, transparent); vertical-align: top; }
+.trip-grid tr.quick-row input, .trip-grid tr.quick-row select { width: 100%; min-width: 0; margin: 0; }
+.trip-grid tr.quick-row div.quick-entry { display: grid; grid-template-columns: 7em 1fr 8em; gap: 4px; }
+.trip-grid tr.quick-row td.num input { width: 7em; text-align: right; }
+@media (max-width: 640px) { .trip-grid tr.quick-row div.quick-entry { grid-template-columns: 1fr; } }
+.trip-tree tr.tree-person, .trip-tree tr.tree-trip { cursor: pointer; }
+.trip-tree tr.tree-person td { border-top: 2px solid var(--line, #d9dde5); }
+.trip-tree td.ind2 { padding-left: 48px !important; }
+.trip-tree .tree-toggle { width: 1.4em; text-decoration: none; }
+.trip-tree .tree-date { margin-right: 8px; }
+.trip-tree a.photo-link { margin-left: 8px; white-space: nowrap; }
+.who-went { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.who-went .who-one strong { margin-right: 6px; }
+.trip-grid tr.quick-row input[type=date] { min-width: 9.5em; }

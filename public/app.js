@@ -85,8 +85,11 @@ let lineRow = 0;
 const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', amountTyped: '', amountOpen: false, taxable: false,
   jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '', row: ++lineRow });
 const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
-const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', jobs: [{ jobId: '', share: '' }] });
-const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
+const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', travelers: [], jobs: [{ jobId: '', share: '' }] });
+// The employee last chosen on the Trips page (migration 040), so the page opens on the same person.
+const lastTripWho = () => { try { return localStorage.getItem('zacc.tripWho') ?? ''; } catch { return ''; } };
+const keepTripWho = (v) => { try { localStorage.setItem('zacc.tripWho', v); } catch { /* private window: not kept */ } };
+const blankTripCost = (date = today()) => ({ date, travelerId: '', kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
   expenseAccountId: '', paidFromAccountId: '', photos: [], photoBusy: false, key: newKey() });
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 // Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
@@ -297,8 +300,9 @@ createApp({
         { id: 'tax-summary', label: 'Tax Summary', perm: 'view_books', feature: 'tax', range: true },
         { id: 'tax-1099', label: '1099-NEC', perm: 'view_books', feature: 'tax', yearly: true },
         { id: 'tax-w2', label: 'W-2 / W-3', perm: 'payroll', feature: 'tax', yearly: true },
+        { id: 'trips-by-employee', label: 'Trips by Employee', perm: 'view_books', range: true },
       ],
-      report: { type: 'balance-sheet', from: yearStart(), to: today(), year: Number(today().slice(0, 4)), compare: 'none', data: null },
+      report: { type: 'balance-sheet', from: yearStart(), to: today(), year: Number(today().slice(0, 4)), compare: 'none', data: null, who: '', open: {}, people: [] },
       taxCats: null,
       showNewAcct: false, newAcct: { code: '', name: '', type: 'expense', subtype: 'operating' }, register: null,
       subtypeChoices: {
@@ -329,7 +333,7 @@ createApp({
         pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
-      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
+      trip: { people: [], who: lastTripWho(), quickRow: null, list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
@@ -380,6 +384,7 @@ createApp({
       const r = this.report;
       if (this.reportIsYearly) return `year=${r.year}`;
       const base = this.reportIsRange ? `from=${r.from}&to=${r.to}` : `asOf=${r.to}`;
+      if (r.type === 'trips-by-employee' && r.who) return `${base}&userId=${r.who}`;
       return ['balance-sheet', 'income-statement'].includes(r.type) && r.compare !== 'none' ? `${base}&compare=${r.compare}` : base;
     },
     cmpCols() { return this.report.data?.comparison ? 5 : 2; },
@@ -1190,7 +1195,26 @@ createApp({
       const data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/${type}?${this.reportQuery}`));
       if (r.type === type) r.data = data; // ignore an answer for a report the user has already switched away from
       if (type === 'tax-summary' && data?.form) this.taxCats = await this.run(() => api('GET', `/companies/${this.companyId}/tax-categories`));
+      if (type === 'trips-by-employee' && !r.people.length) r.people = (await this.run(() => api('GET', `/companies/${this.companyId}/trip-people`))) ?? [];
     },
+    // ---- Trips by employee: a tree, person ▸ trip ▸ each cost and day of travel ▸ trip subtotal ▸ person total.
+    tripRepOpen(key) { return Boolean(this.report.open[key]); },
+    tripRepToggle(key) { this.report.open[key] = !this.report.open[key]; },
+    /** Open every level (all = true), only the people's trips (all = 'trips'), or close everything. */
+    tripRepAll(all) {
+      const open = {};
+      if (all) for (const p of this.report.data?.people ?? []) {
+        open[`p${p.userId}`] = true;
+        if (all === true) for (const t of p.trips) open[`p${p.userId}t${t.tripId}`] = true;
+      }
+      this.report.open = open;
+    },
+    /** A trip's lines in date order: costs and days of travel time. */
+    tripRepLines(t) {
+      return [...t.costs.map((x) => ({ ...x, type: 'cost' })), ...t.time.map((x) => ({ ...x, type: 'time' }))]
+        .sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'time') - (b.type === 'time'));
+    },
+    tripRepPhotoUrl(x, id) { return `/api/companies/${this.companyId}/trip-costs/${x.id}/photos/${id}`; },
     /** Tax-ready: give accounts a tax category (null = back to the suggestion), then refresh the summary. */
     async saveTaxCategories(items, done) {
       if (await this.run(() => api('PUT', `/companies/${this.companyId}/tax-categories`, { items }), done)) this.loadReport();
@@ -1507,6 +1531,8 @@ createApp({
     async loadTrips() {
       const tr = this.trip;
       tr.list = (await this.run(() => api('GET', `${this.tripBase()}/trips`))) ?? [];
+      if (!tr.people.length) tr.people = (await this.run(() => api('GET', `${this.tripBase()}/trip-people`))) ?? [];
+      if (tr.who && !tr.people.some((p) => p.id === tr.who)) tr.who = '';
       if (!this.ar.jobs.length) this.ar.jobs = (await this.run(() => api('GET', `${this.tripBase()}/jobs?inactive=1`))) ?? [];
       if (tr.cur) await this.openTrip(tr.cur.id);
       await this.loadRoad();
@@ -1679,6 +1705,62 @@ createApp({
       this.ar.jobs = (await this.run(() => api('GET', `${this.tripBase()}/jobs?inactive=1`))) ?? this.ar.jobs;
       await this.addTripJobs([j.id]);
     },
+    // ---- Travelers (migration 040): the Employee pull-down narrows the Trip pull-down to that person's trips.
+    tripsForWho() { return this.trip.who ? this.trip.list.filter((t) => (t.travelerIds ?? []).includes(this.trip.who)) : this.trip.list; },
+    pickTripWho(id) {
+      this.trip.who = id; keepTripWho(id);
+      // The open trip stays open if the person went on it; otherwise back to the list of their trips.
+      if (this.trip.cur && id && !this.trip.cur.travelers.some((x) => x.id === id)) this.closeTripView();
+    },
+    tripPersonName(id) { return this.trip.people.find((p) => p.id === id)?.name ?? ''; },
+    /** Who a new cost or day of travel is for: the employee chosen above, the only traveler, or the person signed in. */
+    tripDefaultWho() {
+      const t = this.trip.cur; const me = this.auth.user?.id;
+      if (this.trip.who) return this.trip.who;
+      if (t?.travelers.length === 1) return t.travelers[0].id;
+      return t?.travelers.some((x) => x.id === me) ? me : (t?.travelers[0]?.id ?? me ?? '');
+    },
+    /** People for the Traveler pull-down: the trip's travelers first, then everyone else in the company. */
+    tripWhoChoices() {
+      const on = new Set((this.trip.cur?.travelers ?? []).map((x) => x.id));
+      return [...this.trip.people.filter((p) => on.has(p.id)), ...this.trip.people.filter((p) => !on.has(p.id))];
+    },
+    /** Each traveler's share of the open trip: their costs and travel hours. */
+    tripByPerson() {
+      const t = this.trip.cur;
+      if (!t) return [];
+      const m = new Map(t.travelers.map((x) => [x.id, { id: x.id, name: x.name, cents: 0, minutes: 0 }]));
+      const get = (id, name) => { if (!m.has(id ?? '')) m.set(id ?? '', { id, name: name || 'Not named', cents: 0, minutes: 0 }); return m.get(id ?? ''); };
+      for (const x of t.costs) if (x.status === 'posted') get(x.travelerId, x.travelerName).cents += x.amountCents;
+      for (const x of t.time) if (x.status !== 'rejected') get(x.userId, x.userName).minutes += x.minutes;
+      return [...m.values()];
+    },
+    // ---- The grid's typing row (like a spreadsheet): Tab across, Enter saves the cost and starts the next row.
+    tripQuickReset(keep = {}) {
+      const t = this.trip.cur;
+      const last = t?.costs.filter((x) => x.status === 'posted').at(-1);
+      this.trip.quickRow = { date: keep.date ?? last?.date ?? t?.startDate ?? today(), travelerId: keep.travelerId ?? this.tripDefaultWho(),
+        kind: keep.kind ?? 'other', description: '', vendor: '', amount: '', key: newKey(), busy: false };
+    },
+    async saveTripQuick() {
+      const q = this.trip.quickRow; const t = this.trip.cur;
+      if (!q || q.busy) return;
+      if (!q.description.trim() && !q.amount.trim()) return;
+      const last = t.costs.filter((x) => x.status === 'posted').at(-1);
+      const expenseAccountId = last?.expenseAccountId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
+      const card = cardsByKind()[q.kind];
+      const paidFromAccountId = (card && this.tripPaidFromAccounts().some((a) => a.id === card) ? card : null)
+        ?? last?.paidFromAccountId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? '';
+      q.busy = true;
+      try {
+        const r = await this.run(() => api('POST', `${this.tripBase()}/trips/${t.id}/costs`, { date: q.date, travelerId: q.travelerId || undefined, kind: q.kind,
+          description: q.description, vendor: q.vendor, amount: q.amount, expenseAccountId, paidFromAccountId }, { 'Idempotency-Key': q.key }), 'Cost saved.');
+        if (!r) return;
+        this.trip.cur = r;
+        this.tripQuickReset({ date: q.date, travelerId: q.travelerId, kind: q.kind });
+        this.$nextTick(() => document.getElementById('trip-quick-what')?.focus());
+      } finally { if (this.trip.quickRow === q) q.busy = false; }
+    },
     /** Pick a trip from the pull-down (newest first); empty goes back to the list. */
     pickTrip(id) { if (id) { Object.assign(this.trip, { form: null, cost: null, editCostId: null, travel: null, viewRow: null, find: { q: '', pick: {}, newJob: null, customers: this.trip.find.customers } }); this.openTrip(id); } else this.closeTripView(); },
     /** Road items waiting for the open trip (sent from the phone, not in the books yet). */
@@ -1688,12 +1770,12 @@ createApp({
       const t = this.trip.cur;
       if (!t) return [];
       const rows = [
-        ...this.tripRoadItems().map((i) => ({ key: `r${i.id}`, type: 'road', item: i, date: i.data.date,
+        ...this.tripRoadItems().map((i) => ({ key: `r${i.id}`, type: 'road', item: i, date: i.data.date, who: i.userName ?? '',
           entry: i.kind === 'time' ? `Travel time${i.data.notes ? ' · ' + i.data.notes : ''}` : this.roadLabel(i),
           cents: i.kind === 'cost' ? i.data.amountCents : null, hours: i.kind === 'time' ? i.hours : null, photos: i.photos.length })),
-        ...t.costs.map((x) => ({ key: `c${x.id}`, type: 'cost', x, date: x.date, cents: x.amountCents, photos: x.photoCount,
+        ...t.costs.map((x) => ({ key: `c${x.id}`, type: 'cost', x, date: x.date, cents: x.amountCents, photos: x.photoCount, who: x.travelerName ?? '',
           entry: `${x.description}${x.vendor ? ' · ' + x.vendor : ''}${x.kind === 'mileage' ? ' · ' + x.miles + ' mi × ' + x.mileRateCents + '¢' : ''}` })),
-        ...t.time.map((x) => ({ key: `t${x.id}`, type: 'time', x, date: x.date, hours: x.hours, entry: `Travel time${x.notes ? ' · ' + x.notes : ''}` })),
+        ...t.time.map((x) => ({ key: `t${x.id}`, type: 'time', x, date: x.date, hours: x.hours, who: x.userName ?? '', entry: `Travel time${x.notes ? ' · ' + x.notes : ''}` })),
       ];
       rows.sort((a, b) => a.date.localeCompare(b.date) || (a.type === 'road') - (b.type === 'road'));
       // A dashed line where a new day of the trip starts (Homer, 2026-10-30).
@@ -1802,13 +1884,13 @@ createApp({
     },
     async openTrip(id) {
       const t = await this.run(() => api('GET', `${this.tripBase()}/trips/${id}`));
-      if (t) { this.trip.cur = t; this.trip.photoView = null; }
+      if (t) { const same = this.trip.cur?.id === t.id; this.trip.cur = t; this.trip.photoView = null; if (!same || !this.trip.quickRow) this.tripQuickReset(); }
     },
     closeTripView() { Object.assign(this.trip, { cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null }); this.loadTrips(); },
-    newTrip() { Object.assign(this.trip, { cur: null, form: blankTrip(), editing: false }); },
+    newTrip() { Object.assign(this.trip, { cur: null, form: { ...blankTrip(), travelers: [this.trip.who || this.auth.user?.id].filter(Boolean) }, editing: false }); },
     editTrip() {
       const t = this.trip.cur;
-      this.trip.form = { name: t.name, startDate: t.startDate, endDate: t.endDate ?? '', notes: t.notes ?? '',
+      this.trip.form = { name: t.name, startDate: t.startDate, endDate: t.endDate ?? '', notes: t.notes ?? '', travelers: t.travelers.map((x) => x.id),
         jobs: t.jobs.length ? t.jobs.map((j) => ({ jobId: j.jobId, share: j.share,
           // Shares by kind that differ from the trip share stay as they are; the rest keep following it.
           ...Object.fromEntries(['air', 'hotel', 'car', 'rest'].filter((k) => j[k] !== j.share).map((k) => [k, j[k]])) })) : [{ jobId: '', share: '' }] };
@@ -1829,7 +1911,7 @@ createApp({
       const r = tr.editing
         ? await this.run(() => api('PATCH', `${this.tripBase()}/trips/${tr.cur.id}`, body), 'Trip saved.')
         : await this.run(() => api('POST', `${this.tripBase()}/trips`, body), 'Trip added. Now add its costs.');
-      if (r) { tr.cur = r; tr.form = null; tr.editing = false; }
+      if (r) { tr.cur = r; tr.form = null; tr.editing = false; this.tripQuickReset(); tr.list = (await this.run(() => api('GET', `${this.tripBase()}/trips`))) ?? tr.list; }
     },
     async toggleTripOpen() {
       const t = this.trip.cur;
@@ -1851,10 +1933,11 @@ createApp({
       c.expenseAccountId = last?.expenseAccountId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
       c.paidFromAccountId = last?.paidFromAccountId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? '';
       c.mileRate = lastMileRate();
+      c.travelerId = this.tripDefaultWho();
       Object.assign(this.trip, { cost: c, editCostId: null, travel: null });
     },
     editTripCost(x) {
-      Object.assign(this.trip, { editCostId: x.id, travel: null, cost: { ...blankTripCost(x.date), kind: x.kind, vendor: x.vendor ?? '', description: x.description,
+      Object.assign(this.trip, { editCostId: x.id, travel: null, cost: { ...blankTripCost(x.date), travelerId: x.travelerId ?? '', kind: x.kind, vendor: x.vendor ?? '', description: x.description,
         miles: x.miles ?? '', mileRate: x.mileRateCents != null ? String(Number(x.mileRateCents) / 100) : '',
         amount: (x.amountCents / 100).toFixed(2), expenseAccountId: x.expenseAccountId, paidFromAccountId: x.paidFromAccountId, keptPhotos: x.photoCount } });
     },
@@ -1867,7 +1950,7 @@ createApp({
     async saveTripCost() {
       const tr = this.trip; const c = tr.cost;
       const body = { date: c.date, kind: c.kind, vendor: c.vendor, description: c.description, amount: c.amount, miles: c.miles, mileRate: c.mileRate,
-        expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId };
+        expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId, travelerId: c.travelerId || undefined };
       if (c.kind === 'mileage') keepMileRate(c.mileRate);
       if (!c.roadItem) keepCardFor(c.kind, c.paidFromAccountId);
       if (c.roadItem) {
@@ -1919,7 +2002,7 @@ createApp({
       const v = this.trip.photoView;
       if (await this.run(() => api('DELETE', `${this.tripBase()}/trip-costs/${v.cost.id}/photos/${ph.id}`), 'Photo removed.')) await this.openTripPhotos(v.cost);
     },
-    newTravel() { Object.assign(this.trip, { travel: { date: this.trip.cur.startDate, hours: '', start: '', end: '', breaks: '', notes: '' }, cost: null }); },
+    newTravel() { Object.assign(this.trip, { travel: { date: this.trip.cur.startDate, userId: this.tripDefaultWho(), hours: '', start: '', end: '', breaks: '', notes: '' }, cost: null }); },
     clockTime,
     /** One day's travel: the hours, or start and end less breaks. "Save, then next day" keeps the times for the next date. */
     async saveTravel(next = false) {
@@ -1932,7 +2015,7 @@ createApp({
       }
       const r = await this.run(() => (t.editId
         ? api('PATCH', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time/${t.editId}`, body)
-        : api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, body)), 'Travel time saved.');
+        : api('POST', `${this.tripBase()}/trips/${this.trip.cur.id}/travel-time`, { ...body, userId: t.userId || undefined })), 'Travel time saved.');
       if (!r) return;
       this.trip.cur = r;
       this.trip.travel = next ? { ...t, editId: null, date: nextDay(t.date), hours: clock ? '' : t.hours } : null;

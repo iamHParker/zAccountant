@@ -401,7 +401,7 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
         date: d.date, kind: d.kind, vendor: d.vendor, description: d.description, miles: d.miles, mileRate: d.mileRate,
         amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : undefined,
         expenseAccountId: input.expenseAccountId, paidFromAccountId: input.paidFromAccountId,
-      }, { actor, idempotencyKey: `road-${item.id}` });
+      }, { actor, idempotencyKey: `road-${item.id}`, travelerId: item.user_id }); // the phone's owner went
       await c.query(
         `INSERT INTO trip_cost_photos (company_id, trip_cost_id, picture, picture_type, created_by)
          SELECT company_id, $2, picture, picture_type, $3 FROM road_photos WHERE item_id = $1 ORDER BY created_at, id`, [item.id, r.costId, actor]);

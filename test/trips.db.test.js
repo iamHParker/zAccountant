@@ -170,3 +170,64 @@ test('trips: shares by kind of cost', { skip: !hasDb && 'DATABASE_URL not set' }
   // TX: only half the hotel and car; no airfare or meals line at all.
   assert.deepEqual(await pull(tx), [['Lodging', '50', 21993], ['Rental car', '50', 9000]]);
 });
+
+// Homer, 2026-11-02: trips for every employee who travels. Two engineers share one site visit; each cost names who
+// spent it, travel time names its person, and the report totals each person's trips.
+test('trips: travelers, and the trips-by-employee report', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
+  const { tripsByEmployeeRows } = await import('../src/core/csv.js');
+  const db = await freshDatabase();
+  t.after(() => db.drop());
+  const { pool } = db;
+  const co = await ledger.createCompany(pool, { name: 'Parker Engineering', homeState: 'TX' });
+  const A = Object.fromEntries((await ledger.listAccounts(pool, co.id)).map((a) => [a.code, a.id]));
+  const user = async (email, name) => {
+    const { rows: [u] } = await pool.query('INSERT INTO users (email, name, password_hash) VALUES ($1, $2, \'x\') RETURNING id', [email, name]);
+    await pool.query("INSERT INTO memberships (company_id, user_id, role) VALUES ($1, $2, 'owner')", [co.id, u.id]);
+    return u.id;
+  };
+  const homer = await user('homer@example.com', 'Homer Parker');
+  const ana = await user('ana@example.com', 'Ana Ruiz');
+  const { rows: [outsider] } = await pool.query("INSERT INTO users (email, name, password_hash) VALUES ('x@example.com', 'Not Here', 'x') RETURNING id");
+  const viewer = { userId: homer, can: () => true, departmentId: null };
+  const card = { expenseAccountId: A['6500'], paidFromAccountId: A['2100'] };
+
+  assert.deepEqual((await trips.listTripPeople(pool, co.id)).map((p) => p.name), ['Ana Ruiz', 'Homer Parker']);
+  await assert.rejects(trips.createTrip(pool, co.id, { name: 'Dallas', startDate: '2026-10-04', travelers: [outsider.id] }), /not valid/);
+  let dal = await trips.createTrip(pool, co.id, { name: 'Dallas site visit', startDate: '2026-10-04', endDate: '2026-10-05', travelers: [homer, ana] });
+  assert.deepEqual(dal.travelers.map((x) => x.name), ['Ana Ruiz', 'Homer Parker']);
+  const aus = await trips.createTrip(pool, co.id, { name: 'Austin permit office', startDate: '2026-10-20', travelers: [homer] });
+
+  // Dallas: Homer's airfare and Ana's airfare; the rental car is Homer's; Ana's hotel; 6 h of travel each.
+  dal = await trips.addTripCost(pool, co.id, dal.id, { date: '2026-10-04', kind: 'airfare', description: 'Airfare SAT-DAL', amount: '412.30', ...card, travelerId: homer });
+  dal = await trips.addTripCost(pool, co.id, dal.id, { date: '2026-10-04', kind: 'airfare', description: 'Airfare SAT-DAL', amount: '398.10', ...card, travelerId: ana });
+  dal = await trips.addTripCost(pool, co.id, dal.id, { date: '2026-10-04', kind: 'rental_car', description: 'Rental car', amount: '120.00', ...card }, { travelerId: homer });
+  const hotel = await trips.addTripCost(pool, co.id, dal.id, { date: '2026-10-04', kind: 'lodging', description: 'Hotel', amount: '189.00', ...card, travelerId: ana });
+  await assert.rejects(trips.addTripCost(pool, co.id, dal.id, { date: '2026-10-04', description: 'x', amount: '1', ...card, travelerId: outsider.id }), /not valid/);
+  await pool.query('INSERT INTO trip_cost_photos (company_id, trip_cost_id, picture, picture_type) VALUES ($1, $2, $3, \'image/png\')', [co.id, hotel.costId, Buffer.from('png')]);
+  await trips.addTravelTime(pool, co.id, viewer, dal.id, { date: '2026-10-04', hours: '6' });
+  dal = await trips.addTravelTime(pool, co.id, viewer, dal.id, { userId: ana, date: '2026-10-04', hours: '6:30' });
+  assert.deepEqual(dal.costs.map((x) => x.travelerName), ['Homer Parker', 'Ana Ruiz', 'Homer Parker', 'Ana Ruiz']);
+  // Correcting Ana's hotel keeps her as the traveler (and the photo moves with it).
+  const fixed = await trips.replaceTripCost(pool, co.id, hotel.costId, { date: '2026-10-04', kind: 'lodging', description: 'Hotel, 1 night', amount: '199.00', ...card });
+  assert.equal(fixed.costs.find((x) => x.id === fixed.costId).travelerName, 'Ana Ruiz');
+  // Someone with costs on the trip stays on it.
+  await assert.rejects(trips.updateTrip(pool, co.id, dal.id, { travelers: [homer] }), (e) => e.details.some((d) => /Ana Ruiz has costs/.test(d)));
+  await trips.addTripCost(pool, co.id, aus.id, { date: '2026-10-20', kind: 'mileage', description: 'SAT to Austin and back', miles: '160', mileRate: '0.70', ...card, travelerId: homer });
+  const list = await trips.listTrips(pool, co.id);
+  assert.deepEqual(list.map((x) => [x.name, x.travelerIds.length]), [['Austin permit office', 1], ['Dallas site visit', 2]]);
+
+  const r = await trips.getTripsByEmployee(pool, co.id, { from: '2026-10-01', to: '2026-10-31' });
+  // Ana: $398.10 + $199.00 = $597.10 (the voided $189.00 hotel is left out), 6.5 h, one trip.
+  // Homer: Dallas $412.30 + $120.00 = $532.30 and 6 h; Austin 160 mi × $0.70 = $112.00; in all $644.30.
+  assert.deepEqual(r.people.map((p) => [p.name, p.tripCount, p.costCents, p.hours]), [['Ana Ruiz', 1, 59710, '6.50'], ['Homer Parker', 2, 64430, '6.00']]);
+  assert.deepEqual(r.people[1].trips.map((x) => [x.name, x.costCents, x.hours]), [['Dallas site visit', 53230, '6.00'], ['Austin permit office', 11200, '0.00']]);
+  assert.equal(r.people[0].trips[0].costs.find((x) => x.kind === 'lodging').photoIds.length, 1);
+  assert.deepEqual(r.totals, { costCents: 124140, minutes: 750, hours: '12.50', tripCount: 2 }); // shared Dallas trip counted once
+  const one = await trips.getTripsByEmployee(pool, co.id, { from: '2026-10-15', to: '2026-10-31', userId: homer });
+  assert.deepEqual(one.people.map((p) => [p.name, p.costCents]), [['Homer Parker', 11200]]);
+  await assert.rejects(trips.getTripsByEmployee(pool, co.id, { from: '2026-10-31', to: '2026-10-01' }), /after/);
+
+  const rows = tripsByEmployeeRows(r, { company: 'Parker Engineering', title: 'Trips by Employee' });
+  assert.deepEqual(rows.find((x) => x[0] === 'Total for Homer Parker').slice(0, 9).map((c) => c?.n ?? c), ['Total for Homer Parker', '2 trips', '', '', '', '', '', '644.30', '6.00']);
+  assert.deepEqual(rows.at(-1).slice(7, 9).map((c) => c.n), ['1241.40', '12.50']);
+});
