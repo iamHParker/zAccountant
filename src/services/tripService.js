@@ -53,6 +53,31 @@ async function getTripRow(db, companyId, tripId) {
   return t;
 }
 
+// ---------------------------------------------------------------- Travelers (migration 040)
+// Who went: company members (the same people who keep timesheets). Each cost names its traveler; travel time already
+// names its person. Whoever has a cost or travel time on a trip is one of its travelers.
+
+/** The members who can travel, for the Employee pull-down: [{ id, name }]. */
+export async function listTripPeople(db, companyId) {
+  const { rows } = await db.query(`SELECT u.id, coalesce(nullif(trim(u.name), ''), u.email) AS name FROM memberships m JOIN users u ON u.id = m.user_id
+    WHERE m.company_id = $1 ORDER BY lower(coalesce(nullif(trim(u.name), ''), u.email))`, [companyId]);
+  return rows;
+}
+async function isMember(c, companyId, userId) {
+  if (!isId(userId)) return false;
+  return (await c.query('SELECT 1 FROM memberships WHERE company_id = $1 AND user_id = $2', [companyId, userId])).rows.length > 0;
+}
+async function addTraveler(c, companyId, tripId, userId) {
+  if (userId) await c.query('INSERT INTO trip_travelers (company_id, trip_id, user_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [companyId, tripId, userId]);
+}
+/** travelers: [userId]; each a member of the company, once each. */
+async function cleanTravelers(c, companyId, raw, errors) {
+  if (!Array.isArray(raw) || raw.length > 50) { errors.push('list at most 50 travelers'); return []; }
+  const ids = [...new Set(raw.filter(Boolean))];
+  for (const id of ids) if (!(await isMember(c, companyId, id))) { errors.push('a traveler must be a member of this company'); return []; }
+  return ids;
+}
+
 // ---------------------------------------------------------------- Trips and their projects
 
 /** jobs: [{ jobId, share }] with share a percent ("60"); each project once; shares add up to 100% at most. */
@@ -125,11 +150,13 @@ export async function createTrip(pool, companyId, input, { actor = null } = {}) 
     const errors = [];
     const v = await cleanTrip(c, companyId, input ?? {}, errors);
     if (v.endDate && v.startDate && v.endDate < v.startDate) errors.push('the end date is before the start date');
+    const travelers = await cleanTravelers(c, companyId, input?.travelers ?? [], errors);
     if (errors.length) throw new LedgerError('Trip is not valid', errors);
     const { rows: [t] } = await c.query('INSERT INTO trips (company_id, name, start_date, end_date, notes, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
       [companyId, v.name, v.startDate, v.endDate, v.notes, actor]);
     await saveTripJobs(c, companyId, t.id, v.jobs);
-    await appendAudit(c, companyId, { action: 'create', entity: 'trip', entityId: t.id, actor, payload: v });
+    for (const u of travelers) await addTraveler(c, companyId, t.id, u);
+    await appendAudit(c, companyId, { action: 'create', entity: 'trip', entityId: t.id, actor, payload: { ...v, travelers } });
     return getTrip(c, companyId, t.id);
   });
 }
@@ -163,13 +190,26 @@ export async function updateTrip(pool, companyId, tripId, input, { actor = null 
         }
       }
     }
+    let travelers = null;
+    if (input?.travelers !== undefined) {
+      travelers = await cleanTravelers(c, companyId, input.travelers, errors);
+      // Someone with a cost or travel time on the trip stays on it (their entries say they went).
+      const { rows: busy } = await c.query(`SELECT DISTINCT x.user_id, coalesce(nullif(trim(u.name), ''), u.email) AS name FROM (
+          SELECT traveler_id AS user_id FROM trip_costs WHERE trip_id = $1 AND status = 'posted' AND traveler_id IS NOT NULL
+          UNION SELECT user_id FROM time_entries WHERE trip_id = $1) x JOIN users u ON u.id = x.user_id`, [tripId]);
+      for (const b of busy) if (!travelers.includes(b.user_id)) errors.push(`${b.name} has costs or travel time on this trip, so they stay on it`);
+    }
     if (errors.length) throw new LedgerError('Trip is not valid', errors);
+    if (travelers) {
+      await c.query('DELETE FROM trip_travelers WHERE trip_id = $1 AND NOT (user_id = ANY($2::uuid[]))', [tripId, travelers]);
+      for (const u of travelers) await addTraveler(c, companyId, tripId, u);
+    }
     const cols = { name: 'name', startDate: 'start_date', endDate: 'end_date', notes: 'notes', isActive: 'is_active' };
     const sets = []; const vals = [companyId, tripId];
     for (const [k, col] of Object.entries(cols)) if (v[k] !== undefined) { vals.push(v[k]); sets.push(`${col} = $${vals.length}`); }
     if (sets.length) await c.query(`UPDATE trips SET ${sets.join(', ')} WHERE company_id = $1 AND id = $2`, vals);
     if (v.jobs) await saveTripJobs(c, companyId, tripId, v.jobs);
-    await appendAudit(c, companyId, { action: 'update', entity: 'trip', entityId: tripId, actor, payload: v });
+    await appendAudit(c, companyId, { action: 'update', entity: 'trip', entityId: tripId, actor, payload: travelers ? { ...v, travelers } : v });
     return getTrip(c, companyId, tripId);
   });
 }
@@ -180,7 +220,8 @@ export async function listTrips(db, companyId, { includeClosed = true } = {}) {
             COALESCE((SELECT sum(amount_cents) FROM trip_costs WHERE trip_id = t.id AND status = 'posted'), 0)::bigint AS "totalCents",
             (SELECT count(*) FROM trip_costs WHERE trip_id = t.id AND status = 'posted')::int AS "costCount",
             COALESCE((SELECT string_agg(coalesce(j.code, j.name) || ' ' || (tj.share_bp / 100.0)::numeric(6,2)::text || '%', ', ' ORDER BY tj.share_bp DESC, j.name)
-                        FROM trip_jobs tj JOIN jobs j ON j.id = tj.job_id WHERE tj.trip_id = t.id), '') AS "projectsText"
+                        FROM trip_jobs tj JOIN jobs j ON j.id = tj.job_id WHERE tj.trip_id = t.id), '') AS "projectsText",
+            COALESCE((SELECT json_agg(tt.user_id ORDER BY tt.added_at) FROM trip_travelers tt WHERE tt.trip_id = t.id), '[]') AS "travelerIds"
        FROM trips t WHERE t.company_id = $1 AND (t.is_active OR $2) ORDER BY t.start_date DESC, t.created_at DESC LIMIT 500`, [companyId, includeClosed]);
   return rows.map((r) => ({ ...r, totalCents: Number(r.totalCents), projectsText: r.projectsText.replace(/\.00%/g, '%') }));
 }
@@ -193,8 +234,11 @@ export async function getTrip(db, companyId, tripId) {
             coalesce(tj.car_bp, tj.share_bp) AS "carBp", coalesce(tj.rest_bp, tj.share_bp) AS "restBp"
        FROM trip_jobs tj JOIN jobs j ON j.id = tj.job_id LEFT JOIN contacts c ON c.id = j.customer_id
       WHERE tj.trip_id = $1 ORDER BY tj.share_bp DESC, lower(j.name)`, [t.id]);
+  const { rows: travelers } = await db.query(
+    `SELECT tt.user_id AS id, coalesce(nullif(trim(u.name), ''), u.email) AS name FROM trip_travelers tt JOIN users u ON u.id = tt.user_id
+      WHERE tt.trip_id = $1 ORDER BY lower(coalesce(nullif(trim(u.name), ''), u.email))`, [t.id]);
   const { rows: costs } = await db.query(
-    `SELECT tc.id, to_char(tc.cost_date, 'YYYY-MM-DD') AS date, tc.vendor, tc.description, tc.amount_cents AS "amountCents", tc.kind, tc.miles,
+    `SELECT tc.id, to_char(tc.cost_date, 'YYYY-MM-DD') AS date, tc.traveler_id AS "travelerId", coalesce(nullif(trim(tu.name), ''), tu.email) AS "travelerName", tc.vendor, tc.description, tc.amount_cents AS "amountCents", tc.kind, tc.miles,
             tc.mile_rate_cents AS "mileRateCents",
             tc.expense_account_id AS "expenseAccountId", ea.name AS "expenseAccountName", tc.paid_from_account_id AS "paidFromAccountId", pa.name AS "paidFromName",
             tc.status, tc.replaced_by_id AS "replacedById", e.entry_number AS "entryNumber",
@@ -202,18 +246,18 @@ export async function getTrip(db, companyId, tripId) {
             COALESCE((SELECT json_agg(json_build_object('jobId', l.job_id, 'number', d.number)) FROM document_lines l JOIN documents d ON d.id = l.document_id
                        WHERE l.trip_cost_id = tc.id AND d.status = 'posted'), '[]') AS billed
        FROM trip_costs tc JOIN accounts ea ON ea.id = tc.expense_account_id JOIN accounts pa ON pa.id = tc.paid_from_account_id
-       JOIN journal_entries e ON e.id = tc.journal_entry_id
+       JOIN journal_entries e ON e.id = tc.journal_entry_id LEFT JOIN users tu ON tu.id = tc.traveler_id
       WHERE tc.trip_id = $1 ORDER BY tc.status, tc.cost_date, tc.created_at`, [t.id]);
   const { rows: time } = await db.query(
     `SELECT te.id, to_char(te.work_date, 'YYYY-MM-DD') AS date, te.minutes, to_char(te.start_time, 'HH24:MI') AS start,
-            to_char(te.end_time, 'HH24:MI') AS "end", te.notes, te.billable, te.status, u.name AS "userName",
+            to_char(te.end_time, 'HH24:MI') AS "end", te.notes, te.billable, te.status, te.user_id AS "userId", coalesce(nullif(trim(u.name), ''), u.email) AS "userName",
             COALESCE((SELECT json_agg(json_build_object('jobId', l.job_id, 'number', d.number)) FROM document_lines l JOIN documents d ON d.id = l.document_id
                        WHERE l.time_entry_id = te.id AND d.status = 'posted'), '[]') AS billed
        FROM time_entries te JOIN users u ON u.id = te.user_id WHERE te.trip_id = $1 ORDER BY te.work_date, te.created_at`, [t.id]);
   const shareTotal = jobs.reduce((s, j) => s + j.shareBp, 0);
   const posted = costs.filter((x) => x.status === 'posted');
   return {
-    id: t.id, name: t.name, startDate: t.start_date, endDate: t.end_date, notes: t.notes, isActive: t.is_active,
+    id: t.id, name: t.name, startDate: t.start_date, endDate: t.end_date, notes: t.notes, isActive: t.is_active, travelers,
     jobs: jobs.map((j) => ({ ...j, share: bpToPercent(j.shareBp), air: bpToPercent(j.airBp), hotel: bpToPercent(j.hotelBp), car: bpToPercent(j.carBp), rest: bpToPercent(j.restBp) })), sharePercent: bpToPercent(shareTotal),
     costs: costs.map((x) => ({ ...x, amountCents: Number(x.amountCents) })),
     totalCents: posted.reduce((s, x) => s + Number(x.amountCents), 0),
@@ -230,7 +274,8 @@ const expenseOk = (a) => a.is_active && (a.type === 'expense' || (a.type === 'as
 
 // `mileageCents` (server only, never from a request): an imported mileage cost keeps its source's own figure, e.g.
 // MileIQ rounds each drive to the cent and adds them up, so the books tie out to its report to the penny.
-export async function addTripCost(pool, companyId, tripId, input, { actor = null, idempotencyKey = null, costId = null, replacesId = null, mileageCents = null } = {}) {
+// `travelerId` (option): whose cost it is when the input names nobody, e.g. the person signed in, or the phone's owner.
+export async function addTripCost(pool, companyId, tripId, input, { actor = null, idempotencyKey = null, costId = null, replacesId = null, mileageCents = null, travelerId = null } = {}) {
   idempotencyKey = cleanIdempotencyKey(idempotencyKey);
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
@@ -262,6 +307,8 @@ export async function addTripCost(pool, companyId, tripId, input, { actor = null
     const from = accts.find((a) => a.id === input?.paidFromAccountId);
     if (!exp || !expenseOk(exp)) errors.push('choose the expense account (Travel, Meals…)');
     if (!from || !payableFrom(from)) errors.push('choose what you paid with (bank, credit card, or paid personally)');
+    const traveler = input?.travelerId || travelerId || null;
+    if (traveler && !(await isMember(c, companyId, traveler))) errors.push('the traveler must be a member of this company');
     if (errors.length) throw new LedgerError('Trip cost is not valid', errors);
     const label = `Trip ${trip.name}: ${description}${vendor ? ` (${vendor})` : ''}`.slice(0, 500);
     const entry = validateEntry({ date, memo: label, lines: [
@@ -272,11 +319,12 @@ export async function addTripCost(pool, companyId, tripId, input, { actor = null
     const je = await insertEntry(c, companyId, entry, { source: 'trip', sourceRef: id, actor });
     await c.query(
       `INSERT INTO trip_costs (id, company_id, trip_id, cost_date, vendor, description, amount_cents, expense_account_id, paid_from_account_id, journal_entry_id, idempotency_key, created_by,
-                               kind, miles, mile_rate_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [id, companyId, trip.id, date, vendor, description, amount, exp.id, from.id, je.id, idempotencyKey, actor, kind, mileage?.miles ?? null, mileage?.rateCentsText ?? null]);
+                               kind, miles, mile_rate_cents, traveler_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+      [id, companyId, trip.id, date, vendor, description, amount, exp.id, from.id, je.id, idempotencyKey, actor, kind, mileage?.miles ?? null, mileage?.rateCentsText ?? null, traveler]);
+    await addTraveler(c, companyId, trip.id, traveler);
     await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: 'trip_cost', entityId: id, actor,
-      payload: { ...(replacesId ? { replacesId } : {}), tripId: trip.id, date, kind, vendor, description, amountCents: amount, ...(mileage ? { miles: mileage.miles, mileRateCents: mileage.rateCentsText } : {}), entryId: je.id } });
+      payload: { ...(replacesId ? { replacesId } : {}), tripId: trip.id, travelerId: traveler, date, kind, vendor, description, amountCents: amount, ...(mileage ? { miles: mileage.miles, mileRateCents: mileage.rateCentsText } : {}), entryId: je.id } });
     return { ...(await getTrip(c, companyId, trip.id)), costId: id };
   });
 }
@@ -311,7 +359,7 @@ export async function replaceTripCost(pool, companyId, costId, input, { actor = 
     const old = await getCostRow(c, companyId, costId);
     const { rows: [{ id: newId }] } = await c.query('SELECT gen_random_uuid() AS id');
     await voidTripCost(c, companyId, costId, { actor, replacedById: newId });
-    const saved = await addTripCost(c, companyId, old.trip_id, input, { actor, idempotencyKey, costId: newId, replacesId: costId });
+    const saved = await addTripCost(c, companyId, old.trip_id, input, { actor, idempotencyKey, costId: newId, replacesId: costId, travelerId: old.traveler_id });
     await c.query(`INSERT INTO trip_cost_photos (company_id, trip_cost_id, picture, picture_type, created_at, created_by)
       SELECT company_id, $2, picture, picture_type, created_at, created_by FROM trip_cost_photos WHERE trip_cost_id = $1`, [costId, newId]);
     return { ...(await getTrip(c, companyId, saved.id)), costId: newId };
@@ -367,7 +415,7 @@ export async function deleteCostPhoto(pool, companyId, costId, photoId, { actor 
 export async function addTravelTime(pool, companyId, viewer, tripId, input, { actor = null } = {}) {
   return withTransaction(pool, async (c) => {
     await getTripRow(c, companyId, tripId);
-    await createTimeEntry(c, companyId, viewer, { ...input, jobId: null, tripId }, { actor });
+    await createTimeEntry(c, companyId, viewer, { ...input, jobId: null, tripId }, { actor }); // also lists its person as a traveler
     return getTrip(c, companyId, tripId);
   });
 }
@@ -391,4 +439,69 @@ export async function removeTravelTime(pool, companyId, viewer, tripId, timeEntr
     await deleteTimeEntry(c, companyId, viewer, timeEntryId, { actor });
     return getTrip(c, companyId, tripId);
   });
+}
+
+// ---------------------------------------------------------------- Report: trips by employee (migration 040)
+
+/**
+ * Trips by employee, for the owner and the accountant: each person, their trips, each trip's costs (with receipt
+ * photos) and travel time, a subtotal per trip, and a total per person. Costs by their date and travel time by its
+ * day, both from `from` to `to`; void costs and rejected time are left out. `userId` narrows it to one person.
+ * A cost saved before travelers were kept, with nobody named, is under "Not named".
+ */
+export async function getTripsByEmployee(db, companyId, { from, to, userId = null } = {}) {
+  if (!isIsoDate(from) || !isIsoDate(to)) throw new LedgerError('Choose the dates for the report');
+  if (from > to) throw new LedgerError('The first date is after the last date');
+  if (userId != null && !isId(userId)) throw new LedgerError('That person is not a member of this company');
+  const who = `coalesce(nullif(trim(u.name), ''), u.email)`;
+  const { rows: costs } = await db.query(
+    `SELECT tc.id, tc.trip_id AS "tripId", tc.traveler_id AS "userId", ${who} AS "userName", to_char(tc.cost_date, 'YYYY-MM-DD') AS date,
+            tc.kind, tc.description, tc.vendor, tc.miles, tc.mile_rate_cents AS "mileRateCents", tc.amount_cents AS "amountCents", pa.name AS "paidFromName",
+            COALESCE((SELECT json_agg(p.id ORDER BY p.created_at, p.id) FROM trip_cost_photos p WHERE p.trip_cost_id = tc.id), '[]') AS "photoIds"
+       FROM trip_costs tc JOIN accounts pa ON pa.id = tc.paid_from_account_id LEFT JOIN users u ON u.id = tc.traveler_id
+      WHERE tc.company_id = $1 AND tc.status = 'posted' AND tc.cost_date BETWEEN $2 AND $3 AND ($4::uuid IS NULL OR tc.traveler_id = $4)
+      ORDER BY tc.cost_date, tc.created_at`, [companyId, from, to, userId]);
+  const { rows: time } = await db.query(
+    `SELECT te.id, te.trip_id AS "tripId", te.user_id AS "userId", ${who} AS "userName", to_char(te.work_date, 'YYYY-MM-DD') AS date,
+            te.minutes, te.notes, te.status, te.billable
+       FROM time_entries te JOIN users u ON u.id = te.user_id
+      WHERE te.company_id = $1 AND te.trip_id IS NOT NULL AND te.status <> 'rejected' AND te.work_date BETWEEN $2 AND $3 AND ($4::uuid IS NULL OR te.user_id = $4)
+      ORDER BY te.work_date, te.created_at`, [companyId, from, to, userId]);
+  const tripIds = [...new Set([...costs, ...time].map((x) => x.tripId))];
+  const { rows: tripRows } = tripIds.length ? await db.query(
+    `SELECT t.id, t.name, to_char(t.start_date, 'YYYY-MM-DD') AS "startDate", to_char(t.end_date, 'YYYY-MM-DD') AS "endDate",
+            COALESCE((SELECT string_agg(coalesce(j.code, j.name), ', ' ORDER BY tj.share_bp DESC, j.name) FROM trip_jobs tj JOIN jobs j ON j.id = tj.job_id
+                       WHERE tj.trip_id = t.id), '') AS "projectsText"
+       FROM trips t WHERE t.company_id = $1 AND t.id = ANY($2::uuid[])`, [companyId, tripIds]) : { rows: [] };
+  const tripInfo = new Map(tripRows.map((t) => [t.id, t]));
+
+  // Person → trip → entries. People A to Z (Not named last); trips by their first day.
+  const people = new Map();
+  const personFor = (x) => {
+    const key = x.userId ?? '';
+    if (!people.has(key)) people.set(key, { userId: x.userId, name: x.userId ? x.userName : 'Not named', trips: new Map() });
+    return people.get(key);
+  };
+  const tripFor = (p, tripId) => {
+    if (!p.trips.has(tripId)) p.trips.set(tripId, { ...tripInfo.get(tripId), tripId, costs: [], time: [] });
+    return p.trips.get(tripId);
+  };
+  for (const x of costs) {
+    tripFor(personFor(x), x.tripId).costs.push({ id: x.id, date: x.date, kind: x.kind, kindLabel: COST_KINDS[x.kind] ?? x.kind, description: x.description,
+      vendor: x.vendor, miles: x.miles, mileRateCents: x.mileRateCents, amountCents: Number(x.amountCents), paidFromName: x.paidFromName, photoIds: x.photoIds });
+  }
+  for (const x of time) {
+    tripFor(personFor(x), x.tripId).time.push({ id: x.id, date: x.date, minutes: x.minutes, hours: minutesToHours(x.minutes), notes: x.notes, status: x.status, billable: x.billable });
+  }
+  const sum = (list, f) => list.reduce((t, x) => t + f(x), 0);
+  const out = [...people.values()].map((p) => {
+    const trips = [...p.trips.values()].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.name.localeCompare(b.name)).map((t) => {
+      const costCents = sum(t.costs, (x) => x.amountCents); const minutes = sum(t.time, (x) => x.minutes);
+      return { ...t, costCents, minutes, hours: minutesToHours(minutes), photoCount: sum(t.costs, (x) => x.photoIds.length) };
+    });
+    const costCents = sum(trips, (t) => t.costCents); const minutes = sum(trips, (t) => t.minutes);
+    return { userId: p.userId, name: p.name, trips, tripCount: trips.length, costCount: sum(trips, (t) => t.costs.length), costCents, minutes, hours: minutesToHours(minutes) };
+  }).sort((a, b) => (a.userId ? 0 : 1) - (b.userId ? 0 : 1) || a.name.localeCompare(b.name));
+  const totalCents = sum(out, (p) => p.costCents); const totalMinutes = sum(out, (p) => p.minutes);
+  return { from, to, people: out, totals: { costCents: totalCents, minutes: totalMinutes, hours: minutesToHours(totalMinutes), tripCount: tripIds.length } };
 }

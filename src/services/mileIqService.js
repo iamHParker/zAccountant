@@ -79,7 +79,8 @@ export async function previewMileIq(db, companyId, { content }) {
  * local-driving trip), newTripName, rate (optional, dollars per mile; replaces the file's), expenseAccountId,
  * paidFromAccountId }. The file is read again here; only the keys and trips come from the screen.
  */
-export async function importMileIq(pool, companyId, input, { actor = null } = {}) {
+// travelerId: whose drives these are (input.travelerId, else the option: the person signed in). Each cost names them.
+export async function importMileIq(pool, companyId, input, { actor = null, travelerId = null } = {}) {
   const parsed = read(input?.content);
   const byKey = new Map(parsed.drives.map((d) => [d.key, d]));
   const picks = Array.isArray(input?.drives) ? input.drives : [];
@@ -111,7 +112,7 @@ export async function importMileIq(pool, companyId, input, { actor = null } = {}
     const local = fresh.filter((d) => d.tripId === 'new');
     if (local.length) {
       const dates = local.map((d) => d.date).sort();
-      const t = await createTrip(c, companyId, { name: input.newTripName, startDate: dates[0], endDate: dates.at(-1),
+      const t = await createTrip(c, companyId, { name: input.newTripName, startDate: dates[0], endDate: dates.at(-1), travelers: [],
         notes: 'Made by the MileIQ import. Add the projects this driving was for (and their shares) so their invoices can bill it.' }, { actor });
       for (const d of local) d.tripId = t.id;
     }
@@ -121,7 +122,7 @@ export async function importMileIq(pool, companyId, input, { actor = null } = {}
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g).push(d);
     }
-    const accounts = { expenseAccountId: input?.expenseAccountId, paidFromAccountId: input?.paidFromAccountId };
+    const accounts = { expenseAccountId: input?.expenseAccountId, paidFromAccountId: input?.paidFromAccountId, travelerId: input?.travelerId || travelerId || undefined };
     let amountCents = 0; let costs = 0;
     for (const list of groups.values()) {
       const { tripId, date, rate: r } = list[0];

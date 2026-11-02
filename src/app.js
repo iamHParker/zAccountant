@@ -28,7 +28,7 @@ import * as bookFiles from './services/bookFileService.js';
 import * as mileIq from './services/mileIqService.js';
 import * as homeLayout from './services/homeLayoutService.js';
 import { AuthError } from './services/authService.js';
-import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
+import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows, tripsByEmployeeRows } from './core/csv.js';
 import * as tax from './services/taxService.js';
 import { verifyChain } from './services/audit.js';
 import { runBooksCheck, latestBooksCheck, centralToday } from './jobs/booksCheck.js';
@@ -636,8 +636,13 @@ export function createApp(pool, { log } = {}) {
   api.post(TR, route('bills', ({ db, req, companyId, actor }) => trips.createTrip(db, companyId, req.body ?? {}, { actor }), 201));
   api.get(`${TR}/:tripId`, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.getTrip(db, companyId, req.params.tripId)));
   api.patch(`${TR}/:tripId`, route('bills', ({ db, req, companyId, actor }) => trips.updateTrip(db, companyId, req.params.tripId, req.body ?? {}, { actor })));
+  // A cost names its traveler (travelerId); naming nobody means the person typing it in went.
   api.post(`${TR}/:tripId/costs`, route('bills', ({ db, req, companyId, actor }) =>
-    trips.addTripCost(db, companyId, req.params.tripId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) }), 201));
+    trips.addTripCost(db, companyId, req.params.tripId, req.body ?? {}, { actor, idempotencyKey: idemKey(req), travelerId: req.user.id }), 201));
+  // Trips by employee (owner and accountant): person → trip → costs and travel time, with totals; CSV with ?format=csv.
+  api.get('/companies/:companyId/reports/trips-by-employee', report('view_books', 'Trips by Employee',
+    ({ db, req, companyId }) => trips.getTripsByEmployee(db, companyId, { from: q(req.query.from), to: q(req.query.to), userId: q(req.query.userId) ?? null }), tripsByEmployeeRows));
+  api.get('/companies/:companyId/trip-people', route(['view_books', 'bills'], ({ db, companyId }) => trips.listTripPeople(db, companyId)));
   api.post(`${TR}/:tripId/travel-time`, route('bills', ({ db, req, companyId, viewer, actor }) =>
     trips.addTravelTime(db, companyId, viewer, req.params.tripId, req.body ?? {}, { actor }), 201));
   api.patch(`${TR}/:tripId/travel-time/:timeEntryId`, route('bills', ({ db, req, companyId, viewer, actor }) =>
@@ -654,7 +659,7 @@ export function createApp(pool, { log } = {}) {
   api.delete(`${TC}/photos/:photoId`, route('bills', ({ db, req, companyId, actor }) => trips.deleteCostPhoto(db, companyId, req.params.costId, req.params.photoId, { actor })));
   // MileIQ's monthly drive report → mileage costs on trips (src/services/mileIqService.js).
   api.post('/companies/:companyId/mileiq/preview', route('bills', ({ db, req, companyId }) => mileIq.previewMileIq(db, companyId, { content: req.body?.content })));
-  api.post('/companies/:companyId/mileiq/import', route('bills', ({ db, req, companyId, actor }) => mileIq.importMileIq(db, companyId, req.body ?? {}, { actor }), 201));
+  api.post('/companies/:companyId/mileiq/import', route('bills', ({ db, req, companyId, actor }) => mileIq.importMileIq(db, companyId, req.body ?? {}, { actor, travelerId: req.user.id }), 201));
 
   for (const [path, kind] of [['payments-received', 'received'], ['payments-made', 'made']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) => arap.listPayments(db, companyId, { kind, contactId: q(req.query.contactId) })));

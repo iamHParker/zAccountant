@@ -132,6 +132,14 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tripCosts` (quantity = share,
     `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share, `sharedHoursQuantity`). Those invoice
     lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
+  - **Travelers (migration 040):** `trip_travelers` (trip ↔ member) and `trip_costs.traveler_id`; travel time already
+    has `time_entries.user_id`. A cost or day of travel time adds its person to the trip (`addTraveler`, and in
+    `createTimeEntry`/`updateTimeEntry`); `updateTrip({ travelers })` refuses to drop someone with entries. Default
+    traveler: the request's user (`POST …/costs`, MileIQ), the road key's owner (Road accept), the old cost's on edit.
+    `GET …/trip-people` feeds the Employee pull-down; `listTrips` returns `travelerIds`. Report
+    `GET …/reports/trips-by-employee?from&to[&userId]` (`getTripsByEmployee`, `view_books`, CSV `tripsByEmployeeRows`):
+    person → trip → posted costs (with `photoIds`) and non-rejected travel time, by their own dates; a shared trip
+    counts once in `totals.tripCount`. The Entries grid's last row (`tripQuickReset` / `saveTripQuick`) posts a cost on Enter.
   - **Road page (migration 026, `src/services/roadService.js`, `public/road.html` + `road.js` + `road-sw.js`):** the phone
     keeps items in IndexedDB and sends them with its road key (see Security); each item and photo has the phone's own
     `client_id`, so a resend changes nothing. A service worker keeps a copy of the page for no-signal starts (network

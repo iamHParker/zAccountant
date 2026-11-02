@@ -1365,10 +1365,15 @@
     <section v-if="tab === 'trips'" class="trips">
       <div class="row wrap"><h1>Trips</h1>
         <button class="primary" v-if="can('bills') && !trip.form" @click="newTrip">+ New trip</button>
+        <label class="inline trip-pick" v-if="!trip.form && trip.people.length > 1">Employee
+          <select :value="trip.who" @change="pickTripWho($event.target.value)">
+            <option value="">Everyone</option>
+            <option v-for="p in trip.people" :value="p.id">{{ p.name }}</option>
+          </select></label>
         <label class="inline trip-pick" v-if="!trip.form && trip.list.length">Trip
           <select :value="trip.cur?.id ?? ''" @change="pickTrip($event.target.value)">
-            <option value="">Choose a trip…</option>
-            <option v-for="t in trip.list" :value="t.id">{{ t.name }} · {{ usDate(t.startDate) }} · {{ money(t.totalCents) }}{{ t.isActive ? '' : ' (closed)' }}</option>
+            <option value="">{{ tripsForWho().length ? 'Choose a trip…' : 'No trips for ' + tripPersonName(trip.who) }}</option>
+            <option v-for="t in tripsForWho()" :value="t.id">{{ t.name }} · {{ usDate(t.startDate) }} · {{ money(t.totalCents) }}{{ t.isActive ? '' : ' (closed)' }}</option>
           </select></label>
         <button v-if="trip.cur || trip.form" @click="closeTripView">← All trips</button></div>
       <p class="muted">Keep what a trip cost (airfare, rental car, lodging, tolls, mileage) and the travel time, and which projects it was for.
@@ -1382,6 +1387,11 @@
             <label>First day <input type="date" v-model="trip.form.startDate" required></label>
             <label>Last day (optional) <input type="date" v-model="trip.form.endDate"></label>
           </div>
+          <fieldset class="travelers" v-if="trip.people.length > 1">
+            <legend>Who went</legend>
+            <label class="check" v-for="p in trip.people" :key="p.id"><input type="checkbox" :value="p.id" v-model="trip.form.travelers"> {{ p.name }}</label>
+            <p class="muted small">Each cost and day of travel time says whose it is; the report Trips by Employee totals each person.</p>
+          </fieldset>
           <h3>Projects and their share of the trip</h3>
           <div class="share-row" v-for="(j, i) in trip.form.jobs">
             <select v-model="j.jobId" aria-label="Project"><option value="">Choose a project…</option>
@@ -1439,7 +1449,8 @@
         </div>
         <p class="hint" v-if="!trip.list.length">No trips yet.</p>
         <p class="hint" v-else>Choose a trip in the pull-down above (newest first) to see its projects and every entry, or open one here.</p>
-        <button v-for="t in trip.list.slice(0, 6)" class="trip-card" :class="{ muted: !t.isActive }" @click="openTrip(t.id)">
+        <p class="hint" v-if="trip.who && !tripsForWho().length">{{ tripPersonName(trip.who) }} has no trips yet.</p>
+        <button v-for="t in tripsForWho().slice(0, 6)" class="trip-card" :class="{ muted: !t.isActive }" @click="openTrip(t.id)">
           <span class="row"><strong>{{ t.name }}</strong><span class="num">{{ money(t.totalCents) }}</span></span>
           <span class="muted small">{{ usDate(t.startDate) }}{{ t.endDate && t.endDate !== t.startDate ? ' – ' + usDate(t.endDate) : '' }} · {{ t.costCount }} cost{{ t.costCount === 1 ? '' : 's' }}{{ t.isActive ? '' : ' · closed' }}</span>
           <span class="small" v-if="t.projectsText">{{ t.projectsText }}</span>
@@ -1541,6 +1552,9 @@
             <span class="muted">{{ usDate(trip.cur.startDate) }}{{ trip.cur.endDate && trip.cur.endDate !== trip.cur.startDate ? ' – ' + usDate(trip.cur.endDate) : '' }}</span>
             <template v-if="can('bills')"><button class="link" @click="editTrip">edit</button>
               <button class="link" @click="toggleTripOpen">{{ trip.cur.isActive ? 'close trip' : 'reopen' }}</button></template></div>
+          <p class="small who-went" v-if="trip.cur.travelers.length"><span class="muted">Who went:</span>
+            <span v-for="p in tripByPerson()" :key="p.id ?? 'none'" class="who-one"><strong>{{ p.name }}</strong>
+              <span class="muted">{{ money(p.cents) }}{{ p.minutes ? ', ' + (p.minutes / 60).toFixed(2) + ' h' : '' }}</span></span></p>
           <p v-if="trip.cur.notes" class="pre-line small">{{ trip.cur.notes }}</p>
           <div class="scroll-x"><table class="data trip-shares">
             <thead><tr><th>Project</th><th class="num" v-for="c in SHARE_COLS">{{ c.label }}</th></tr></thead>
@@ -1588,6 +1602,7 @@
             </div>
             <div class="grid2">
               <label>Date <input type="date" v-model="trip.cost.date" required></label>
+              <label v-if="trip.people.length > 1">Traveler <select v-model="trip.cost.travelerId"><option v-for="p in tripWhoChoices()" :value="p.id">{{ p.name }}</option></select></label>
               <label>{{ trip.cost.kind === 'mileage' ? 'Vehicle (optional)' : 'Paid to (optional)' }} <input v-model="trip.cost.vendor" maxlength="120" :placeholder="trip.cost.kind === 'mileage' ? 'my truck' : 'Southwest, Avis, NTTA…'"></label>
               <label>What it was <input v-model="trip.cost.description" maxlength="300" :placeholder="{ airfare: 'Airfare SAT-DAL', rental_car: 'Rental car', lodging: 'Hotel, 2 nights', tolls: 'Tolls', mileage: 'SAT to site and back' }[trip.cost.kind] || 'Description'"></label>
               <template v-if="trip.cost.kind === 'mileage'">
@@ -1622,6 +1637,7 @@
             <p class="small span2" v-if="trip.travel.roadItem"><strong>From the road: check it, then save it to the books</strong></p>
             <p class="hint small span2">One entry per day. Type the hours, or the start and end times and the breaks (lunch, stops); the hours are worked out.</p>
             <label>Date <input type="date" v-model="trip.travel.date" required></label>
+            <label v-if="trip.people.length > 1 && !trip.travel.editId && !trip.travel.roadItem">Who <select v-model="trip.travel.userId"><option v-for="p in tripWhoChoices()" :value="p.id">{{ p.name }}</option></select></label>
             <label v-if="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks)?.hours">Hours
               <input :value="clockTime(trip.travel.start, trip.travel.end, trip.travel.breaks).hours" class="num" readonly></label>
             <label v-else>Hours <input v-model="trip.travel.hours" inputmode="decimal" class="num" placeholder="6 or 5:30" :required="!trip.travel.start && !trip.travel.end"></label>
@@ -1645,11 +1661,12 @@
             <button class="primary" :disabled="road.busy" @click="acceptRoadGroup(tripRoadItems())">Accept all ({{ tripRoadItems().length }})</button>
           </div>
           <p class="hint" v-if="!tripGrid().length && !trip.cost && !trip.travel">Nothing on this trip yet. Travel time is billed by the same shares, at the hourly rate you pick on the invoice.</p>
-          <table class="data trip-grid" v-if="tripGrid().length">
-            <thead><tr><th>Date</th><th>Entry</th><th class="num">Cost</th><th></th></tr></thead>
+          <div class="scroll-x" v-if="tripGrid().length || (can('bills') && trip.quickRow)"><table class="data trip-grid">
+            <thead><tr><th>Date</th><th>Who</th><th>Entry</th><th class="num">Cost</th><th></th></tr></thead>
             <template v-for="g in tripGrid()" :key="g.key">
-              <tr :class="{ muted: g.type === 'cost' && g.x.status === 'void', 'road-row': g.type === 'road', 'new-day': g.newDay }">
+              <tr :class="{ muted: g.type === 'cost' && g.x.status === 'void', 'road-row': g.type === 'road', 'new-day': g.newDay, 'not-who': trip.who && g.who && g.who !== tripPersonName(trip.who) }">
                 <td>{{ usDate(g.date) }}</td>
+                <td class="who">{{ g.who }}</td>
                 <td>{{ g.entry }}
                   <span v-if="g.type === 'road'" class="tag">from the road · not in books</span>
                   <label v-if="g.type === 'road' && g.item.kind === 'cost' && can('bills')" class="small card-pick">Card
@@ -1664,7 +1681,7 @@
                   <template v-if="canEditRow(g)"> | <button class="link" @click="editRow(g)">edit</button> | <button class="link" @click="deleteRow(g)">delete</button></template>
                 </td>
               </tr>
-              <tr v-if="trip.viewRow === g.key" class="view-row"><td colspan="4">
+              <tr v-if="trip.viewRow === g.key" class="view-row"><td colspan="5">
                 <template v-if="g.type === 'road'">
                   <div class="small muted">Sent from {{ g.item.keyName }} on {{ usDate(g.item.receivedAt) }}<span v-if="g.item.data.vendor"> · paid to {{ g.item.data.vendor }}</span></div>
                   <div class="photo-strip" v-if="g.item.photos.length">
@@ -1674,7 +1691,20 @@
                 <div v-else class="small muted">{{ g.x.start ? g.x.start + '–' + g.x.end + ' · ' : '' }}{{ g.x.userName }}{{ g.x.billable ? '' : ' · not billable' }}</div>
               </td></tr>
             </template>
-          </table>
+            <!-- The typing row, like a spreadsheet: Tab across, Enter saves it and starts the next row (same date, person and kind). -->
+            <tr class="quick-row" v-if="can('bills') && trip.quickRow && !trip.cost && !trip.travel" @keydown.enter.prevent="saveTripQuick">
+              <td><input type="date" v-model="trip.quickRow.date" aria-label="Date"></td>
+              <td><select v-model="trip.quickRow.travelerId" aria-label="Traveler"><option v-for="p in tripWhoChoices()" :value="p.id">{{ p.name }}</option></select></td>
+              <td><div class="quick-entry">
+                <select v-model="trip.quickRow.kind" aria-label="Kind"><option v-for="(label, k) in { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', other: 'Other' }" :value="k">{{ label }}</option></select>
+                <input id="trip-quick-what" v-model="trip.quickRow.description" maxlength="300" placeholder="What it was" aria-label="What it was">
+                <input v-model="trip.quickRow.vendor" maxlength="120" placeholder="Paid to" aria-label="Paid to"></div></td>
+              <td class="num"><input v-model="trip.quickRow.amount" inputmode="decimal" class="num" placeholder="0.00" aria-label="Amount"></td>
+              <td class="actions"><button class="small primary" :disabled="trip.quickRow.busy" @click="saveTripQuick">Add</button></td>
+            </tr>
+          </table></div>
+          <p class="muted small" v-if="can('bills') && trip.quickRow && !trip.cost && !trip.travel">Last row: type a cost and press Enter to add it, then the next.
+            It uses the trip's last expense account and the card last used for that kind of cost. Mileage, receipt photos and other accounts: + Add cost.</p>
           <div class="photo-view" v-if="trip.photoView">
             <div class="row"><h3>Receipts: {{ trip.photoView.cost.description }}</h3><button class="link" @click="trip.photoView = null">close</button></div>
             <p class="hint" v-if="!trip.photoView.photos.length">No photos yet.</p>
@@ -2029,6 +2059,49 @@
           </div>
           <p class="muted" v-if="!report.data.employees.length">No paychecks were dated in {{ report.data.year }}.</p>
           <p class="muted small" v-for="n in report.data.notes">{{ n }}</p>
+        </template>
+        <!-- Trips by employee: person ▸ trip ▸ each cost and day of travel ▸ trip subtotal ▸ person total (migration 040). -->
+        <template v-if="report.type === 'trips-by-employee'">
+          <div class="row wrap no-print">
+            <label class="inline">Employee <select class="auto" v-model="report.who" @change="report.open = {}; loadReport()">
+              <option value="">Everyone</option><option v-for="p in report.people" :value="p.id">{{ p.name }}</option></select></label>
+            <span><button class="small" @click="tripRepAll('trips')">Show trips</button> <button class="small" @click="tripRepAll(true)">Show every detail</button>
+              <button class="small" @click="tripRepAll(false)">Summary only</button></span>
+          </div>
+          <p class="muted small">Costs by their date and travel time by its day. Void costs and rejected time are left out. Click a name or a trip to open it.</p>
+          <div class="scroll-x">
+            <table class="data trip-tree">
+              <thead><tr><th>Employee / trip / entry</th><th>Paid with</th><th class="num">Travel hours</th><th class="num">Cost</th></tr></thead>
+              <template v-for="p in report.data.people" :key="p.userId ?? 'none'">
+                <tr class="tree-person" @click="tripRepToggle('p' + p.userId)">
+                  <td><button class="link tree-toggle" :aria-expanded="tripRepOpen('p' + p.userId)">{{ tripRepOpen('p' + p.userId) ? '▾' : '▸' }}</button>
+                    <strong>{{ p.name }}</strong> <span class="muted small">{{ p.tripCount }} trip{{ p.tripCount === 1 ? '' : 's' }}, {{ p.costCount }} cost{{ p.costCount === 1 ? '' : 's' }}</span></td>
+                  <td></td><td class="num">{{ p.hours }}</td><td class="num">{{ money(p.costCents) }}</td></tr>
+                <template v-if="tripRepOpen('p' + p.userId)">
+                  <template v-for="t in p.trips" :key="t.tripId">
+                    <tr class="tree-trip" @click="tripRepToggle('p' + p.userId + 't' + t.tripId)">
+                      <td class="ind"><button class="link tree-toggle" :aria-expanded="tripRepOpen('p' + p.userId + 't' + t.tripId)">{{ tripRepOpen('p' + p.userId + 't' + t.tripId) ? '▾' : '▸' }}</button>
+                        {{ t.name }} <span class="muted small">{{ usDate(t.startDate) }}{{ t.endDate && t.endDate !== t.startDate ? ' – ' + usDate(t.endDate) : '' }}{{ t.projectsText ? ' · ' + t.projectsText : '' }}{{ t.photoCount ? ' · 📷 ' + t.photoCount : '' }}</span></td>
+                      <td></td><td class="num">{{ t.minutes ? t.hours : '' }}</td><td class="num">{{ tripRepOpen('p' + p.userId + 't' + t.tripId) ? '' : money(t.costCents) }}</td></tr>
+                    <template v-if="tripRepOpen('p' + p.userId + 't' + t.tripId)">
+                      <tr v-for="x in tripRepLines(t)" :key="x.type + x.id" class="tree-line">
+                        <td class="ind2"><span class="muted tree-date">{{ usDate(x.date) }}</span>
+                          <template v-if="x.type === 'cost'"> {{ x.kindLabel }}: {{ x.description }}<span class="muted" v-if="x.vendor"> · {{ x.vendor }}</span><span class="muted" v-if="x.kind === 'mileage'"> · {{ x.miles }} mi × {{ x.mileRateCents }}¢</span>
+                            <a v-for="(id, i) in x.photoIds" :key="id" class="photo-link" :href="tripRepPhotoUrl(x, id)" target="_blank" rel="noopener">📷 photo{{ x.photoIds.length > 1 ? ' ' + (i + 1) : '' }}</a></template>
+                          <template v-else> Travel time<span class="muted" v-if="x.notes"> · {{ x.notes }}</span><span class="muted small" v-if="x.status !== 'approved'"> ({{ x.status }})</span></template></td>
+                        <td class="small">{{ x.paidFromName ?? '' }}</td>
+                        <td class="num">{{ x.type === 'time' ? x.hours : '' }}</td><td class="num">{{ x.type === 'cost' ? money(x.amountCents) : '' }}</td></tr>
+                      <tr class="sub"><td class="ind2">Trip total: {{ t.name }}</td><td></td><td class="num">{{ t.hours }}</td><td class="num">{{ money(t.costCents) }}</td></tr>
+                    </template>
+                  </template>
+                  <tr class="sub"><td class="ind">Total for {{ p.name }}</td><td></td><td class="num">{{ p.hours }}</td><td class="num">{{ money(p.costCents) }}</td></tr>
+                </template>
+              </template>
+              <tr class="total"><td>All employees · {{ report.data.totals.tripCount }} trip{{ report.data.totals.tripCount === 1 ? '' : 's' }}</td><td></td>
+                <td class="num">{{ report.data.totals.hours }}</td><td class="num">{{ money(report.data.totals.costCents) }}</td></tr>
+            </table>
+          </div>
+          <p class="muted" v-if="!report.data.people.length">No trip costs or travel time in these dates.</p>
         </template>
         <p v-if="reportTies" :class="reportCheck === 0 ? 'ok' : 'bad'">{{ reportCheck === 0 ? '✓ This report ties out.' : '⚠ This report does not tie out by ' + money(reportCheck) }}</p>
       </div>

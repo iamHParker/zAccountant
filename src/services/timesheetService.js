@@ -213,6 +213,8 @@ export async function createTimeEntry(pool, companyId, viewer, input, { actor = 
       `INSERT INTO time_entries (company_id, user_id, job_id, trip_id, work_date, minutes, start_time, end_time, notes, billable, entered_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
       [companyId, userId, v.jobId, v.tripId, v.date, v.minutes, v.start, v.end, v.notes, v.billable, viewer.userId]);
+    // Travel time on a trip makes its person one of the trip's travelers (migration 040).
+    if (v.tripId) await c.query('INSERT INTO trip_travelers (company_id, trip_id, user_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [companyId, v.tripId, userId]);
     if (userId !== viewer.userId) await appendAudit(c, companyId, { action: 'create', entity: 'time_entry', entityId: t.id, actor, payload: { userId, date: v.date, minutes: v.minutes } });
     return getEntry(c, companyId, t.id);
   });
@@ -231,6 +233,7 @@ export async function updateTimeEntry(pool, companyId, viewer, id, input, { acto
       `UPDATE time_entries SET job_id = $3, work_date = $4, minutes = $5, start_time = $6, end_time = $7, notes = $8, billable = $9, trip_id = $10,
          status = 'draft', review_note = NULL, reviewed_by = NULL, reviewed_at = NULL, updated_at = now()
        WHERE company_id = $1 AND id = $2`, [companyId, id, v.jobId, v.date, v.minutes, v.start, v.end, v.notes, v.billable, v.tripId]);
+    if (v.tripId) await c.query('INSERT INTO trip_travelers (company_id, trip_id, user_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING', [companyId, v.tripId, e.userId]);
     if (e.userId !== viewer.userId) await appendAudit(c, companyId, { action: 'update', entity: 'time_entry', entityId: id, actor, payload: { userId: e.userId, date: v.date, minutes: v.minutes } });
     return getEntry(c, companyId, id);
   });

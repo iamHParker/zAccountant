@@ -309,6 +309,27 @@ is already on an invoice can't be edited or voided until that invoice is.
    billed part of the trip, its percents stay as billed.
    **delete** on a cost voids it (its entry is reversed, kept on record); on a road entry it dismisses it.
 
+7. **Trips for every employee who travels.** When the company has more than one person, the top of Trips has an
+   **Employee** pull-down next to **Trip**: choose a person and the Trip pull-down lists only the trips they went on
+   (**Everyone** lists them all; the page remembers your choice on this computer). A trip can have several travelers:
+   on **+ New trip** or **edit**, tick them under **Who went** (two engineers on one site visit share one trip, so the
+   projects and their shares are set once). Every cost has a **Traveler** and every day of travel time a **Who**; they
+   start on the person chosen above. The grid has a **Who** column (other people's lines are dimmed when you've
+   chosen someone), and under the trip's dates **Who went** shows each person's costs and hours on that trip.
+   Someone with costs or travel time on a trip stays on it. Costs saved before this was added are under the person
+   who typed them in; a cost from the phone is under the phone's owner; a MileIQ import is under whoever imports it.
+8. **Type costs like a spreadsheet.** The last row of the Entries grid is a typing row: date, traveler, kind, what it
+   was, paid to, amount. **Tab** moves across, **Enter** saves it and starts the next row with the same date, person
+   and kind. It uses the trip's last expense account and the card you last used for that kind of cost. For mileage,
+   receipt photos or another account, use **+ Add cost** (or add photos afterward with **view**).
+
+**Reports → Trips by Employee** (owner and accountant) shows, for the dates chosen, one line per person: their trips,
+costs, travel hours and total. Click a name to see their trips with a subtotal each; click a trip to see every cost
+and day of travel time, with **📷 photo** links that open the receipt pictures, then the trip total and the person's
+total. **Show trips**, **Show every detail** and **Summary only** open or close all of it at once; choose an
+**Employee** to see one person. **Print / Save PDF** prints what is open; **Download CSV** gives every line with the
+trip and person totals. Void costs and rejected time are left out.
+
 On each project's invoice, **⏱ Pull in unbilled time and costs** lists its share of every trip cost and travel hour.
 Each line bills the full cost × the share (quantity 0.8 for 80%), so the client can see both. To bill a different
 share on one invoice, type another quantity on that line.
