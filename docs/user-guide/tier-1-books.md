@@ -135,7 +135,8 @@ phone. Press **+ Add person** to add one.
    - **Date:** the day the work was done or the cost was incurred. The lines keep themselves in date order, oldest
      first: after you change a date, add a line or pull in time and costs, they re-sort (lines with no date go last).
    - **Task / description:** Report, Site visit, Deposition…
-   - **Hours / qty:** hours for a rate (half an hour can be typed .5 or 0.5); usually 1 for a cost.
+   - **Hours / qty:** hours for a rate (half an hour can be typed .5 or 0.5, or as minutes: 20/60 becomes 0.33 and
+     1+45/60 becomes 1.75); usually 1 for a cost. A share like 1/2 or 1/3 stays as you typed it.
    - **Rate / price:** change it for a one-off rate (for example 1.25 × your standard rate).
    - **Tax:** tick it if the line is taxable.
    - **Amount:** hours × rate, rounded to the cent. If the invoice you sent rounded a line a cent or two differently,
