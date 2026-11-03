@@ -91,7 +91,9 @@ const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', de
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 // Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
 const ZOOM_MIN = 50; const ZOOM_MAX = 200;
-const projectSort = () => { try { const s = JSON.parse(localStorage.getItem('zacc.projectSort')); if (['code', 'name', 'customer'].includes(s?.key)) return { key: s.key, dir: s.dir < 0 ? -1 : 1 }; } catch { /* none kept */ } return { key: 'code', dir: 1 }; };
+// Projects list order, kept on this computer. The default is newest first (Homer, 2026-11-03: new work was at the bottom).
+// The key name changed with that default ('zacc.projectSort2'), so an old saved "by number" order doesn't hide it.
+const projectSort = () => { try { const s = JSON.parse(localStorage.getItem('zacc.projectSort2')); if (['added', 'code', 'name', 'customer'].includes(s?.key)) return { key: s.key, dir: s.dir < 0 ? -1 : 1 }; } catch { /* none kept */ } return { key: 'added', dir: -1 }; };
 const NEW_CONTACT = '+new'; // the "+ Add new customer…" (and "+ Add new project…") choice in the invoice/bill form's lists
 const lastZoom = () => { try { const z = Number(localStorage.getItem('zacc.zoom')); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 100; } catch { return 100; } };
 const keepZoom = (z) => { try { localStorage.setItem('zacc.zoom', String(z)); } catch { /* private window: not kept */ } };
@@ -1434,22 +1436,32 @@ createApp({
     },
     // ---------------------------------------------------------------- Projects (the jobs time is entered against)
     activeJobs() { return this.ar.jobs.filter((j) => j.isActive); },
-    // Sales → Projects: click Number, Project or Customer to sort; again to reverse. Kept on this computer.
+    // Sales → Projects: click Added, Number, Project or Customer to sort; again to reverse. Kept on this computer.
     // "Project" sorts by the name without its number (2601 Smith Residence sorts under S), so it differs from Number.
+    // "Added" starts newest first; projects pasted in together share a time, so the number breaks the tie the same way.
     sortProjects(key) {
       const s = this.ar.proj.sort;
-      this.ar.proj.sort = { key, dir: s.key === key ? -s.dir : 1 };
-      try { localStorage.setItem('zacc.projectSort', JSON.stringify(this.ar.proj.sort)); } catch { /* private window */ }
+      this.ar.proj.sort = { key, dir: s.key === key ? -s.dir : key === 'added' ? -1 : 1 };
+      try { localStorage.setItem('zacc.projectSort2', JSON.stringify(this.ar.proj.sort)); } catch { /* private window */ }
     },
     sortedJobs() {
       const { key, dir } = this.ar.proj.sort;
+      const cmp = (x, y) => x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' });
       const text = (j) => key === 'code' ? (j.code ?? '') : key === 'customer' ? (j.customerName ?? '')
         : (j.code && j.name.startsWith(j.code) ? j.name.slice(j.code.length).replace(/^[\s\-–·:]+/, '') : j.name);
+      if (key === 'added') {
+        return [...this.ar.jobs].sort((a, b) => dir * ((Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0))
+          || dir * cmp(a.code ?? '', b.code ?? '') || cmp(a.name, b.name));
+      }
       return [...this.ar.jobs].sort((a, b) => {
         const x = text(a), y = text(b);
         if (!x !== !y) return x ? -1 : 1; // blanks last either way
-        return dir * x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' }) || a.name.localeCompare(b.name, 'en', { numeric: true });
+        return dir * cmp(x, y) || a.name.localeCompare(b.name, 'en', { numeric: true });
       });
+    },
+    /** The day a project was added, in Central time (the company's time zone), as MM/DD/YYYY. */
+    projectAdded(j) {
+      return j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit', year: 'numeric' }) : '';
     },
     jobLabel(j) { return j.code && !j.name.startsWith(j.code) ? `${j.code} · ${j.name}` : j.name; },
     editProject(j) {

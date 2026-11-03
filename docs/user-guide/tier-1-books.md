@@ -371,8 +371,10 @@ add the projects it was for, with their shares, so their invoices can bill it.
 ### Projects
 
 **Sales → Projects** lists your projects (the same list as the jobs on the Time tab): number, name, customer and site
-address. Click **Number**, **Project** or **Customer** at the top of the list to sort by it (click again to
-reverse); *Project* sorts by the name without its number, so 2601 Smith Residence sorts under S. The choice is remembered. **+ New project** adds one; a customer that isn't on the list yet can be made right there with
+address, newest first: the **Added** column shows the day each project went on the list, so new work is at the top.
+Click **Added**, **Number**, **Project** or **Customer** at the top of the list to sort by it (the faint ⇅ beside each
+shows it can be sorted; click again to reverse the ▲/▼); *Project* sorts by the name without its number, so 2601 Smith
+Residence sorts under S. The choice is remembered on that computer. **+ New project** adds one; a customer that isn't on the list yet can be made right there with
 **+ Add new customer…** in its Customer list. While writing an invoice, **+ Add new project…** in the invoice's Project
 list does the same without leaving the invoice (it fills in the project block and number). To add many at once from your project folders:
 
