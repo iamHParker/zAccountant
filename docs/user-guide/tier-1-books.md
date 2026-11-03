@@ -239,6 +239,9 @@ photo** and the camera opens. **Choose photo** picks one you already took. Add u
 
 ### Mistakes and reports
 
+- The invoice list (Open, Paid, Voided or All) starts newest first. Click **Number**, **Customer**, **Date**, **Due**,
+  **Total** or **Balance** at the top to sort by it, and click again to reverse (▲ smallest first, ▼ largest first; the
+  faint ⇅ marks a heading you can sort by). Your choice is remembered on that computer. The bill list works the same way.
 - To fix a mistake on an invoice, open it and press **Edit**. The form opens filled in; change what's wrong and press
   **Save changes**. Behind the scenes the old invoice is voided and the corrected one takes its place with the same
   number. The old one stays in the Voided list, marked "Replaced". Bills work the same way.
