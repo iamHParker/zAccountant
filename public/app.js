@@ -91,6 +91,10 @@ const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', de
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 // Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
 const ZOOM_MIN = 50; const ZOOM_MAX = 200;
+// Sales/Purchases list order (Number, customer/vendor, Date, Due, Total, Balance), kept on this computer, one for each side.
+// The default is the server's own order: newest date first (Homer, 2026-11-03: sort the open invoices by number too).
+const DOC_SORT_KEYS = ['number', 'who', 'date', 'due', 'total', 'balance'];
+const docSort = (kind) => { try { const s = JSON.parse(localStorage.getItem(`zacc.docSort.${kind}`)); if (DOC_SORT_KEYS.includes(s?.key)) return { key: s.key, dir: s.dir < 0 ? -1 : 1 }; } catch { /* none kept */ } return { key: 'date', dir: -1 }; };
 // Projects list order, kept on this computer. The default is newest first (Homer, 2026-11-03: new work was at the bottom).
 // The key name changed with that default ('zacc.projectSort2'), so an old saved "by number" order doesn't hide it.
 const projectSort = () => { try { const s = JSON.parse(localStorage.getItem('zacc.projectSort2')); if (['added', 'code', 'name', 'customer'].includes(s?.key)) return { key: s.key, dir: s.dir < 0 ? -1 : 1 }; } catch { /* none kept */ } return { key: 'added', dir: -1 }; };
@@ -327,7 +331,7 @@ createApp({
         { id: 'journal', label: 'Transactions (journal)', template: 'journal-entries.csv', help: 'QuickBooks: Reports → Journal for the date range → Export to CSV. Or fill in our template (one row per line; rows with the same Entry number form one entry).' },
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
-      ar: { panel: 'docs', view: 'open', docs: [], contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
+      ar: { panel: 'docs', view: 'open', docs: [], docSort: { invoice: docSort('invoice'), bill: docSort('bill') }, contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
         pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
@@ -1439,6 +1443,25 @@ createApp({
     // Sales → Projects: click Added, Number, Project or Customer to sort; again to reverse. Kept on this computer.
     // "Project" sorts by the name without its number (2601 Smith Residence sorts under S), so it differs from Number.
     // "Added" starts newest first; projects pasted in together share a time, so the number breaks the tie the same way.
+    // Sales → Invoices (and Purchases → Bills): click a heading to sort by it, again to reverse. Numbers sort as numbers
+    // (2601 before 2601A before 2602); dates are YYYY-MM-DD so they sort as text. Ties keep the newest-first order.
+    docSortOf() { return this.ar.docSort[this.S.kind] ?? { key: 'date', dir: -1 }; },
+    sortDocs(key) {
+      const s = this.docSortOf();
+      const next = { key, dir: s.key === key ? -s.dir : ['date', 'due', 'total', 'balance'].includes(key) ? -1 : 1 };
+      this.ar.docSort[this.S.kind] = next;
+      try { localStorage.setItem(`zacc.docSort.${this.S.kind}`, JSON.stringify(next)); } catch { /* private window */ }
+    },
+    sortedDocs() {
+      const { key, dir } = this.docSortOf();
+      const val = (d) => ({ number: d.number, who: d.contactName, date: d.date, due: this.dueShown(d), total: d.totalCents, balance: d.balanceCents })[key];
+      return [...this.ar.docs].sort((a, b) => {
+        const x = val(a), y = val(b);
+        if (typeof x === 'number' || typeof y === 'number') return dir * ((x ?? 0) - (y ?? 0));
+        if (!x !== !y) return x ? -1 : 1; // blanks last either way
+        return dir * String(x ?? '').localeCompare(String(y ?? ''), 'en', { numeric: true, sensitivity: 'base' });
+      });
+    },
     sortProjects(key) {
       const s = this.ar.proj.sort;
       this.ar.proj.sort = { key, dir: s.key === key ? -s.dir : key === 'added' ? -1 : 1 };

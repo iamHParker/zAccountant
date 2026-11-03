@@ -1171,9 +1171,12 @@
         </div>
         <p class="hint" v-if="!ar.docs.length">None yet.</p>
         <table class="data" v-else>
-          <thead><tr><th>Number</th><th>{{ S.Who }}</th><th>Date</th><th>Due</th><th class="num">Total</th><th class="num">Balance</th><th>Status</th><th></th></tr></thead>
+          <thead><tr>
+            <th v-for="[k, label, cls] in [['number', 'Number'], ['who', S.Who], ['date', 'Date'], ['due', 'Due'], ['total', 'Total', 'num'], ['balance', 'Balance', 'num']]" :class="cls" :aria-sort="docSortOf().key === k ? (docSortOf().dir > 0 ? 'ascending' : 'descending') : 'none'">
+              <button type="button" class="th-sort" @click="sortDocs(k)" :title="'Sort by ' + label.toLowerCase() + (docSortOf().key === k ? ' (click again to reverse)' : '')">{{ label }}<span v-if="docSortOf().key === k" class="sort-arrow on">{{ docSortOf().dir > 0 ? '▲' : '▼' }}</span><span v-else class="sort-arrow">⇅</span></button></th>
+            <th>Status</th><th></th></tr></thead>
           <tbody>
-            <tr v-for="d in ar.docs" class="click" @click="openDoc(d)">
+            <tr v-for="d in sortedDocs()" class="click" @click="openDoc(d)">
               <td>{{ d.number }}</td><td>{{ d.contactName }}</td><td>{{ d.date }}</td><td>{{ dueShown(d) }}</td>
               <td class="num">{{ money(d.totalCents) }}</td><td class="num">{{ money(d.balanceCents) }}</td>
               <td :class="{ bad: d.status === 'overdue', ok: d.status === 'paid', muted: d.status === 'void' }">{{ d.replacedById ? 'Replaced' : statusLabel(d.status) }}</td>
