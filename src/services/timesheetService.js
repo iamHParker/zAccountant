@@ -14,7 +14,7 @@ const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400
 
 // ---------------------------------------------------------------- Jobs
 
-const JOB_COLS = `j.id, j.name, j.code, j.customer_id AS "customerId", c.name AS "customerName", j.address, j.is_active AS "isActive"`;
+const JOB_COLS = `j.id, j.name, j.code, j.customer_id AS "customerId", c.name AS "customerName", j.address, j.is_active AS "isActive", j.created_at AS "createdAt"`;
 
 export async function listJobs(db, companyId, { includeInactive = false } = {}) {
   const { rows } = await db.query(
