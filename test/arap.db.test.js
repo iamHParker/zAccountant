@@ -15,6 +15,14 @@ test('line amounts are exact (quantity × price, half-up)', () => {
   assert.equal(arap.lineAmount('2.', 8000), 16000);
   assert.equal(arap.cleanQuantity(' .25 '), '0.25');
   assert.equal(arap.lineAmount('0.3333', 100), 33);        // 33.33¢ → 33¢
+  // Minutes over 60 become decimal hours to 2 decimals (Homer 2026-11-03); other fractions stay shares.
+  assert.equal(arap.cleanQuantity('20/60'), '0.33');      // 20/60 = 0.3333… → 0.33
+  assert.equal(arap.cleanQuantity('1+45/60'), '1.75');    // 60 + 45 = 105 min = 1.75 h
+  assert.equal(arap.cleanQuantity(' 2 + 30 / 60 '), '2.5');
+  assert.equal(arap.cleanQuantity('40/60'), '0.67');      // 0.6666… rounds up
+  assert.equal(arap.cleanQuantity('1/2'), '1/2');         // a share stays as typed
+  assert.equal(arap.lineAmount('1+45/60', 15000), 26250); // 1.75 h × $150 = $262.50
+  assert.equal(arap.lineAmount('20/60', 15000), 4950);    // 0.33 h × $150 = $49.50
   assert.equal(arap.lineAmount('1.5', 1), 2);              // 1.5¢ → 2¢ (half-up)
   assert.equal(arap.lineAmount('3', 3333), 9999);
   assert.throws(() => arap.lineAmount('1.23456', 100), /4 decimals/);

@@ -50,9 +50,26 @@ async function systemAccount(c, companyId, key, missing) {
   return a;
 }
 
-/** A typed quantity as stored: trimmed, ".5" → "0.5", "2." → "2" (Homer typed .5 hours, Oct 2026). */
+/** Minutes → decimal hours to 2 decimals, half-up, as quantity text: 20 → "0.33", 105 → "1.75", 480 → "8". */
+export function minutesToHoursText(minutes) {
+  const h = divRoundHalfUp(BigInt(minutes) * 100n, 60n); // hundredths of an hour
+  const frac = String(h % 100n).padStart(2, '0').replace(/0+$/, '');
+  return frac ? `${h / 100n}.${frac}` : String(h / 100n);
+}
+
+/** Hours and minutes typed over 60: "20/60" (20 minutes) or "1+45/60" (1 hour 45 minutes). */
+const OVER_60 = /^(?:(\d{1,6})\s*\+\s*)?(\d{1,6})\s*\/\s*60$/;
+
+/**
+ * A typed quantity as stored: trimmed, ".5" → "0.5", "2." → "2" (Homer typed .5 hours, Oct 2026).
+ * Minutes over 60 become decimal hours to 2 decimals (Homer 2026-11-03): "20/60" → "0.33", "1+45/60" → "1.75".
+ * Any other fraction (a share like 1/2 or 1/3) stays as typed.
+ */
 export function cleanQuantity(quantity) {
-  return String(quantity ?? '1').trim().replace(/^\./, '0.').replace(/\.$/, '');
+  const q = String(quantity ?? '1').trim();
+  const m = OVER_60.exec(q);
+  if (m) return minutesToHoursText(Number(m[1] ?? 0) * 60 + Number(m[2]));
+  return q.replace(/^\./, '0.').replace(/\.$/, '');
 }
 
 /**

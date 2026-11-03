@@ -14,7 +14,7 @@ test('trip shares: percent, invoice quantity, shared hours', () => {
   assert.deepEqual(['60', '33.33', '12.5%', '0', '100', '100.01', '-5', 'abc'].map(trips.percentToBp), [6000, 3333, 1250, 0, 10000, null, null, null]);
   assert.deepEqual([6000, 3333, 1250, 500, 10000].map(trips.bpToQuantity), ['0.6', '0.3333', '0.125', '0.05', '1']);
   assert.equal(projects.sharedHoursQuantity(360, 6000), '3.6'); // 6 h travel × 60% = 3.6 h
-  assert.equal(projects.sharedHoursQuantity(50, 3333), '0.2778'); // 50 × 3333 / 60 = 2777.5 → 2778 (half-up)
+  assert.equal(projects.sharedHoursQuantity(50, 3333), '0.28'); // 50 × 3333 / 6000 = 27.775 → 28 hundredths (half-up)
   // Mileage at a typed rate: 212.4 mi × $0.725 = $153.99 (21240 × 7250 / 10000 = 15399); 100 mi × $0.70 = $70.00.
   assert.equal(trips.mileageAmount('212.4', '0.725').amountCents, 15399);
   assert.deepEqual(trips.mileageAmount('100', '.70'), { miles: '100', rateCentsText: '70', amountCents: 7000 });

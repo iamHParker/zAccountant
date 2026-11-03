@@ -8,26 +8,23 @@ import { parseProjectList, splitProjectName } from '../core/projects.js';
 import { minutesToHours } from '../core/timesheets.js';
 import { divRoundHalfUp } from '../core/money.js';
 import { appendAudit } from './audit.js';
-import { lineAmount } from './arapService.js';
+import { lineAmount, minutesToHoursText } from './arapService.js';
 import { bpToQuantity, bpToPercent, COST_SHARE_SQL } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
 
-/** Minutes → hours as an invoice quantity with up to 4 decimals, half-up (50 min → "0.8333", 90 → "1.5"). */
-export function minutesToQuantity(minutes) {
-  const q4 = divRoundHalfUp(BigInt(minutes) * 10000n, 60n);
-  const whole = q4 / 10000n;
-  const frac = String(q4 % 10000n).padStart(4, '0').replace(/0+$/, '');
-  return frac ? `${whole}.${frac}` : String(whole);
-}
+/**
+ * Minutes → hours as an invoice quantity with up to 2 decimals, half-up (50 min → "0.83", 90 → "1.5").
+ * Invoice hours are billed to 2 decimals (Homer 2026-11-03) so the hours the client sees × the rate = the amount.
+ */
+export const minutesToQuantity = minutesToHoursText;
 
-/** A share of a trip's travel time, in hours to 4 decimals: 6 h (360 min) at 60% → "3.6". */
+/** A share of a trip's travel time, in hours to 2 decimals: 6 h (360 min) at 60% → "3.6". */
 export function sharedHoursQuantity(minutes, shareBp) {
-  const q4 = divRoundHalfUp(BigInt(minutes) * BigInt(shareBp), 60n); // minutes × bp / 60 = hours × 10000
-  const whole = q4 / 10000n;
-  const frac = String(q4 % 10000n).padStart(4, '0').replace(/0+$/, '');
-  return frac ? `${whole}.${frac}` : String(whole);
+  const h = divRoundHalfUp(BigInt(minutes) * BigInt(shareBp), 6000n); // minutes × bp / 6000 = hundredths of an hour
+  const frac = String(h % 100n).padStart(2, '0').replace(/0+$/, '');
+  return frac ? `${h / 100n}.${frac}` : String(h / 100n);
 }
 
 /**

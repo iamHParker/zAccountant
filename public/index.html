@@ -850,7 +850,7 @@
                 <td class="w150"><input type="date" v-model="l.serviceDate" @blur="sortLines"></td>
                 <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit">
                   <span v-if="l.from" class="tag" :title="'Billed once: this line is linked to its ' + (l.timeEntryId ? 'time entry' : 'cost')">from {{ l.from }}</span></td>
-                <td class="w90"><input v-model="l.quantity" @input="l.qtyTyped = true" inputmode="decimal" class="num" title="Hours, a quantity, or a share like 1/3"></td>
+                <td class="w90"><input v-model="l.quantity" @input="l.qtyTyped = true" @change="l.quantity = hoursText(l.quantity)" class="num" title="Hours (2.5, or minutes like 20/60 or 1+45/60), a quantity, or a share like 1/3"></td>
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td><input type="checkbox" v-model="l.taxable" class="auto-w" title="Taxable"></td>
                 <td class="num line-amount" @contextmenu.prevent="openLineAmount(l)" @dblclick="openLineAmount(l)"
@@ -877,7 +877,7 @@
               <tr v-for="(l, i) in ar.doc.lines">
                 <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
                 <td><input v-model="l.description" maxlength="300"></td>
-                <td class="w90"><input v-model="l.quantity" inputmode="decimal" class="num"></td>
+                <td class="w90"><input v-model="l.quantity" @change="l.quantity = hoursText(l.quantity)" class="num" title="Quantity (minutes like 20/60 or 1+45/60 become hours)"></td>
                 <td class="w120"><input v-model="l.unitPrice" inputmode="decimal" class="num" placeholder="0.00"></td>
                 <td v-if="S.kind === 'invoice'"><input type="checkbox" v-model="l.taxable" class="auto-w"></td>
                 <td class="num line-amount" @contextmenu.prevent="openLineAmount(l)" @dblclick="openLineAmount(l)"
@@ -1018,7 +1018,7 @@
         <table class="data invoice-lines">
           <thead><tr><th class="num">Hours / qty</th><th>Date</th><th>Description</th><th class="num">Rate</th><th title="Taxable">Tax</th><th class="num">Amount</th></tr></thead>
           <tbody>
-            <tr v-for="l in ar.detail.lines" class="item"><td class="num">{{ l.quantity }}</td><td>{{ l.serviceDate ? usDate(l.serviceDate) : '' }}</td>
+            <tr v-for="l in ar.detail.lines" class="item"><td class="num">{{ qtyShow(l.quantity, l.unitPriceCents) }}</td><td>{{ l.serviceDate ? usDate(l.serviceDate) : '' }}</td>
               <td>{{ l.description || l.itemName || l.accountName }}<span v-if="l.itemName && l.description" class="muted small"> · {{ l.itemName }}</span></td>
               <td class="num">{{ money(l.unitPriceCents) }}</td><td>{{ l.taxable ? 'T' : '' }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
             <tr v-if="ar.detail.taxCents"><td colspan="5" class="num">Subtotal</td><td class="num">{{ money(ar.detail.subtotalCents) }}</td></tr>
@@ -1050,7 +1050,7 @@
             <tr v-for="l in ar.detail.lines"><td>{{ l.description || l.accountName }}<span v-if="l.taxable" class="muted small"> (taxable)</span>
               <span v-if="l.jobName" class="muted small"> · {{ l.jobName }}{{ l.billable ? (l.billedOn ? ', billed on invoice ' + l.billedOn : ', to bill the client') : '' }}</span></td>
               <td v-if="S.kind === 'bill'">{{ l.accountCode }} · {{ l.accountName }}</td>
-              <td class="num">{{ l.quantity }}</td><td class="num">{{ money(l.unitPriceCents) }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+              <td class="num">{{ qtyShow(l.quantity, l.unitPriceCents) }}</td><td class="num">{{ money(l.unitPriceCents) }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
             <tr v-if="ar.detail.taxCents"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Subtotal</td><td class="num">{{ money(ar.detail.subtotalCents) }}</td></tr>
             <tr v-if="ar.detail.taxCents"><td :colspan="3" class="num">Sales tax {{ ar.detail.taxRate }}%</td><td class="num">{{ money(ar.detail.taxCents) }}</td></tr>
             <tr class="total"><td :colspan="S.kind === 'bill' ? 4 : 3" class="num">Total</td><td class="num">{{ money(ar.detail.totalCents) }}</td></tr>

@@ -27,8 +27,21 @@ function cents(v) {
   return Number(m[1].replace(/,/g, '') || 0) * 100 + Number((m[2] ?? '').padEnd(2, '0'));
 }
 
+/**
+ * Hours and minutes typed over 60 become decimal hours to 2 decimals, half-up, like the server's cleanQuantity
+ * (Homer 2026-11-03): "20/60" → "0.33", "1+45/60" → "1.75". Anything else (a share like 1/2) is returned as typed.
+ */
+function hoursText(qty) {
+  const m = /^(?:(\d{1,6})\s*\+\s*)?(\d{1,6})\s*\/\s*60$/.exec(String(qty ?? '').trim());
+  if (!m) return qty;
+  const h = Math.floor(((Number(m[1] ?? 0) * 60 + Number(m[2])) * 100 + 30) / 60); // hundredths, half-up
+  const frac = String(h % 100).padStart(2, '0').replace(/0+$/, '');
+  return frac ? `${Math.floor(h / 100)}.${frac}` : String(Math.floor(h / 100));
+}
+
 /** Quantity × price → cents, rounded half-up exactly like the server (BigInt, no floating point). */
 function lineCents(qty, price) {
+  qty = hoursText(qty);
   const p = cents(price);
   const f = /^(\d{1,4})\/(\d{1,4})$/.exec(String(qty || '').trim()); // a share like 1/3 (split across jobs)
   if (f) return p == null || Number(f[2]) === 0 ? null : Number((BigInt(f[1]) * BigInt(p) * 2n + BigInt(f[2])) / (2n * BigInt(f[2])));
@@ -36,6 +49,21 @@ function lineCents(qty, price) {
   if (p == null || !m) return null;
   const n = (BigInt(m[1]) * 10000n + BigInt((m[2] ?? '').padEnd(4, '0'))) * BigInt(p);
   return Number((n * 2n + 10000n) / 20000n);
+}
+/**
+ * Hours / quantity as shown on an invoice or bill: at most 2 decimals, half-up ("0.8333" → "0.83"; Homer 2026-11-03).
+ * Shown in full when rounding would change quantity × price, so the shown hours × rate always gives the amount.
+ * A share like "1/3" and anything with 2 decimals or fewer is shown as stored.
+ */
+function qtyShow(qty, priceCents) {
+  const q = String(qty ?? '').trim();
+  const m = /^(\d{1,9})\.(\d{3,4})$/.exec(q);
+  if (!m) return q;
+  const h = (BigInt(m[1]) * 10000n + BigInt(m[2].padEnd(4, '0')) + 50n) / 100n; // hundredths, half-up
+  const frac = String(h % 100n).padStart(2, '0').replace(/0+$/, '');
+  const shown = frac ? `${h / 100n}.${frac}` : String(h / 100n);
+  const price = (Math.abs(priceCents ?? 0) / 100).toFixed(2);
+  return lineCents(shown, price) === lineCents(q, price) ? shown : q;
 }
 /** Sales tax on taxable cents at a percent like "8.25", half-up. */
 function taxCents(taxable, pct) {
@@ -1374,6 +1402,8 @@ createApp({
       b.recon = open ? await this.run(() => api('GET', `/companies/${this.companyId}/reconciliations/${open.id}`)) : null;
     },
     lineCents,
+    qtyShow,
+    hoursText,
     /** A line's amount: the one typed over quantity × price (a rounding adjustment), or quantity × price. */
     lineAmt(l) { const t = String(l.amountTyped ?? '').trim() ? cents(l.amountTyped) : null; return t ?? lineCents(l.quantity, l.unitPrice); },
     /** True when a typed amount differs from quantity × price. */

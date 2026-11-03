@@ -38,9 +38,9 @@ test('folder names split into customer, reference and site address (Homer\'s lis
 test('hours as an invoice quantity', () => {
   assert.equal(projects.minutesToQuantity(90), '1.5');
   assert.equal(projects.minutesToQuantity(480), '8');
-  assert.equal(projects.minutesToQuantity(50), '0.8333'); // 50/60 = 0.83333… → 0.8333
-  assert.equal(projects.minutesToQuantity(20), '0.3333');
-  assert.equal(projects.minutesToQuantity(40), '0.6667'); // 0.66666… rounds up
+  assert.equal(projects.minutesToQuantity(50), '0.83'); // 50/60 = 0.83333… → 0.83
+  assert.equal(projects.minutesToQuantity(20), '0.33');
+  assert.equal(projects.minutesToQuantity(40), '0.67'); // 0.66666… rounds up
 });
 
 test('billing a project: unbilled time and costs, billed once', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
@@ -95,18 +95,18 @@ test('billing a project: unbilled time and costs, billed once', { skip: !hasDb &
   assert.deepEqual(bill.lines.map((l) => [l.jobName, l.billable]), [['2601 Smith Residence', true], ['2601 Smith Residence', false]]);
 
   const unbilled = await projects.listUnbilled(pool, co.id, { jobId: jobs['2601'].id });
-  assert.deepEqual(unbilled.time.map((x) => [x.date, x.quantity, x.notes]), [['2026-10-05', '2.5', 'Site visit'], ['2026-10-06', '0.8333', 'Report']]);
+  assert.deepEqual(unbilled.time.map((x) => [x.date, x.quantity, x.notes]), [['2026-10-05', '2.5', 'Site visit'], ['2026-10-06', '0.83', 'Report']]);
   assert.deepEqual(unbilled.costs.map((x) => [x.description, x.amountCents, x.vendorName]), [['Airfare SAT-DAL', 41230, 'Southwest Airlines']]);
   assert.equal((await projects.listUnbilled(pool, co.id, { customerId: dwh.id })).time.length, 3); // all of DWH's projects
   assert.equal((await projects.listUnbilled(pool, co.id, { jobId: jobs['2601'].id, from: '2026-10-06' })).time.length, 1);
 
-  // 2.5 h × $150 = $375.00; 0.8333 h × $150 = $124.995 → $125.00; airfare passed on at cost $412.30. Total $912.30.
+  // 2.5 h × $150 = $375.00; 0.83 h × $150 = $124.50; airfare passed on at cost $412.30. Total $911.80.
   const lines = [
     ...unbilled.time.map((x) => ({ accountId: A['4000'] ?? A['4100'], description: x.notes, quantity: x.quantity, unitPrice: '150', serviceDate: x.date, timeEntryId: x.id })),
     ...unbilled.costs.map((x) => ({ accountId: A['4000'] ?? A['4100'], description: x.description, amount: x.amountCents, serviceDate: x.date, billedLineId: x.id })),
   ];
   const inv = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: dwh.id, number: '2601', date: '2026-10-10', jobId: jobs['2601'].id, lines });
-  assert.equal(inv.totalCents, 91230);
+  assert.equal(inv.totalCents, 91180);
   assert.equal(inv.job.code, '2601');
   assert.equal(inv.lines[0].timeEntryId, t1.id);
 

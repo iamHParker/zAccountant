@@ -123,7 +123,9 @@ phone. Press **+ Add person** to add one.
    marked "bill to client" that aren't on an invoice yet. Pick the rate for the hours (Eng Std Rate…) and the item for
    the costs, untick anything to leave for later, and press **Add … lines**. Each hour or cost can be billed only
    once: it drops off the list when the invoice is saved, and comes back if that invoice is voided. Leave the project
-   empty to see everything for all of the customer's projects. Hours are billed to 4 decimals (50 minutes = 0.8333 h).
+   empty to see everything for all of the customer's projects. Hours are billed to 2 decimals (50 minutes = 0.83 h), so the hours your client sees × the rate is the amount.
+   The invoice shows hours to at most 2 decimals. If you type more (0.8333), the invoice shows them in full whenever
+   0.83 × the rate would give a different amount, so the arithmetic on the page always checks.
 3. For each line:
    - **Rate or item:** pick one, and the rate, tax and income account fill in. **+ Add new rate…** at the bottom of
      the list opens a small form, saves the new rate and puts it on the line. If a rate has no price saved yet, a note
