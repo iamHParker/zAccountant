@@ -120,7 +120,9 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     carries `time_entry_id` or `billed_line_id` (the bill line it passes on).
   - `GET …/unbilled?jobId=|customerId=&from&to` (permission `invoices`) lists billable, non-rejected time and billable
     lines of posted bills that no posted invoice line points at. Hours become a quantity with `minutesToQuantity`
-    (4 decimals, half-up: 50 min → 0.8333).
+    (2 decimals, half-up: 50 min → 0.83; Homer 2026-11-03, so the hours the client sees × the rate = the amount).
+    The invoice and bill views show quantities with `qtyShow` (`public/app.js`): at most 2 decimals, except a
+    quantity rounding would change the arithmetic of (a typed 0.8333, an older line), which is shown in full.
   - Billed once: `cleanLines` checks first (clear message); trigger `zacc_bill_once` is the backstop, with an advisory
     lock on the source so two invoices saved together take turns. Voiding the invoice frees the source; Edit's copy
     carries the same links (the old invoice is voided first in the same transaction).
@@ -130,7 +132,7 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     edited by void + corrected copy (`replaced_by_id`, photos copied). Kinds: airfare, rental car, lodging, meals,
     tolls, mileage, other; mileage = miles × a typed rate per mile (`mileageAmount`, never a built-in IRS number).
     Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tripCosts` (quantity = share,
-    `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share, `sharedHoursQuantity`). Those invoice
+    `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share to 2 decimals, `sharedHoursQuantity`). Those invoice
     lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
   - **Road page (migration 026, `src/services/roadService.js`, `public/road.html` + `road.js` + `road-sw.js`):** the phone
     keeps items in IndexedDB and sends them with its road key (see Security); each item and photo has the phone's own

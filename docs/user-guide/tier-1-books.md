@@ -123,7 +123,9 @@ phone. Press **+ Add person** to add one.
    marked "bill to client" that aren't on an invoice yet. Pick the rate for the hours (Eng Std Rate…) and the item for
    the costs, untick anything to leave for later, and press **Add … lines**. Each hour or cost can be billed only
    once: it drops off the list when the invoice is saved, and comes back if that invoice is voided. Leave the project
-   empty to see everything for all of the customer's projects. Hours are billed to 4 decimals (50 minutes = 0.8333 h).
+   empty to see everything for all of the customer's projects. Hours are billed to 2 decimals (50 minutes = 0.83 h), so the hours your client sees × the rate is the amount.
+   The invoice shows hours to at most 2 decimals. If you type more (0.8333), the invoice shows them in full whenever
+   0.83 × the rate would give a different amount, so the arithmetic on the page always checks.
 3. For each line:
    - **Rate or item:** pick one, and the rate, tax and income account fill in. **+ Add new rate…** at the bottom of
      the list opens a small form, saves the new rate and puts it on the line. If a rate has no price saved yet, a note
@@ -133,7 +135,8 @@ phone. Press **+ Add person** to add one.
    - **Date:** the day the work was done or the cost was incurred. The lines keep themselves in date order, oldest
      first: after you change a date, add a line or pull in time and costs, they re-sort (lines with no date go last).
    - **Task / description:** Report, Site visit, Deposition…
-   - **Hours / qty:** hours for a rate (half an hour can be typed .5 or 0.5); usually 1 for a cost.
+   - **Hours / qty:** hours for a rate (half an hour can be typed .5 or 0.5, or as minutes: 20/60 becomes 0.33 and
+     1+45/60 becomes 1.75); usually 1 for a cost. A share like 1/2 or 1/3 stays as you typed it.
    - **Rate / price:** change it for a one-off rate (for example 1.25 × your standard rate).
    - **Tax:** tick it if the line is taxable.
    - **Amount:** hours × rate, rounded to the cent. If the invoice you sent rounded a line a cent or two differently,
