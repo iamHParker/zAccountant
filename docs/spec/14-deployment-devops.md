@@ -34,8 +34,11 @@ streaming PostgreSQL replica; manual promotion runbook (RB-07). Target RTO with 
 - Never caches `/api/*` (`Cache-Control: no-store` — financial data must never sit in a shared cache).
 - Provides TLS 1.3 at the edge, WAF and DDoS protection (see 14.5).
 
+Service settings (2026-11 update: Railway stops reading `railway.toml` on 2026-12-01, so these are now set in the
+Railway dashboard; steps in `docs/runbooks/railway-setup.md` step 11; alpha runs one replica):
+
 ```toml
-# railway.toml (service: web)
+# formerly railway.toml (service: web)
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
@@ -261,7 +264,8 @@ after 1 year. Audit logs stay in PostgreSQL (small rows), partitioned when large
 
 ## 14.9 Compliance & Auditing (Deployment Level)
 
-- **Infrastructure as Code:** `railway.toml` per service + Terraform (Cloudflare DNS/WAF, R2 buckets, Grafana alerts).
+- **Infrastructure as Code:** Railway service settings in the dashboard (recorded in `docs/runbooks/railway-setup.md`;
+  Railway retired `railway.toml` on 2026-12-01) + Terraform (Cloudflare DNS/WAF, R2 buckets, Grafana alerts).
   All infra changes via PR.
 - **Drift detection:** weekly `terraform plan` in CI; any diff opens an issue.
 - **Production access:** no SSH; Railway access limited to 2 named people with hardware-key MFA; database access only

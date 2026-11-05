@@ -9,7 +9,7 @@ proof load on the foundation, the load test is the proof load on the frame.
 | URL | Meaning | Who uses it |
 |---|---|---|
 | `GET /healthz` | the server process is running | uptime monitor (status page) |
-| `GET /readyz` | the server can reach the database | Railway health check (`healthcheckPath`) |
+| `GET /readyz` | the server can reach the database | Railway health check (dashboard: Settings → Deploy → Healthcheck Path) |
 
 ## 2. Logs
 

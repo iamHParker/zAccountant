@@ -6,8 +6,9 @@ Homer does these steps in the Railway website; Claude sends them one at a time i
 1. **Empty project.** railway.com → New → Empty Project. Rename it zAccountant.
 2. **Database.** In the project: + Create (or Add) → Database → PostgreSQL. Leave its name as **Postgres**
    (the variables below refer to it by that name).
-3. **App from GitHub.** + Create → GitHub Repo → `iamHParker/zAccountant`. Railway reads `railway.toml` and builds
-   with the `Dockerfile`. The first build may fail until step 4 is done; that's expected.
+3. **App from GitHub.** + Create → GitHub Repo → `iamHParker/zAccountant`. Railway finds the `Dockerfile` and builds
+   with it. Then set the service settings in step 11 (the health check matters). The first build may fail until
+   step 4 is done; that's expected.
 4. **Variables** on the app service (Variables tab → Raw Editor), with the three secrets Claude generates:
    ```
    MIGRATION_DATABASE_URL=${{Postgres.DATABASE_URL}}
@@ -45,6 +46,21 @@ choice (Pro, or our own backup job); he chose to decide later, reminder set for 
     - Deployments shows a red **Failed** deploy → open it, copy the end of **Build Logs** or **Deploy Logs** to Claude.
     - No new deploys at all → Settings → Source: reconnect the repo or pick branch `main`; then press **Deploy** on
       the newest commit. Railway keeps the last good version running until a new one starts cleanly.
+
+11. **Service settings live in the Railway dashboard** (since 2026-11: Railway stops reading `railway.toml` /
+    `railway.json` on **2026-12-01**, so the repo no longer has one). App service → **Settings**:
+    - **Build → Builder:** Dockerfile (found by itself; Dockerfile path `Dockerfile`).
+    - **Deploy → Custom Start Command:** leave empty (the Dockerfile's `CMD` runs `node src/server.js`).
+    - **Deploy → Healthcheck Path:** `/readyz`. This is the one that matters: Railway then waits for the new copy
+      to answer 200 before switching visitors to it, so a failed migration leaves the old copy running. Without
+      it, Railway switches as soon as the container starts, even if it crashes a second later.
+    - **Healthcheck timeout:** Variables → `RAILWAY_HEALTHCHECK_TIMEOUT_SEC=60` (Railway's default is 300).
+    - **Deploy → Restart Policy:** On Failure, max retries **5**.
+    - **Replicas:** **1**. The sign-in rate limits and the nightly books check live in the server's memory; going to
+      2+ needs a shared store (Redis) for the limits and a separate cron service for the nightly job.
+    Check it took: the next deploy's log shows the health check on `/readyz` passing.
+    Railway's newer route, Infrastructure as Code (`.railway/railway.ts`, applied with the Railway CLI's
+    `railway config apply`), is not used: it isn't read during deploys and adds a tool for one service's settings.
 
 Later: custom domain (e.g. app.zaccountant.com, then set `ALLOWED_HOSTS` to include it), `METRICS_TOKEN` for
 Grafana, an uptime monitor on `/healthz`.
