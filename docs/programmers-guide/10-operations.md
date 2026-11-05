@@ -11,9 +11,12 @@ Production runs on **Railway** at `zaccountant-production.up.railway.app` (Hobby
 ## A deploy, step by step
 
 1. A pull request merges into `main`.
-2. Railway builds the `Dockerfile` (Node 22 plus the PostgreSQL client tools for backups).
+2. Railway builds the `Dockerfile` (Node 22 plus the PostgreSQL client tools for backups). Service settings (health
+   check, restarts, replicas) live in the Railway dashboard, not in a file: Railway stops reading `railway.toml` on
+   2026-12-01. The list is in railway-setup.md step 11.
 3. The new copy starts: it checks its settings, runs new migrations as the owner login, refreshes the restricted
-   login's grants, then starts listening. `/readyz` turns green when it can reach the database.
+   login's grants, then starts listening. `/readyz` turns green when it can reach the database, and only then does
+   Railway's health check switch visitors to it.
 4. Railway sends the old copy SIGTERM. It finishes its requests and exits.
 
 If a migration fails, the new copy refuses to start and the old one keeps serving. Fix forward with a new
