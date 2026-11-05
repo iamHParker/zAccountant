@@ -106,9 +106,9 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 - Front page at `/` (`public/welcome.html`, plain HTML); prices on their own page `/prices` (`prices.html`, from
   `GET /api/public/plans`; Homer 2026-10-25); the app is at `/app`.
   Settings → Back up your books (`src/services/backupService.js`): re-importable CSVs of the chart and journal.
-- Guides: `docs/user-guide/` (chapters by tier: everyone, Books, Payroll, Timesheets, staff) and
-  `docs/programmers-guide/` (architecture, money, security, DB, features, front end, **error handling**, testing,
-  recipes, ops). Update the matching chapter in the same PR as any feature or rule change (Homer, 2026-10-24).
+- Guides: `docs/user-guide/` (tiers + a "How do I…?" index in its README) and `docs/programmers-guide/` (0 web basics
+  … 10 ops, 11 how it fits together; ch. 4 lists every migration). Update the matching chapter, the index and the
+  migration table in the same PR as any feature or rule change (Homer, 2026-10-24).
 - Ops: request logs/metrics in `src/metrics.js`; restore drill and load test in `src/jobs/`; how to run them and
   the results log: `docs/runbooks/operations.md`.
 

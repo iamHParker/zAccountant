@@ -13,6 +13,9 @@ The screens are plain files the server sends as they are, except that the server
 | `feedback.js` | the Beta feedback recorder and pictures |
 | `clock.js` | travel time from the clock: `clockTime(start, end, breaks)` shows the hours while typing (the server works them out again: `cleanEntry` takes `breaks` text, the Road item takes `start`/`end`/`breaks`) |
 | `paste.js` | `picturesFromClipboard()`: copied screenshots/photos as `File`s for the **📋 Paste** buttons beside photo pickers (app and Road page) |
+| `boot.js` | a start-up guard loaded before the app: if the app hasn't drawn its first screen after 6 seconds (an old phone, a script that failed to load), it shows "zAccountant could not start in this browser" with the errors, instead of a blank page |
+| `payee.js` | `payeeKey()`: the "same payee" key Banking uses to fill one choice into every line from the same payee (chapter 5, Banking) |
+| `road.html`, `road.js`, `road-sw.js`, `road.webmanifest` | the phone's Road page at `/road`: its own small Vue app, the service worker that keeps a copy for no-signal starts, and the "add to Home Screen" description (chapter 5, Road page) |
 | `templates/` | CSV templates people download for imports |
 
 ## The screens are compiled on the server (since Oct 2026)

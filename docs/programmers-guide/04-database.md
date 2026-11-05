@@ -27,16 +27,23 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `020_corrections.sql` | `replaced_by_id` on documents and payments (Edit = void + corrected copy); invoice number unique among non-replaced |
 | `021_payment_photos.sql` | photos of the check and remittance kept with a payment (RLS by company) |
 | `022_customer_people.sql` | customer "Part of" group and people (adjusters); invoice attention, send-to, claim/job number |
-| `039_move_payments_on_correction.sql` | an edited invoice or bill keeps its payments: `payment_applications.document_id` may move only from a voided document to its corrected copy (trigger `payment_applications_move`) |
-| `031_corrections_2.sql` | void a payroll run once (void columns, `zacc_run_void_once`, period unique among runs not voided); reopen the latest reconciliation (`zacc_recon_final`), which also fixes Cancel (the trigger returned NULL on DELETE) |
-| `030_employee_details.sql` | employee home address (jsonb, for the W-2), hire and termination dates; each paycheck keeps its own copy of the employee in `calculation.employee` |
-| `029_home_layout.sql` | `home_layouts`: each person's Home card arrangement per company (`{ left, right }` card ids); RLS on company and user |
-| `028_mileiq.sql` | `mileage_drives`: each drive imported from MileIQ (when, where, miles, rate, tolls, parking), its trip and the mileage cost it is part of; `drive_key` stops a second import; RLS |
-| `027_offsite_backups.sql` | one row per nightly off-site backup try (when, size, SHA-256, object key, error); no business data, no RLS |
-| `026_road.sql` | Road page: `road_keys` (hash only; no RLS, looked up before the company is known), `road_items` (the phone's inbox; `client_id` makes resends harmless), `road_photos`; RLS on items and photos |
-| `025_passkeys.sql` | passkeys (public keys only) and one-time sign-in challenges; no company, so no row-level security (like `users`) |
-| `024_trips.sql` | trips, their projects' shares (`trip_jobs.share_bp`), trip costs (own journal entry; kinds incl. mileage), receipt photos, travel time (`time_entries.trip_id`); billed once per project |
 | `023_billable_time_costs.sql` | project site address; project + "bill to client" on bill lines; invoice lines linked to the time or cost they bill (billed once, by trigger) |
+| `024_trips.sql` | trips, their projects' shares (`trip_jobs.share_bp`), trip costs (own journal entry; kinds incl. mileage), receipt photos, travel time (`time_entries.trip_id`); billed once per project |
+| `025_passkeys.sql` | passkeys (public keys only) and one-time sign-in challenges; no company, so no row-level security (like `users`) |
+| `026_road.sql` | Road page: `road_keys` (hash only; no RLS, looked up before the company is known), `road_items` (the phone's inbox; `client_id` makes resends harmless), `road_photos`; RLS on items and photos |
+| `027_offsite_backups.sql` | one row per nightly off-site backup try (when, size, SHA-256, object key, error); no business data, no RLS |
+| `028_mileiq.sql` | `mileage_drives`: each drive imported from MileIQ (when, where, miles, rate, tolls, parking), its trip and the mileage cost it is part of; `drive_key` stops a second import; RLS |
+| `029_home_layout.sql` | `home_layouts`: each person's Home card arrangement per company (`{ left, right }` card ids); RLS on company and user |
+| `030_employee_details.sql` | employee home address (jsonb, for the W-2), hire and termination dates; each paycheck keeps its own copy of the employee in `calculation.employee` |
+| `031_corrections_2.sql` | void a payroll run once (void columns, `zacc_run_void_once`, period unique among runs not voided); reopen the latest reconciliation (`zacc_recon_final`), which also fixes Cancel (the trigger returned NULL on DELETE) |
+| `032_care_of.sql` | `documents.care_of`: an attorney's client, so Bill To reads "Client c/o Attorney" |
+| `033_road_checks.sql` | Road page **check** items (`road_items.kind = 'check'`) and `road_items.payment_id`, the payment a check became |
+| `034_bank_pdf.sql` | `bank_transactions.source` may be `'pdf'` (a statement read from its PDF) |
+| `035_payment_pdfs.sql` | `payment_photos` may hold a PDF (a deposit confirmation, an emailed remittance) |
+| `036_payment_plans.sql` | payment plans on invoices: `documents.plan_count` (2–60) and `plan_first_due` |
+| `037_late_charges.sql` | late-charge settings on `companies` (APR, fee, grace days), `contacts.is_homeowner` / `no_late_charges`, invoice `no_late_charges` and `late_charge_month`, one late-charge invoice per customer per month |
+| `038_trip_shares_by_kind.sql` | a project's trip share by kind of cost: `trip_jobs.air_bp / hotel_bp / car_bp / rest_bp` (NULL = follow `share_bp`) |
+| `039_move_payments_on_correction.sql` | an edited invoice or bill keeps its payments: `payment_applications.document_id` may move only from a voided document to its corrected copy (trigger `payment_applications_move`) |
 
 ## How migrations run
 
@@ -46,7 +53,7 @@ happens. On Railway this runs every time the server starts (`src/server.js`), as
 
 ## Writing a migration
 
-1. Make a new file with the next number, for example `019_split_costs.sql`. **Never edit a migration that has
+1. Make a new file with the next number, for example `040_split_costs.sql`. **Never edit a migration that has
    reached `main`.** Production has already run it, and edits would never run there.
 2. Start with a comment that says what the file adds and why, in plain words.
 3. Every company table gets:
