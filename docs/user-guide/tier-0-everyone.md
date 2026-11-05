@@ -42,20 +42,22 @@ company**.
 
 | Tab | What it's for | Tier |
 |---|---|---|
-| Home | cash, income, expenses and profit this year; record a quick transaction | 1 |
+| Home | cash, income, expenses and profit this year; record a quick transaction; your shortcut cards | 1 |
 | Transactions | every entry; search; advanced journal entries; recurring entries | 1 |
-| Sales | invoices, customers, payments received, what customers owe | 1 |
+| Sales | invoices, customers, projects, payments received, payment plans, late charges, what customers owe | 1 |
 | Bills | bills, vendors, payments made, what you owe | 1 |
+| Trips | trips and their costs, mileage and travel time; your phone on the road; MileIQ import | 1 |
 | Banking | import bank statements, review them, rules, reconcile | 1 |
 | Reports | balance sheet, profit and loss, cash flow, trial balance; payroll reports | 1, 2 |
 | Accounts | chart of accounts, account registers, importing from QuickBooks or Excel | 1 |
 | Payroll | employees, payroll runs, pay stubs, payroll taxes | 2 |
 | Time | timesheets and approvals | 3 |
-| Settings | company name and fiscal year, people and roles, invoice letterhead and rates, closing the books, audit trail, payroll settings | 1, 2 |
+| Settings | company name and fiscal year, your sign-in and passkeys, people and roles, invoice letterhead and rates, late charges, backups, closing the books, audit trail, payroll settings | 1, 2 |
 
 You see only the tabs your role and your company's plan include.
 
-**? Help** opens the guide for the screen you are on, and its search box finds any guide.
+**? Help** opens the guide for the screen you are on, and its search box finds any guide. The bar along the bottom
+of the screen has the zoom slider, full screen, Options and the build number.
 
 ## 4. When something goes wrong
 
@@ -72,6 +74,7 @@ zAccountant never half-saves: a save either completes or nothing changes. Messag
 | "That is too large to send" | the file or picture is over the limit | use a smaller file or picture |
 | "Something went wrong on our side. Nothing was saved." | a problem in zAccountant itself | press 🐞 Beta feedback so we can fix it |
 | "Please sign in" / the sign-in screen appears | your session ended | sign in again; your saved work is safe |
+| "zAccountant could not start in this browser" with a list of errors | the app couldn't start on this phone or browser (often an old version) | update the phone or browser, or close and reopen the page; take a screenshot of the page and send it to us |
 
 Saves of entries, invoices, bills and payments are protected against doubles. If you press Save again after a
 dropped connection, they are recorded once.

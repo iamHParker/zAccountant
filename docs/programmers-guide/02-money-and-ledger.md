@@ -49,6 +49,7 @@ entry. History stays complete, which is what an auditor expects.
 | `bank` | Banking review (adding a bank line) |
 | `invoice`, `bill`, `payment` | `arapService.js` |
 | `payroll` | `payrollService.js`: paychecks, payroll runs and tax deposits |
+| `trip` | `tripService.js`: a trip cost (also from the Road page and MileIQ) |
 | `import` | `importService.js` (QuickBooks/Excel/IIF; can be undone as a batch) |
 | `recurring` | the nightly job or "Post due entries now" |
 | `reversal` | reversing an entry, or voiding a document, paycheck or deposit |

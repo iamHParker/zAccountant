@@ -50,6 +50,8 @@ IIF account types from type/subtype (`IIF_TYPE`); the customer or vendor name is
 payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
 
 ## Sales and bills (`arapService.js`, `invoiceSetupService.js`)
+
+### Documents, posting and edits
 - Customers and vendors are `contacts` (`kind`). Invoices and bills are `documents` with `document_lines`.
 - Saving a document posts one journal entry: invoice = Dr Accounts Receivable, Cr income per line, Cr Sales Tax
   Payable. Bill = Dr expense per line, Cr Accounts Payable. Payments are `payments` plus `payment_applications`.
@@ -63,11 +65,15 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   keep the contact, cover what was paid, and be dated on or before the first payment. The runtime role may UPDATE
   only `payment_applications.document_id`, and trigger `payment_applications_move` (migration 039) allows it only
   from a voided document to its `replaced_by_id` copy, with the overpay check. Plain Void still needs payments voided.
+
+### Divisions, adjusters, attention and lettered numbers
 - Divisions and adjusters (migration 022): `contacts.group_name` ("Part of"; `getAging` returns `groups` totals) and
   `contacts.people` (jsonb `[{name,email,phone}]`, ≤ 50, checked by `cleanPeople`). Invoices carry `attention`,
   `send_to`, `client_ref` (claim/job number), `care_of` (an attorney's client: Bill To reads "client c/o contact"; migration 032), set at save like every document field. A typed invoice number already in
   use becomes the next lettered one (`nextLetteredNumber`: 2601 → 2601A … Z, AA …), returned as `numberWasTaken`; an
   automatic number never gets a letter. The ✉ Email button is a `mailto:` link built in the browser.
+
+### Payment plans
 - Payment plans (migration 036, `src/core/paymentPlan.js`, Homer 2026-10-29): `documents.plan_count` (2-60) and
   `plan_first_due` on an invoice. `planSchedule` splits the total evenly (odd cents one each to the first payments),
   monthly from the first due date (31st → month end); `planStatus` applies what was paid earliest-first and gives
@@ -77,6 +83,8 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   moves no money. Sales → Payment plans (`ar.panel = 'plans'`) and the Home card `plans` (`loadHomePlans`) filter open
   invoices with `plan`; Statement prints `getDocument`'s payments and schedule; `payPlan` pre-fills the next payment.
   A plan invoice never gets late charges.
+
+### Late charges
 - Late charges (migration 037, `src/core/lateCharges.js` pure, `src/services/lateChargeService.js`, Homer 2026-10-29):
   company `late_apr` (percent text, ≤ 36% typo guard), `late_fee_cents`, `late_grace_days` (30), `late_holiday_grace_days`
   (60: a homeowner's invoice due in Nov/Dec); contact `is_homeowner`, `no_late_charges`; invoice `no_late_charges`
@@ -88,12 +96,16 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
   Finance Charges" the first time); the unique index `documents_late_charge_once` stops a second one in a month, a
   void frees it, and `replaceDocument` carries `late_charge_month` to the corrected copy. UI: Settings → Late charges,
   Sales → Late charges (`ar.panel = 'late'`), customer checkboxes, the invoice's "No late charges" box.
+
+### Payment photos and PDFs
 - Payment photos (migration 021, `src/services/paymentPhotoService.js`): `payment_photos` (bytea ≤ 3 MB, JPEG/PNG, or a
   PDF since migration 035 such as the bank's deposit confirmation, sent unshrunk as `data:application/pdf`, checked for `%PDF-`;
   6 per payment), routes `…/payments/:id/photos[/:photoId]` (add/remove: the side's permission; view: view_books or the
   side). The browser shrinks each photo to 2000 px (`pictureFromFile`); the form's file inputs use
   `capture="environment"` so an iPhone opens its camera. Edit copies the photos to the corrected payment. ⚠️ A check
   photo carries bank numbers: audit entries record only the photo id and size.
+
+### Professional-services invoices
 - **Professional-services invoices (migration 016):**
   - `invoice_items` holds saved rates. Kind `service` is hours × rate; kind `expense` is a cost passed on, usually
     quantity 1 and untaxed. A rate with no price means "type it on the invoice".
@@ -112,65 +124,72 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     `invoice_footer`), a logo in `company_logos` (≤1 MB PNG/JPEG, checked by its first bytes), and
     `default_sales_tax_rate`, which fills new invoices.
   - Sales tax = rate × the sum of taxable lines, rounded once (not per line). Zero to 20%.
-- **Projects and billing time and costs (migration 023, `src/services/projectService.js`, `src/core/projects.js`):**
-  - A project is a `jobs` row (the timesheet jobs), now with a site `address`. `/jobs` is no longer gated by the
-    Timesheets plan feature, and `invoices` may add projects. `POST …/jobs/import` adds projects from pasted folder
-    names (`parseProjectList`: last path part, leading number = `code`, whole folder name = `name`; preview first).
-  - A bill line can carry `job_id` and `billable` ("bill to client"). An invoice carries `job_id`; an invoice line
-    carries `time_entry_id` or `billed_line_id` (the bill line it passes on).
-  - `GET …/unbilled?jobId=|customerId=&from&to` (permission `invoices`) lists billable, non-rejected time and billable
-    lines of posted bills that no posted invoice line points at. Hours become a quantity with `minutesToQuantity`
-    (2 decimals, half-up: 50 min → 0.83; Homer 2026-11-03, so the hours the client sees × the rate = the amount).
-    The invoice and bill views show quantities with `qtyShow` (`public/app.js`): at most 2 decimals, except a
-    quantity rounding would change the arithmetic of (a typed 0.8333, an older line), which is shown in full.
-  - Billed once: `cleanLines` checks first (clear message); trigger `zacc_bill_once` is the backstop, with an advisory
-    lock on the source so two invoices saved together take turns. Voiding the invoice frees the source; Edit's copy
-    carries the same links (the old invoice is voided first in the same transaction).
-  - **Trips (migration 024, `src/services/tripService.js`, Trips tab, permission `bills`; edit/void `post`):** a trip
-    lists projects with a share in hundredths of a percent (`share_bp`, total ≤ 100%; the rest is not billed). A trip
-    cost posts its own entry (source `trip`: Dr expense, Cr bank / credit card / owner equity "paid personally") and is
-    edited by void + corrected copy (`replaced_by_id`, photos copied). Kinds: airfare, rental car, lodging, meals,
-    tolls, mileage, other; mileage = miles × a typed rate per mile (`mileageAmount`, never a built-in IRS number).
-    Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tripCosts` (quantity = share,
-    `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share to 2 decimals, `sharedHoursQuantity`). Those invoice
-    lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
-  - **Road page (migration 026, `src/services/roadService.js`, `public/road.html` + `road.js` + `road-sw.js`):** the phone
-    keeps items in IndexedDB and sends them with its road key (see Security); each item and photo has the phone's own
-    `client_id`, so a resend changes nothing. A service worker keeps a copy of the page for no-signal starts (network
-    first). Trips → From the road accepts an item in one transaction: a trip (new project numbers become jobs unless a
-    job with that name or number exists; even shares via `evenShares`), a cost (`addTripCost` with idempotency key
-    `road-<item id>`, photos copied), or travel time (a time entry for the sender). QR codes come from
-    `qrcode-generator` on the server (SVG). A **check** item (migration 033: date, from, amount, check number, typed
-    invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
-    The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
-    { paymentId }` (`invoices`) links it (`road_items.payment_id`) and copies its photos to `payment_photos`.
-    Changing a sent item: `PUT /api/road/items/:clientId { data }` (`editItem`) re-checks the data like a new item
-    and replaces `road_items.data`, only while `status = 'pending'`; the phone marks the item `edited` and sends the
-    change on its next sync. Accepted items are fixed at the desk (`PATCH …/trips/:tripId/travel-time/:timeEntryId`
-    = `updateTravelTime`, or a trip cost's void + copy).
-    At the desk (Homer, 2026-10-30): `PATCH …/road-items/:id { data }` (`editRoadItem`) and `accept { data }` re-check
-    desk changes through `deskData` → `cleanItem` (the trip and kind stay; amounts typed in dollars, time as h:mm);
-    `POST …/road-items/accept-all { itemIds, expenseAccountId, paidFromAccountId }` (`acceptRoadItems`) accepts several
-    in one transaction, trips first, and refuses if any is no longer pending; `paidFrom: { itemId: accountId }` puts
-    single costs on another card (the browser's `roadCard`: the row's pick, else `zacc.cardByKind` in localStorage,
-    else Paid with). The trip's project card searches `ar.jobs` by code, name or customer (`tripJobMatches`), adds the
-    ticked ones or a new job (`POST …/jobs`) and PATCHes the trip with even shares across all (`addTripJobs`).
-    Shares by kind of cost (migration 038): `trip_jobs.air_bp / hotel_bp / car_bp / rest_bp`, NULL = follow `share_bp`
-    (travel time always uses `share_bp`); `COST_SHARE_SQL` picks a cost's share by `kind` in `listUnbilled`; `cleanTrip`
-    checks each column totals ≤ 100% and `updateTrip` keeps a billed project's every share. UI: the editable percent
-    table (`SHARE_COLS`, `trip.shares`, `saveTripShares`); typing a cell marks it in `trip.shareTouched` and `spreadTripShare` splits what is left of 100% among the column's untyped cells, in hundredths. The Trips tab has a trip pull-down
-    (`pickTrip`, newest first) and one Entries grid per trip (`tripGrid`: costs, travel time and the trip's pending
-    road items, by date; View | Edit | Delete; a road item's Edit fills the cost or travel form and "Save to books"
-    accepts it with the changes).
-  - **MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`):** the CSV is laid out
-    like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's
-    header, reads only typed cells and works the dollars out itself. A drive's `key` is a SHA-256 of when, where, miles
-    and vehicle; `mileage_drives` keeps each imported drive, and a key counts as imported while its trip cost is posted
-    or was edited. Import groups drives per (trip, day, rate) into one `addTripCost` mileage cost whose amount is the
-    sum of each drive rounded (server-only `mileageCents` option, so the books tie out to MileIQ's report); tolls and
-    parking post as their own costs. Drives with trip `new` go on one new trip spanning their dates.
-  - Billed time can't be changed, deleted or sent back (`zacc_time_billed_final`, and the service says which invoice);
-    a bill with a billed cost can't be voided or edited (`zacc_bill_cost_billed`) until that invoice is.
+
+## Projects and billing time and costs (migration 023, `src/services/projectService.js`, `src/core/projects.js`)
+- A project is a `jobs` row (the timesheet jobs), now with a site `address`. `/jobs` is no longer gated by the
+  Timesheets plan feature, and `invoices` may add projects. `POST …/jobs/import` adds projects from pasted folder
+  names (`parseProjectList`: last path part, leading number = `code`, whole folder name = `name`; preview first).
+- A bill line can carry `job_id` and `billable` ("bill to client"). An invoice carries `job_id`; an invoice line
+  carries `time_entry_id` or `billed_line_id` (the bill line it passes on).
+- `GET …/unbilled?jobId=|customerId=&from&to` (permission `invoices`) lists billable, non-rejected time and billable
+  lines of posted bills that no posted invoice line points at. Hours become a quantity with `minutesToQuantity`
+  (2 decimals, half-up: 50 min → 0.83; Homer 2026-11-03, so the hours the client sees × the rate = the amount).
+  The invoice and bill views show quantities with `qtyShow` (`public/app.js`): at most 2 decimals, except a
+  quantity rounding would change the arithmetic of (a typed 0.8333, an older line), which is shown in full.
+- Billed once: `cleanLines` checks first (clear message); trigger `zacc_bill_once` is the backstop, with an advisory
+  lock on the source so two invoices saved together take turns. Voiding the invoice frees the source; Edit's copy
+  carries the same links (the old invoice is voided first in the same transaction).
+- Billed time can't be changed, deleted or sent back (`zacc_time_billed_final`, and the service says which invoice);
+  a bill with a billed cost can't be voided or edited (`zacc_bill_cost_billed`) until that invoice is.
+
+## Trips (migration 024, `src/services/tripService.js`, Trips tab, permission `bills`; edit/void `post`)
+A trip
+lists projects with a share in hundredths of a percent (`share_bp`, total ≤ 100%; the rest is not billed). A trip
+cost posts its own entry (source `trip`: Dr expense, Cr bank / credit card / owner equity "paid personally") and is
+edited by void + corrected copy (`replaced_by_id`, photos copied). Kinds: airfare, rental car, lodging, meals,
+tolls, mileage, other; mileage = miles × a typed rate per mile (`mileageAmount`, never a built-in IRS number).
+Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tripCosts` (quantity = share,
+`bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share to 2 decimals, `sharedHoursQuantity`). Those invoice
+lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
+
+## Road page (migration 026, `src/services/roadService.js`, `public/road.html` + `road.js` + `road-sw.js`)
+The phone
+keeps items in IndexedDB and sends them with its road key (see Security); each item and photo has the phone's own
+`client_id`, so a resend changes nothing. A service worker keeps a copy of the page for no-signal starts (network
+first). Trips → From the road accepts an item in one transaction: a trip (new project numbers become jobs unless a
+job with that name or number exists; even shares via `evenShares`), a cost (`addTripCost` with idempotency key
+`road-<item id>`, photos copied), or travel time (a time entry for the sender). QR codes come from
+`qrcode-generator` on the server (SVG). A **check** item (migration 033: date, from, amount, check number, typed
+invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
+The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
+{ paymentId }` (`invoices`) links it (`road_items.payment_id`) and copies its photos to `payment_photos`.
+Changing a sent item: `PUT /api/road/items/:clientId { data }` (`editItem`) re-checks the data like a new item
+and replaces `road_items.data`, only while `status = 'pending'`; the phone marks the item `edited` and sends the
+change on its next sync. Accepted items are fixed at the desk (`PATCH …/trips/:tripId/travel-time/:timeEntryId`
+= `updateTravelTime`, or a trip cost's void + copy).
+At the desk (Homer, 2026-10-30): `PATCH …/road-items/:id { data }` (`editRoadItem`) and `accept { data }` re-check
+desk changes through `deskData` → `cleanItem` (the trip and kind stay; amounts typed in dollars, time as h:mm);
+`POST …/road-items/accept-all { itemIds, expenseAccountId, paidFromAccountId }` (`acceptRoadItems`) accepts several
+in one transaction, trips first, and refuses if any is no longer pending; `paidFrom: { itemId: accountId }` puts
+single costs on another card (the browser's `roadCard`: the row's pick, else `zacc.cardByKind` in localStorage,
+else Paid with). The trip's project card searches `ar.jobs` by code, name or customer (`tripJobMatches`), adds the
+ticked ones or a new job (`POST …/jobs`) and PATCHes the trip with even shares across all (`addTripJobs`).
+Shares by kind of cost (migration 038): `trip_jobs.air_bp / hotel_bp / car_bp / rest_bp`, NULL = follow `share_bp`
+(travel time always uses `share_bp`); `COST_SHARE_SQL` picks a cost's share by `kind` in `listUnbilled`; `cleanTrip`
+checks each column totals ≤ 100% and `updateTrip` keeps a billed project's every share. UI: the editable percent
+table (`SHARE_COLS`, `trip.shares`, `saveTripShares`); typing a cell marks it in `trip.shareTouched` and `spreadTripShare` splits what is left of 100% among the column's untyped cells, in hundredths. The Trips tab has a trip pull-down
+(`pickTrip`, newest first) and one Entries grid per trip (`tripGrid`: costs, travel time and the trip's pending
+road items, by date; View | Edit | Delete; a road item's Edit fills the cost or travel form and "Save to books"
+accepts it with the changes).
+
+## MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`)
+The CSV is laid out
+like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's
+header, reads only typed cells and works the dollars out itself. A drive's `key` is a SHA-256 of when, where, miles
+and vehicle; `mileage_drives` keeps each imported drive, and a key counts as imported while its trip cost is posted
+or was edited. Import groups drives per (trip, day, rate) into one `addTripCost` mileage cost whose amount is the
+sum of each drive rounded (server-only `mileageCents` option, so the books tie out to MileIQ's report); tolls and
+parking post as their own costs. Drives with trip `new` go on one new trip spanning their dates.
 
 ## Old invoices from a PDF (`oldInvoiceService.js`, `src/core/oldInvoice.js`)
 - `POST /companies/:id/invoices/read-pdf` (`invoices`) takes `{ pdf: base64 }` (4 MB) and saves nothing. pdf.js

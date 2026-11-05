@@ -5,10 +5,11 @@ pieces fit, the rules the code never breaks, and the steps for common changes. T
 installing and running; the [User Guide](../user-guide/README.md) covers what people see on screen.
 
 Written for an engineer who is new to web programming. Where a web idea has an engineering equivalent, the
-chapter says so.
+chapter says so. New to the web? Read chapter 0, then 1 and 11, and use the rest as reference.
 
 | # | Chapter | Read it when you… |
 |---|---|---|
+| 0 | [Web basics for an engineer](00-web-basics.md) | are new to web programming: HTTP, JSON, Node, SQL, Vue, cookies, Git and deploys in plain words |
 | 1 | [Architecture: the load path of a request](01-architecture.md) | start here; how a click becomes a saved row |
 | 2 | [Money, rounding and the ledger](02-money-and-ledger.md) | touch anything with amounts, entries or reports |
 | 3 | [Security: sign-in, permissions, plans, row-level security](03-security.md) | add a route, a table or a role |
@@ -18,7 +19,8 @@ chapter says so.
 | 7 | [Error handling](07-error-handling.md) | write anything that can fail (everything) |
 | 8 | [Testing](08-testing.md) | before every pull request |
 | 9 | [Recipes: step-by-step changes](09-recipes.md) | add a route, a setting, a report, a tax table |
-| 10 | [Operations: deploys, backups, monitoring](10-operations.md) | something is wrong in production |
+| 10 | [Operations: deploys, backups, monitoring, the jobs](10-operations.md) | something is wrong in production |
+| 11 | [How the pieces fit together](11-how-it-fits-together.md) | want the general arrangement: the main tables, and a job's path from an hour worked to the tax summary |
 
 ## Ten rules (break one and the books can be wrong)
 

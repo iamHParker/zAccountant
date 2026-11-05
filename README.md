@@ -4,15 +4,17 @@ Small-business accounting and payroll for Texas, Colorado, California and Washin
 **double-entry books that cannot silently go out of balance**, with payroll tax logic reviewed by a
 Professional Review Board.
 
-Status: **Sprint 6 (payroll runs, pay stubs, roles and timesheets)** — see [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md).
-Target: public beta January 1, 2027.
+Status: **beta testing**, live on Railway. Private alpha December 1, 2026; public launch January 1, 2027
+(plan: [docs/spec/21-implementation-roadmap.md](docs/spec/21-implementation-roadmap.md)).
 
 ## Guides
 
-- **[User Guide](docs/user-guide/README.md)**: what people see and do, in chapters by tier (everyone, Basic books,
-  Payroll add-on, Timesheets add-on, zAccountant staff).
-- **[Programmer's Guide](docs/programmers-guide/README.md)**: how the code is built, the rules it never breaks,
-  error handling, testing, and step-by-step recipes for common changes.
+- **[User Guide](docs/user-guide/README.md)**: what people see and do, in chapters by tier (everyone, Books,
+  Payroll, Timesheets add-on, zAccountant staff), with a "How do I…?" index.
+- **[Programmer's Guide](docs/programmers-guide/README.md)**: web basics for newcomers, how the code is built and how
+  the pieces fit together, the rules it never breaks, error handling, testing, recipes for common changes, and operations.
+- **Runbooks** ([Railway setup](docs/runbooks/railway-setup.md), [operations](docs/runbooks/operations.md)): step-by-step
+  instructions for the live site.
 
 ## What's here
 
@@ -76,6 +78,11 @@ app (Google/Microsoft Authenticator, 1Password, Authy). `npm run seed` also crea
 | `DEVELOPER_EMAILS` | for the Developer dashboard | comma-separated sign-in emails that see the Developer dashboard (beta feedback, server errors, backup download) |
 | `ADMIN_EMAILS` | optional | comma-separated sign-in emails that see the Admin dashboard only |
 | `API_RATE_LIMIT`, `AUTH_RATE_LIMIT` | optional | requests per minute per address (default 1,200), sign-in attempts per 5 minutes (default 30) |
+| `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_REGION`, `BACKUP_S3_KEY_ID`, `BACKUP_S3_SECRET`, `BACKUP_ENCRYPTION_KEY` | for the nightly off-site backup | where to send it and the key that locks it; off until all are set ([operations runbook](docs/runbooks/operations.md) section 4) |
+| `NIGHTLY_JOB` | optional | `off` skips the nightly books check and backup (handy on your own computer) |
+| `DB_POOL_MAX` | optional | most database connections the server keeps open at once (default 10) |
+| `PORT`, `HOST`, `NODE_ENV`, `RAILWAY_PUBLIC_DOMAIN` | rarely | Railway sets `PORT` and `RAILWAY_PUBLIC_DOMAIN`, the `Dockerfile` sets `NODE_ENV=production`; `PORT` defaults to 3000, and `HOST` to every address in production but only this computer otherwise |
+| `BACKUP_SOURCE_URL`, `RESTORE_TARGET_URL` | restore drill only | the database to back up and the empty one to restore into (`npm run drill:restore`) |
 
 Monitoring, backups (the restore drill) and the load test: [docs/runbooks/operations.md](docs/runbooks/operations.md).
 
