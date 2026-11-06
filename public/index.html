@@ -1444,7 +1444,7 @@
         <p class="hint" v-else>Choose a trip in the pull-down above (newest first) to see its projects and every entry, or open one here.</p>
         <button v-for="t in trip.list.slice(0, 6)" class="trip-card" :class="{ muted: !t.isActive }" @click="openTrip(t.id)">
           <span class="row"><strong>{{ t.name }}</strong><span class="num">{{ money(t.totalCents) }}</span></span>
-          <span class="muted small">{{ usDate(t.startDate) }}{{ t.endDate && t.endDate !== t.startDate ? ' – ' + usDate(t.endDate) : '' }} · {{ t.costCount }} cost{{ t.costCount === 1 ? '' : 's' }}{{ t.isActive ? '' : ' · closed' }}</span>
+          <span class="muted small">{{ usDate(t.startDate) }}{{ t.endDate && t.endDate !== t.startDate ? ' – ' + usDate(t.endDate) : '' }}{{ tripAhead(t) ? ' · coming up' : '' }} · {{ t.costCount }} cost{{ t.costCount === 1 ? '' : 's' }}{{ t.bookingCount ? ' · ' + t.bookingCount + (t.bookingCount === 1 ? ' booking' : ' bookings') : '' }}{{ t.isActive ? '' : ' · closed' }}</span>
           <span class="small" v-if="t.projectsText">{{ t.projectsText }}</span>
         </button>
       </template>
@@ -1452,7 +1452,7 @@
       <details class="card road-keys" v-if="!trip.cur && !trip.form && can('bills')" :open="Boolean(road.made)">
         <summary><strong>Your phone on the road</strong> <span class="muted small">· jot down costs, receipts and travel time without signing in</span></summary>
         <p class="hint">The Road page on your phone can only add trips, costs with receipt photos, travel time and new project numbers,
-          and only into the "From the road" box here. It can't see your books. It works with no signal and sends when it can.
+          plus bookings for a trip planned ahead (flight, hotel, rental car), and only into the "From the road" box here. It can't see your books. It works with no signal and sends when it can.
           Make a key, scan the code with the phone's camera, then on the iPhone choose Share → <strong>Add to Home Screen</strong>.</p>
         <table class="data" v-if="road.keys.length">
           <thead><tr><th>Phone</th><th>Made</th><th>Works until</th><th>Last used</th><th></th></tr></thead>
@@ -1578,6 +1578,54 @@
           </div>
         </div>
 
+        <!-- BOOKINGS: the trip's plan, booked ahead (Homer, 2026-11-06). Not in the books until paid ("Paid" records the cost). -->
+        <div class="card trip-bookings">
+          <div class="row wrap"><h2>Bookings</h2>
+            <button v-if="can('bills') && !trip.booking" @click="newBooking">+ Add booking</button></div>
+          <p class="hint" v-if="!trip.cur.bookings.length && !tripRoadBookings().length && !trip.booking">Planning ahead? Add the flight, hotel and rental car as you book them,
+            here or from your phone's Road page. A booking is the plan, not money: when you pay for it, press Paid and the cost goes in the books.</p>
+          <form v-if="trip.booking" @submit.prevent="saveBooking" class="grid2">
+            <div class="chips span2">
+              <button type="button" v-for="(label, k) in BOOKING_KINDS" :class="{ active: trip.booking.kind === k }" @click="trip.booking.kind = k">{{ label }}</button>
+            </div>
+            <label>{{ { airfare: 'Airline', lodging: 'Hotel', rental_car: 'Rental company' }[trip.booking.kind] || 'With' }}
+              <input v-model="trip.booking.vendor" maxlength="120" :placeholder="{ airfare: 'Southwest', lodging: 'Hilton Garden Inn', rental_car: 'Avis' }[trip.booking.kind] || ''"></label>
+            <label>Confirmation number <input v-model.trim="trip.booking.confirmation" maxlength="40" autocomplete="off"></label>
+            <label>{{ BOOKING_DATES[trip.booking.kind][0] }} <input type="date" v-model="trip.booking.startsOn" required></label>
+            <label>Time (optional) <input type="time" v-model="trip.booking.startTime"></label>
+            <label>{{ BOOKING_DATES[trip.booking.kind][1] }} (optional) <input type="date" v-model="trip.booking.endsOn"></label>
+            <label>Time (optional) <input type="time" v-model="trip.booking.endTime"></label>
+            <label>Price, if known ($) <input v-model.trim="trip.booking.amount" inputmode="decimal" class="num" placeholder="0.00"></label>
+            <label>Details (optional) <input v-model="trip.booking.details" maxlength="500" placeholder="Flight numbers, address, room or car type"></label>
+            <div class="span2"><button class="primary">{{ trip.booking.editId ? 'Save booking' : 'Add booking' }}</button>
+              <button type="button" @click="trip.booking = null">Cancel</button></div>
+          </form>
+          <div class="scroll-x" v-if="trip.cur.bookings.length || tripRoadBookings().length"><table class="data">
+            <thead><tr><th>Booking</th><th>When</th><th>Confirmation</th><th class="num">Price</th><th></th></tr></thead>
+            <tr v-for="b in trip.cur.bookings" :key="b.id" :class="{ muted: b.status === 'cancelled' }">
+              <td><strong>{{ BOOKING_KINDS[b.kind] }}</strong>{{ b.vendor ? ' · ' + b.vendor : '' }}<div v-if="b.details" class="small muted pre-line">{{ b.details }}</div></td>
+              <td class="small">{{ bookingWhen(b) }}</td>
+              <td>{{ b.confirmation }}</td>
+              <td class="num">{{ b.amountCents != null ? money(b.amountCents) : '' }}
+                <div class="small" v-if="b.tripCostId">paid {{ money(b.paidCents) }}</div>
+                <div class="small" v-else-if="b.status === 'cancelled'">cancelled</div></td>
+              <td class="actions" v-if="can('bills')">
+                <template v-if="b.status === 'booked'">
+                  <button class="link" v-if="!b.tripCostId" @click="payBooking(b)">paid</button><template v-if="!b.tripCostId"> | </template>
+                  <button class="link" @click="editBooking(b)">edit</button> | <button class="link" @click="setBookingStatus(b, 'cancelled')">cancel</button></template>
+                <button class="link" v-else @click="setBookingStatus(b, 'booked')">book again</button></td>
+            </tr>
+            <tr v-for="i in tripRoadBookings()" :key="i.id" class="road-row">
+              <td><strong>{{ BOOKING_KINDS[i.data.kind] }}</strong>{{ i.data.vendor ? ' · ' + i.data.vendor : '' }} <span class="tag">from the road · not on the trip yet</span>
+                <div v-if="i.data.details" class="small muted pre-line">{{ i.data.details }}</div></td>
+              <td class="small">{{ bookingWhen(i.data) }}</td>
+              <td>{{ i.data.confirmation }}</td>
+              <td class="num">{{ i.data.amountCents != null ? money(i.data.amountCents) : '' }}</td>
+              <td class="actions" v-if="can('bills')"><button class="link" :disabled="road.busy" @click="acceptRoad(i)">accept</button> | <button class="link" @click="dismissRoad(i)">dismiss</button></td>
+            </tr>
+          </table></div>
+        </div>
+
         <div class="card">
           <div class="row wrap"><h2>Entries</h2>
             <span v-if="can('bills') && !trip.cost && !trip.travel"><button class="primary" @click="newTripCost">+ Add cost</button> <button @click="newTravel">+ Add travel time</button></span></div>
@@ -1585,6 +1633,7 @@
             <h3>{{ trip.cost.roadItem ? 'From the road: check it, then save it to the books' : trip.editCostId ? 'Correct this cost' : 'New cost' }}</h3>
             <p class="muted small" v-if="trip.editCostId">Saving voids the old one and records the corrected one; its receipt photos move with it.</p>
             <p class="muted small" v-if="trip.cost.roadItem">Sent from your phone and not in the books yet. Saving puts it in the books with your changes and its photos.</p>
+            <p class="muted small" v-if="trip.cost.bookingId">Paying for the booking {{ trip.cost.bookingText }}. Saving puts the cost in the books and marks the booking paid.</p>
             <div class="chips">
               <button type="button" v-for="(label, k) in { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' }"
                 :class="{ active: (trip.cost.kind || 'other') === k }" @click="pickCostKind(k)">{{ label }}</button>
