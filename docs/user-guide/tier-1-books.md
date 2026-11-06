@@ -315,6 +315,17 @@ is already on an invoice can't be edited or voided until that invoice is.
    billed part of the trip, its percents stay as billed.
    **delete** on a cost voids it (its entry is reversed, kept on record); on a road entry it dismisses it.
 
+**A trip planned ahead: bookings.** A trip two weeks out can be made now (its first day can be any future date), and
+the flight, hotel and rental car put on it as you book them. Open the trip and press **+ Add booking** under
+**Bookings**: pick **Flight**, **Hotel**, **Rental car** or **Other**, then who it is with (Southwest, Hilton, Avis),
+the confirmation number, the dates (Depart / Return, Check in / Check out, Pick up / Drop off), times if you like, the
+price if you know it, and details (flight numbers, the hotel's address). A booking is your plan, **not money**: nothing
+goes in your books when you add it. When you pay for it (airfare usually the day you book, a hotel or car at the end of
+the stay), press **paid** on its row: the cost form opens filled in from the booking; check the amount (taxes are often
+added at check-out), save, and the booking shows **paid** with what you paid. **cancel** marks a booking cancelled (it
+stays on the trip, crossed out); **book again** undoes that. In the Trips list a trip that hasn't started says
+*coming up* and how many bookings it has.
+
 On each project's invoice, **⏱ Pull in unbilled time and costs** lists its share of every trip cost and travel hour.
 Each line bills the full cost × the share (quantity 0.8 for 80%), so the client can see both. To bill a different
 share on one invoice, type another quantity on that line.
@@ -332,9 +343,15 @@ while you travel, even with no signal, without signing in to your books on the p
    one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other; the amount or
    the miles and rate; receipt photos: **📷 Take photo**, **🖼 Choose photo** from Photos, or **📋 Paste**) and **+ Travel time** (one per day: hours, or start, end and breaks; **Save, then next day**). Everything is saved on the phone first and sent when
    there is signal. The top of the page says how many are waiting; **Send** sends them at once.
+   there is signal. The top of the page says how many are waiting; **Send now** sends them at once.
+   **Planning a trip ahead:** make the trip with its future dates, then **+ Booking** for the flight, hotel and rental
+   car (who, confirmation number, dates and times, price if known, details). The **Trip** pull-down lists trips under
+   **Coming up** (soonest first) and **Now and earlier**. The trip's **Trip plan** card shows every booking, the ones
+   made at your desk too, with the confirmation numbers handy at the counter. When you pay, press **Paid: record the
+   cost** on the booking: the cost form opens filled in, and the booking is marked paid once the cost is accepted.
 3. Back at the desk: **Trips → From the road** lists what arrived. Choose the expense account and what you paid with,
    then **Accept** the new trip first (its projects share it evenly; open the trip to change the shares), then its
-   costs and travel time. **Dismiss** anything that shouldn't go in the books. On the phone each item then says
+   bookings (nothing to choose; they go on the trip, not in the books), costs and travel time. **Dismiss** anything that shouldn't go in the books. On the phone each item then says
    *In the books*; **Clear items already in the books** tidies the list.
 
 **The four buttons.** The Road page opens on four coloured buttons, one for each job: **Check in** (green, a

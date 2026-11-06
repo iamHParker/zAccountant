@@ -32,3 +32,11 @@ export function nextDay(iso) {
   const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
+
+/** "17:40" → "5:40 PM" (a 24-hour time as people read it). */
+export function clock12(t) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(t ?? '');
+  if (!m) return t ?? '';
+  const h = Number(m[1]);
+  return `${((h + 11) % 12) + 1}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
+}

@@ -141,10 +141,10 @@
         <label>Trip
           <select v-model="tripKey">
             <option value="">Choose a trip…</option>
-            <optgroup label="Started on this phone" v-if="localTrips.length">
-              <option v-for="t in localTrips" :value="'c:' + t.clientId">{{ t.data.name }}</option></optgroup>
-            <optgroup label="In zAccountant" v-if="serverTrips.length">
-              <option v-for="t in serverTrips" :value="'s:' + t.id">{{ t.name }}</option></optgroup>
+            <optgroup label="Coming up" v-if="tripChoices.ahead.length">
+              <option v-for="t in tripChoices.ahead" :value="t.key">{{ t.name }} · {{ usDate(t.startDate) }}</option></optgroup>
+            <optgroup label="Now and earlier" v-if="tripChoices.rest.length">
+              <option v-for="t in tripChoices.rest" :value="t.key">{{ t.name }}</option></optgroup>
           </select></label>
         <button class="wide" v-if="screen === 'trip'" @click="newTrip">+ New trip</button>
         <p class="hint" v-if="screen === 'time' && !tripKey">Choose the trip the travel time is for.</p>
@@ -170,18 +170,64 @@
             <textarea v-model="tripForm.newProjects" rows="2"></textarea></label>
           <label>Notes <textarea v-model="tripForm.notes" rows="2" maxlength="500"></textarea></label>
           <p class="muted small">Shares are set at the desk (they start even).</p>
+          <p class="muted small" v-if="!tripForm.editId">Planning ahead? Pick the trip's first day, even weeks away. Then book its flight, hotel and rental car on it.</p>
           <button class="primary">Save trip</button> <button type="button" @click="tripForm = null">Cancel</button>
         </form>
       </section>
 
       <template v-if="tripKey && !tripForm && (screen === 'trip' || screen === 'time')">
-        <div class="row wrap road-actions" v-if="!costForm && !timeForm">
+        <div class="row wrap road-actions" v-if="!costForm && !timeForm && !bookingForm">
           <button class="primary" v-if="screen === 'trip'" @click="newCost">+ Cost or receipt</button>
           <button :class="{ primary: screen === 'time' }" @click="newTime">+ Travel time</button>
+          <button v-if="screen === 'trip'" @click="newBooking">+ Booking</button>
         </div>
+
+        <!-- The trip's plan (Homer, 2026-11-06): the flight, hotel and rental car booked for it. Not money until paid. -->
+        <section class="card" v-if="bookingForm">
+          <h2>{{ bookingForm.editId ? 'Change this booking' : 'Booking' }}</h2>
+          <form @submit.prevent="saveBooking">
+            <div class="chips">
+              <button type="button" v-for="(label, k) in bookingKinds" :class="{ active: bookingForm.kind === k }" @click="bookingForm.kind = k">{{ bookingIcon[k] }} {{ label }}</button>
+            </div>
+            <label>{{ { airfare: 'Airline', lodging: 'Hotel', rental_car: 'Rental company' }[bookingForm.kind] || 'With' }}
+              <input v-model="bookingForm.vendor" maxlength="120" :placeholder="{ airfare: 'Southwest', lodging: 'Hilton Garden Inn', rental_car: 'Avis' }[bookingForm.kind] || ''"></label>
+            <label>Confirmation number <input v-model.trim="bookingForm.confirmation" maxlength="40" autocapitalize="characters" autocomplete="off"></label>
+            <div class="grid2">
+              <label>{{ bookingDates[bookingForm.kind][0] }} <input type="date" v-model="bookingForm.startsOn" required></label>
+              <label>Time (optional) <input type="time" v-model="bookingForm.startTime"></label>
+              <label>{{ bookingDates[bookingForm.kind][1] }} <input type="date" v-model="bookingForm.endsOn"></label>
+              <label>Time (optional) <input type="time" v-model="bookingForm.endTime"></label>
+            </div>
+            <label>Price, if you know it ($) <input v-model.trim="bookingForm.amount" class="amt" inputmode="decimal" placeholder="0.00"></label>
+            <label>Details <textarea v-model="bookingForm.details" rows="2" maxlength="500"
+              :placeholder="{ airfare: 'WN 1123 SAT-ABQ 6:05 AM; WN 2210 back', lodging: 'Address, king room, late check-in', rental_car: 'Midsize, counter in terminal' }[bookingForm.kind] || ''"></textarea></label>
+            <p class="muted small">A booking is your plan, not money. When you pay for it, press Paid on it to record the cost.</p>
+            <button class="primary">Save</button> <button type="button" @click="bookingForm = null">Cancel</button>
+          </form>
+        </section>
+        <section class="card" v-if="screen === 'trip' && tripBookings.length && !bookingForm">
+          <h2>Trip plan</h2>
+          <div class="road-item booking" v-for="x in tripBookings" :key="x.key" :class="{ muted: x.b.status === 'cancelled' }">
+            <div class="row wrap">
+              <span><strong>{{ bookingIcon[x.b.kind] }} {{ bookingKinds[x.b.kind] }}</strong>{{ x.b.vendor ? ' · ' + x.b.vendor : '' }}</span>
+              <span class="pill" v-if="x.b.status === 'cancelled'">Cancelled</span>
+              <span class="pill ok" v-else-if="bookingPaid(x)">Paid</span>
+              <span class="pill" v-else-if="x.item" :class="statusClass(x.item)">{{ statusText(x.item) }}</span>
+            </div>
+            <div class="small">{{ bookingWhen(x.b) }}</div>
+            <div class="small" v-if="x.b.confirmation">Confirmation <strong class="confirmation">{{ x.b.confirmation }}</strong></div>
+            <div class="small muted pre-line" v-if="x.b.details">{{ x.b.details }}</div>
+            <div class="small muted" v-if="bookingPrice(x.b)">Price <span class="amt">{{ bookingPrice(x.b) }}</span></div>
+            <p class="bad small" v-if="x.item?.error">{{ x.item.error }}</p>
+            <span><button class="link small" v-if="x.b.status !== 'cancelled' && !bookingPaid(x)" @click="payBooking(x)">Paid: record the cost</button>
+              <button class="link small" v-if="x.item && canChange(x.item)" @click="changeItem(x.item)">change</button>
+              <button class="link small" v-if="x.item && !x.item.sentItem" @click="removeItem(x.item)">remove</button></span>
+          </div>
+        </section>
 
         <section class="card" v-if="costForm">
           <h2>{{ costForm.editId ? 'Change this cost' : 'Cost' }}</h2>
+          <p class="muted small" v-if="costForm.booking">Paying for a booking: it is marked paid when this cost is put in the books.</p>
           <form @submit.prevent="saveCost">
             <div class="chips">
               <button type="button" v-for="(label, k) in kinds" :class="{ active: costForm.kind === k }" @click="costForm.kind = k">{{ label }}</button>

@@ -70,7 +70,8 @@ server errors, backup). Admins and developers see the Admin dashboard (plans).
 ## The Road page's key (`src/services/roadService.js`)
 
 The phone page `/road` never holds a session. It sends `Authorization: Bearer zr_…` (a road key; only its SHA-256 is
-stored in `road_keys`) to four routes under `/api/road`: read open trip and project names, send an item, send a photo,
+stored in `road_keys`) to the routes under `/api/road`: read open trip and project names (and the bookings on open trips:
+vendor, confirmation, dates, quoted price, whether paid; no accounts or entries), send or change an item, send a photo,
 ask which items were accepted. Each request runs in `withScope` as the key's person and company and needs that
 person's `bills` permission now, so removing the person or changing their role shuts the key. Items land in
 `road_items` (pending); only **Accept** at the desk (permission `bills`) posts them, through the normal Trips code.
