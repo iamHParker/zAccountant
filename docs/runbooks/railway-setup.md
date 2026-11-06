@@ -62,5 +62,12 @@ choice (Pro, or our own backup job); he chose to decide later, reminder set for 
     Railway's newer route, Infrastructure as Code (`.railway/railway.ts`, applied with the Railway CLI's
     `railway config apply`), is not used: it isn't read during deploys and adds a tool for one service's settings.
 
+12. **Receipt reading (optional).** Lets a receipt photo fill in a trip cost's amount, date and vendor. Make an API key
+    at console.anthropic.com (sign up, add a payment card, **API Keys → Create Key**), then app service →
+    Variables: `ANTHROPIC_API_KEY=<the key>`. The buttons appear after the redeploy. About 1–2¢ a receipt;
+    `RECEIPT_MODEL=claude-haiku-5-5` makes it about 1/40 of that, `RECEIPT_READS_PER_DAY` (default 200) caps one
+    company, `RECEIPT_READING=off` turns it off without removing the key. Set a monthly spend limit in the
+    Anthropic console too (Settings → Limits).
+
 Later: custom domain (e.g. app.zaccountant.com, then set `ALLOWED_HOSTS` to include it), `METRICS_TOKEN` for
 Grafana, an uptime monitor on `/healthz`.

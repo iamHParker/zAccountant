@@ -9,6 +9,7 @@ import { createApp } from '/vendor/vue.js';
 import { render } from '/road.render.js';
 import { picturesFromClipboard } from '/paste.js';
 import { clockTime, clock12, nextDay } from '/clock.js';
+import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
 
 const KEY_STORE = 'zacc.roadKey';
 const SUMMARY_STORE = 'zacc.roadSummary';
@@ -90,7 +91,7 @@ createApp({
       summary: (() => { try { return JSON.parse(getLocal(SUMMARY_STORE) ?? 'null'); } catch { return null; } })(),
       online: navigator.onLine, syncing: false, busy: false,
       items: [], tripKey: getLocal('zacc.roadTrip') ?? '',
-      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, kinds: KINDS,
+      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, kinds: KINDS, reading: false,
       bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
       screen: 'home', screens: SCREENS,
       // Amounts start hidden (blurred) and the phone remembers the choice: someone beside you sees no deposit totals.
@@ -164,6 +165,7 @@ createApp({
       const q = this.projectSearch.toLowerCase();
       return (this.summary?.projects ?? []).filter((p) => `${p.code ?? ''} ${p.name}`.toLowerCase().includes(q)).slice(0, 30);
     },
+    canRead() { return Boolean(this.summary?.receiptReading); },
     mileageText() {
       const c = mileageCents(this.costForm?.miles, this.costForm?.mileRate);
       return c == null ? '' : `${this.costForm.miles} mi × $${this.costForm.mileRate} = ${money(c)}`;
@@ -198,9 +200,9 @@ createApp({
       this.setKey(m[1]); this.pasted = ''; this.refresh().then(() => this.sync());
     },
     forgetKey() { this.key = null; this.keyProblem = ''; setLocal(KEY_STORE, null); },
-    async call(method, path, body) {
+    async call(method, path, body, { seconds = 30 } = {}) {
       const res = await fetch(`/api/road${path}`, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.key}` },
-        body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30_000) });
+        body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(seconds * 1000) });
       const data = await res.json().catch(() => ({}));
       if (res.status === 401 || res.status === 403) throw new KeyProblem(data.error ?? 'This road key no longer works.');
       if (!res.ok) { const e = new Error([data.error, ...(data.details ?? [])].filter(Boolean).join(': ')); e.status = res.status; throw e; }
@@ -294,7 +296,7 @@ createApp({
     },
     // A new cost or day of travel starts on today's date (it used to copy the last item's date, which was easy to miss:
     // Homer, 2026-10-28). For the days after, "Save, then next day".
-    newCost() { this.timeForm = null; this.bookingForm = null; this.costForm = { kind: 'other', date: today(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [], booking: null }; },
+    newCost() { this.timeForm = null; this.bookingForm = null; this.costForm = { kind: 'other', date: today(), dateDefault: today(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [], booking: null }; },
     // ---- Bookings: the flight, hotel and rental car for a trip planned ahead. Not money until paid.
     newBooking() {
       this.costForm = null; this.timeForm = null;
@@ -314,7 +316,7 @@ createApp({
     payBooking(x) {
       this.timeForm = null; this.bookingForm = null;
       const b = x.b;
-      this.costForm = { kind: b.kind, date: today(), amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : (b.amount ?? ''), miles: '', mileRate: lastMileRate(),
+      this.costForm = { kind: b.kind, date: today(), dateDefault: today(), amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : (b.amount ?? ''), miles: '', mileRate: lastMileRate(),
         vendor: b.vendor ?? '', description: b.confirmation ? `${KINDS[b.kind]}, confirmation ${b.confirmation}` : '', photos: [], booking: x.ref };
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
@@ -350,14 +352,40 @@ createApp({
     async addPhotos(ev) {
       const files = [...(ev.target.files ?? [])];
       ev.target.value = '';
+      const form = this.checkForm ?? this.costForm;
+      const first = form.photos.length;
       this.busy = true;
       try {
         for (const f of files) {
-          const form = this.checkForm ?? this.costForm;
           if (form.photos.length >= 6) { this.flash('At most 6 photos.', 'bad'); break; }
           form.photos.push({ clientId: `photo-${newId()}`, dataUrl: await shrinkPhoto(f) });
         }
       } catch { this.flash('That photo could not be read. Try taking it again.', 'bad'); } finally { this.busy = false; }
+      // A new cost's first receipt is read right away (with signal), to fill in the amount, date and who was paid.
+      if (form === this.costForm && first === 0 && form.photos.length && !form.editId && this.canRead && this.online && !String(form.amount).trim()) {
+        this.readReceipt();
+      }
+    },
+    // A receipt picture dragged onto the photo boxes (a computer, or an iPad): the same as choosing it.
+    dropPhotos(ev) {
+      const files = droppedPictures(ev);
+      if (files.length) this.addPhotos({ target: { files, value: '' } });
+    },
+    /** Read the cost's newest receipt photo and fill in the boxes still empty (public/receipt.js). Nothing is saved. */
+    async readReceipt() {
+      const form = this.costForm;
+      const photo = form?.photos.at(-1);
+      if (!photo || this.reading) return;
+      if (!this.online) { this.flash('Reading a receipt needs signal. Type it in, or tap "Fill in from the receipt" later.', 'bad'); return; }
+      this.reading = true;
+      try {
+        const read = await this.call('POST', '/receipt', { picture: photo.dataUrl }, { seconds: 90 });
+        if (this.costForm !== form) return; // the form was closed meanwhile
+        this.flash(filledText(fillFromReceipt(form, read), read));
+      } catch (e) {
+        if (e instanceof KeyProblem) this.keyProblem = e.message;
+        else this.flash(e.message || 'The receipt could not be read just now. Type it in.', 'bad');
+      } finally { this.reading = false; }
     },
     async saveCost() {
       const f = this.costForm;

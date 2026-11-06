@@ -205,6 +205,23 @@ table (`SHARE_COLS`, `trip.shares`, `saveTripShares`); typing a cell marks it in
 road items, by date; View | Edit | Delete; a road item's Edit fills the cost or travel form and "Save to books"
 accepts it with the changes).
 
+## Reading receipts (`src/core/receipt.js`, `src/services/receiptReader.js`, `public/receipt.js`; Homer, 2026-11-06)
+A receipt photo is sent to Claude (Anthropic's vision model, `@anthropic-ai/sdk`) with a JSON form (`RECEIPT_SCHEMA`:
+vendor, total, currency, date, kind, description, isReceipt) as a structured output, so the answer always parses.
+`normalizeReceipt` checks every box again (amount through `toCents`, never rounded; a real date from 2000 to a year
+out; kind from `RECEIPT_KINDS`, else `other`). Routes: `POST /api/road/receipt` (road key) and `POST
+…/receipts/read` (`bills`), both answering `{ vendor, amount, date, kind, description, currency }` and saving
+nothing. They return `{ [AFTER]: fn }` so the permission check runs in the DB scope and the slow call runs after it
+(no pool connection held for the seconds it takes). `public/receipt.js` `fillFromReceipt` fills only empty boxes
+(the date if it is still the form's starting date, `dateDefault`); a new cost's first photo is read at once.
+Drag and drop: `droppedPictures` on the photo boxes. Off unless `ANTHROPIC_API_KEY` is set (`receiptReadingOn`;
+`RECEIPT_READING=off` turns it off again); the desk learns it from `GET /api/public/features`, the phone from the
+road summary's `receiptReading`. Model: `RECEIPT_MODEL` (default `claude-opus-5-5`, effort `low`, server-side
+refusal fallback on). Cost: a 1600 px photo is about 1,600 input tokens, so about 0.6¢ in plus well under 1¢ out on
+Opus 5.5: roughly 1–2¢ a receipt; `RECEIPT_MODEL=claude-haiku-5-5` is about 1/40 of that. `RECEIPT_READS_PER_DAY`
+(default 200) caps one company's reads a day (in memory). Errors: no picture / not a receipt = 400; off = 503;
+reader down or refusing = 502; busy or over the cap = 429 (`ReceiptError`). ⚠️ Never log or store the picture.
+
 ## MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`)
 The CSV is laid out
 like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's

@@ -16,6 +16,7 @@ import { randomToken } from '../security/crypto.js';
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
 import { createTimeEntry } from './timesheetService.js';
+import { receiptReadingOn } from './receiptReader.js';
 import { createTrip, addTripCost, addBooking, listBookings, cleanBooking, COST_KINDS, BOOKING_KINDS, mileageAmount, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_COST } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -118,7 +119,7 @@ export async function roadSummary(db, key) {
     "SELECT client_id, trip_booking_id FROM road_items WHERE key_id = $1 AND kind = 'booking' AND trip_booking_id = ANY($2::uuid[])", [key.id, all.map((b) => b.id)]) : { rows: [] };
   const fromItem = new Map(sent.map((r) => [r.trip_booking_id, r.client_id]));
   const bookings = all.map(({ paidCents, tripCostId, ...b }) => ({ ...b, paid: Boolean(tripCostId), fromClientId: fromItem.get(b.id) ?? null }));
-  return { ...who, keyName: key.name, expiresOn: key.expiresOn, trips, projects, bookings, costKinds: COST_KINDS, bookingKinds: BOOKING_KINDS };
+  return { ...who, keyName: key.name, expiresOn: key.expiresOn, trips, projects, bookings, costKinds: COST_KINDS, bookingKinds: BOOKING_KINDS, receiptReading: receiptReadingOn() };
 }
 
 /** A booking named by a cost ("Paid: record the cost"): { id } of a saved booking, or { clientId } of one sent from this phone. */
