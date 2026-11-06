@@ -8,7 +8,7 @@ import { createApp } from '/vendor/vue.js';
 // The screens (the HTML in road.html), compiled by the server into a render function (src/core/pages.js).
 import { render } from '/road.render.js';
 import { picturesFromClipboard } from '/paste.js';
-import { clockTime, clock12, nextDay } from '/clock.js';
+import { clockTime, clock12, nextDay, durationMinutes, hhmm } from '/clock.js';
 import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
 
 const KEY_STORE = 'zacc.roadKey';
@@ -77,6 +77,10 @@ const SCREENS = {
   equipment: { title: 'Equipment', color: 'c-equip' },
   supplies: { title: 'Supplies', color: 'c-supply' },
 };
+// Time in blocks (Homer, 2026-11-06): travel, site time, office/drafting; lunch is the gap between two blocks.
+const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
+const BLOCK_ICON = { travel: '🚗', site: '🏗️', office: '📐' };
+const keyRef = (k) => (k?.startsWith('c:') ? { clientId: k.slice(2) } : k?.startsWith('s:') ? { id: k.slice(2) } : null);
 const KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
 // Bookings on a trip planned ahead (Homer, 2026-11-06): the reservation, not money. The words for its two dates.
 const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
@@ -93,7 +97,7 @@ createApp({
       summary: (() => { try { return JSON.parse(getLocal(SUMMARY_STORE) ?? 'null'); } catch { return null; } })(),
       online: navigator.onLine, syncing: false, busy: false,
       items: [], tripKey: getLocal('zacc.roadTrip') ?? '',
-      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, buyForm: null, kinds: KINDS, reading: false,
+      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, buyForm: null, blockForm: null, blockDay: today(), blockTypes: BLOCK_TYPES, blockIcon: BLOCK_ICON, kinds: KINDS, reading: false,
       bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
       screen: 'home', screens: SCREENS,
       // Amounts start hidden (blurred) and the phone remembers the choice: someone beside you sees no deposit totals.
@@ -116,7 +120,13 @@ createApp({
     /** Trips that start after today, from this phone and from zAccountant, soonest first. */
     upcomingTrips() { return this.tripChoices.ahead; },
     /** The Time screen lists only travel time; Trip now lists everything on the trip. */
-    shownTripItems() { return this.screen === 'time' ? this.tripEntries.filter((i) => i.kind === 'time') : this.tripEntries; },
+    shownTripItems() { return this.tripEntries; },
+    /** The day's blocks on this phone, in time order (blocks typed as hours only go last). */
+    dayBlocks() {
+      return this.items.filter((i) => i.kind === 'block' && i.data.date === this.blockDay)
+        .sort((a, b) => (a.data.start ?? '99').localeCompare(b.data.start ?? '99') || a.createdAt.localeCompare(b.createdAt));
+    },
+    dayMinutes() { return this.dayBlocks.reduce((t, i) => t + this.blockMinutes(i.data), 0); },
     localTrips() { return this.items.filter((i) => i.kind === 'trip' && i.status !== 'dismissed'); },
     /**
      * Every trip to pick from, split into "Coming up" (planned ahead: it starts after today) and the rest, soonest
@@ -178,7 +188,7 @@ createApp({
   },
   watch: {
     hide: { immediate: true, handler(v) { document.body.classList.toggle('hush', v); } },
-    tripKey(v) { setLocal('zacc.roadTrip', v || null); this.costForm = null; this.timeForm = null; this.bookingForm = null; if (v && this.screen === 'time') this.newTime(); },
+    tripKey(v) { setLocal('zacc.roadTrip', v || null); this.costForm = null; this.timeForm = null; this.bookingForm = null; },
   },
   async mounted() {
     // The QR code opens /road#key=zr_…: keep the key on the phone and take it out of the address bar.
@@ -237,9 +247,9 @@ createApp({
       this.closeForms();
       if (history.state?.road) history.back(); else this.screen = 'home';
     },
-    goTime() { this.go('time'); if (this.tripKey) this.newTime(); },
+    goTime() { this.go('time'); },
     openTrip(key) { this.tripKey = key; this.go('trip'); },
-    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; },
+    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; this.blockForm = null; },
     toggleHide() { this.hide = !this.hide; setLocal('zacc.roadHide', this.hide ? null : 'show'); },
     newTrip() { this.tripForm = { name: '', startDate: today(), endDate: '', jobIds: [], newProjects: '', notes: '' }; this.projectSearch = ''; },
     /** A trip planned ahead (Homer, 2026-11-06): the New trip form starting tomorrow; its bookings go on it once saved. */
@@ -267,6 +277,9 @@ createApp({
       } else if (i.kind === 'check') {
         this.checkForm = { ...base, date: d.date, amount: d.amount, from: d.from ?? '', checkNumber: d.checkNumber ?? '', invoices: d.invoices ?? '',
           notes: d.notes ?? '', photos: [...(i.photos ?? [])] };
+      } else if (i.kind === 'block') {
+        this.blockForm = { ...base, type: d.type, date: d.date, start: d.start ?? '', end: d.end ?? '', hours: d.start ? '' : d.hours ?? '',
+          jobId: d.jobId ?? '', splitJobId: d.splitJobId ?? '', tripKey: d.trip ? (d.trip.clientId ? `c:${d.trip.clientId}` : `s:${d.trip.id}`) : '', notes: d.notes ?? '' };
       } else if (i.kind === 'purchase') {
         this.buyForm = { ...base, kind: 'purchase', category: d.category, date: d.date, amount: d.amount ?? '', vendor: d.vendor ?? '',
           description: d.description ?? '', serialNumber: d.serialNumber ?? '', jobId: d.jobId ?? '', photos: [...(i.photos ?? [])] };
@@ -364,6 +377,35 @@ createApp({
       if (f.category === 'equipment') data.serialNumber = f.serialNumber.trim() || null;
       if (await this.saveItem('purchase', f, data, f.photos)) { this.buyForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
     },
+    // ---- Time in blocks: a day is travel out, site time (lunch is the gap), travel on or home, office or drafting.
+    blockMinutes(d) { return d.start && d.end ? clockTime(d.start, d.end, '')?.minutes ?? 0 : durationMinutes(d.hours) ?? 0; },
+    blockHours(d) { return hhmm(this.blockMinutes(d)); },
+    /** A new block starts where the day's last one ended, on the same project. */
+    newBlock(type) {
+      const last = this.dayBlocks.filter((i) => i.data.end).at(-1)?.data;
+      this.closeForms();
+      this.blockForm = { type, date: this.blockDay, start: last?.end ?? '', end: '', hours: '', jobId: last?.jobId ?? '', splitJobId: '', tripKey: '', notes: '' };
+    },
+    async saveBlock(next = false) {
+      const f = this.blockForm;
+      if (!(f.start && f.end) && !durationMinutes(f.hours)) { this.flash('Type the start and end times, or the hours.', 'bad'); return; }
+      if (f.type !== 'office' && !f.jobId && !(f.type === 'travel' && f.tripKey)) { this.flash(f.type === 'travel' ? 'Choose the project, or the trip.' : 'Choose the project.', 'bad'); return; }
+      if (f.splitJobId && f.splitJobId === f.jobId) { this.flash('Split it with a different project.', 'bad'); return; }
+      const data = { date: f.date, type: f.type, notes: f.notes.trim() || null,
+        ...(f.start && f.end ? { start: f.start, end: f.end } : { hours: f.hours }) };
+      const trip = f.type === 'travel' ? keyRef(f.tripKey) : null;
+      if (trip) data.trip = trip;
+      else { data.jobId = f.jobId || null; if (f.type === 'travel' && f.splitJobId) data.splitJobId = f.splitJobId; }
+      if (!(await this.saveItem('block', f, data))) return;
+      this.blockDay = f.date;
+      this.blockForm = null;
+      if (next && f.end) this.newBlock(f.type === 'travel' ? 'site' : 'travel');
+      this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.');
+    },
+    hhmm,
+    /** "0:31 and 0:30": the two halves of a split block. */
+    hhmmHalf(d) { const m = this.blockMinutes(d); return `${hhmm(Math.ceil(m / 2))} and ${hhmm(m - Math.ceil(m / 2))}`; },
+    projectName(id) { const p = this.summary?.projects?.find((x) => x.id === id); return p ? (p.code ? `${p.code} ${p.name}` : p.name) : 'a project'; },
     newTime() { this.costForm = null; this.bookingForm = null; this.timeForm = { date: today(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
     clockTime,
     // A screenshot or photo copied to the clipboard: the same as choosing it.
@@ -443,6 +485,11 @@ createApp({
     itemText(i) {
       if (i.kind === 'trip') return `Trip: ${i.data.name}`;
       if (i.kind === 'booking') return `${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''}`;
+      if (i.kind === 'block') {
+        const d = i.data;
+        const where = d.trip ? 'trip' : d.jobId ? this.projectName(d.jobId) + (d.splitJobId ? ' + ' + this.projectName(d.splitJobId) + ' (split)' : '') : 'no project';
+        return `${BLOCK_ICON[d.type]} ${d.start ? clock12(d.start) + '–' + clock12(d.end) + ' ' : ''}${this.blockHours(d)} h · ${where}${d.notes ? ' · ' + d.notes : ''}`;
+      }
       if (i.kind === 'purchase') return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.serialNumber ? ' · serial ' + i.data.serialNumber : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'check') return `Check${i.data.checkNumber ? ' #' + i.data.checkNumber : ''}${i.data.from ? ' from ' + i.data.from : ''}${i.data.invoices ? ' · inv ' + i.data.invoices : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'time') return `Travel time ${i.data.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;

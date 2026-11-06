@@ -180,6 +180,12 @@ equipment|supplies, amount, vendor, description, serialNumber` (equipment only),
 from (`source = 'purchase'`), idempotency key `road-<item id>`, and the photos are copied to `purchase_photos`.
 Accept-all refuses purchases (each is its own account). `GET …/purchases?category=equipment` is the equipment list
 (posted only); `POST …/purchases/:id/void` reverses the entry.
+Time blocks (migration 042, Homer 2026-11-06): a road item of kind `block` (`date, type travel|site|office, start/end`
+or `minutes`, `jobId`, `splitJobId` (travel only), `notes`; or `trip` for travel on a trip). `cleanItem` requires a
+project except for office. Accept makes one time entry (notes `"Travel: …"`), or for a split two entries from
+`splitBlock(minutes, start)` (halves, odd minute to the first, the first ending where the second starts) plus an audit
+`split` record listing both ids; a block on a trip goes the travel-time way. Phone: the Time screen (`dayBlocks`,
+`newBlock(type)` starts at the day's last end on the same project, `saveBlock(next)`).
 Screens (Homer, 2026-11-06): the page opens on six coloured buttons (`screen = 'home'`; `SCREENS` in `road.js`:
 check, trip, plan, time, equipment, supplies; icon colours `.road-icon.c-*` in `styles.css`, the Lighthouse tool-rail look). `go(screen)`
 pushes a history entry so the phone's Back returns home (`popstate`). Privacy: `hide` (localStorage `zacc.roadHide`,
