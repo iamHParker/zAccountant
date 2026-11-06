@@ -8,7 +8,7 @@ import { createApp } from '/vendor/vue.js';
 // The screens (the HTML in road.html), compiled by the server into a render function (src/core/pages.js).
 import { render } from '/road.render.js';
 import { picturesFromClipboard } from '/paste.js';
-import { clockTime, nextDay } from '/clock.js';
+import { clockTime, clock12, nextDay } from '/clock.js';
 import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
 
 const KEY_STORE = 'zacc.roadKey';
@@ -69,6 +69,10 @@ function mileageCents(miles, rate) {
 }
 const money = (c) => (c == null ? '' : `$${(c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`);
 const KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
+// Bookings on a trip planned ahead (Homer, 2026-11-06): the reservation, not money. The words for its two dates.
+const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
+const BOOKING_ICON = { airfare: '✈', lodging: '🏨', rental_car: '🚗', other: '📌' };
+const BOOKING_DATES = { airfare: ['Depart', 'Return'], lodging: ['Check in', 'Check out'], rental_car: ['Pick up', 'Drop off'], other: ['From', 'To'] };
 
 class KeyProblem extends Error {}
 
@@ -80,17 +84,28 @@ createApp({
       summary: (() => { try { return JSON.parse(getLocal(SUMMARY_STORE) ?? 'null'); } catch { return null; } })(),
       online: navigator.onLine, syncing: false, busy: false,
       items: [], tripKey: getLocal('zacc.roadTrip') ?? '',
-      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, kinds: KINDS, reading: false,
+      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, kinds: KINDS, reading: false,
+      bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
     };
   },
   computed: {
     waiting() { return this.items.filter((i) => this.notSent(i)).length; },
     checkItems() { return this.items.filter((i) => i.kind === 'check').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20); },
     localTrips() { return this.items.filter((i) => i.kind === 'trip' && i.status !== 'dismissed'); },
-    /** Trips in zAccountant, less the ones this phone started (an accepted one shows up in both lists). */
-    serverTrips() {
-      const mine = new Set(this.localTrips.map((t) => `${t.data.name}|${t.data.startDate}`));
-      return (this.summary?.trips ?? []).filter((t) => !mine.has(`${t.name}|${t.startDate}`));
+    /**
+     * Every trip to pick from, split into "Coming up" (planned ahead: it starts after today) and the rest, soonest
+     * first for the ones coming up and newest first for the rest (Homer, 2026-11-06).
+     */
+    tripChoices() {
+      const day = today();
+      const all = [
+        ...this.localTrips.filter((t) => !this.serverTripFor(t.clientId)).map((t) => ({ key: `c:${t.clientId}`, name: t.data.name, startDate: t.data.startDate, endDate: t.data.endDate })),
+        ...(this.summary?.trips ?? []).map((t) => ({ key: t.fromClientId && this.items.some((i) => i.clientId === t.fromClientId) ? `c:${t.fromClientId}` : `s:${t.id}`,
+          name: t.name, startDate: t.startDate, endDate: t.endDate })),
+      ];
+      const ahead = all.filter((t) => t.startDate > day).sort((a, b) => a.startDate.localeCompare(b.startDate));
+      const rest = all.filter((t) => t.startDate <= day).sort((a, b) => b.startDate.localeCompare(a.startDate));
+      return { ahead, rest };
     },
     tripRef() {
       if (this.tripKey.startsWith('c:')) return { clientId: this.tripKey.slice(2) };
@@ -104,6 +119,27 @@ createApp({
         || (i.data.trip && (ref.clientId ? i.data.trip.clientId === ref.clientId : i.data.trip.id === ref.id)))
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     },
+    /** The trip picked, as zAccountant knows it (a trip this phone sent counts once it is accepted at the desk). */
+    savedTripId() {
+      const ref = this.tripRef;
+      return ref?.id ?? (ref?.clientId ? this.serverTripFor(ref.clientId)?.id ?? null : null);
+    },
+    /**
+     * The trip's plan: its bookings, in date order. The desk's copy wins (it knows paid and cancelled); a booking still
+     * on the phone or waiting in the inbox shows from the phone.
+     */
+    tripBookings() {
+      const ref = this.tripRef;
+      if (!ref) return [];
+      const saved = (this.summary?.bookings ?? []).filter((b) => b.tripId === this.savedTripId)
+        .map((b) => ({ key: `s:${b.id}`, b, ref: { id: b.id }, item: null }));
+      const onDesk = new Set(saved.map((x) => x.b.fromClientId).filter(Boolean));
+      const mine = this.tripItems.filter((i) => i.kind === 'booking' && i.status !== 'dismissed' && !onDesk.has(i.clientId))
+        .map((i) => ({ key: `c:${i.clientId}`, b: i.data, ref: { clientId: i.clientId }, item: i }));
+      return [...saved, ...mine].sort((x, y) => `${x.b.startsOn} ${x.b.startTime ?? '99'}`.localeCompare(`${y.b.startsOn} ${y.b.startTime ?? '99'}`));
+    },
+    /** What this phone sent for the trip, less its bookings (they are in the plan above). */
+    tripEntries() { return this.tripItems.filter((i) => i.kind !== 'booking'); },
     projectMatches() {
       const q = this.projectSearch.toLowerCase();
       return (this.summary?.projects ?? []).filter((p) => `${p.code ?? ''} ${p.name}`.toLowerCase().includes(q)).slice(0, 30);
@@ -115,7 +151,7 @@ createApp({
     },
   },
   watch: {
-    tripKey(v) { setLocal('zacc.roadTrip', v || null); this.costForm = null; this.timeForm = null; },
+    tripKey(v) { setLocal('zacc.roadTrip', v || null); this.costForm = null; this.timeForm = null; this.bookingForm = null; },
   },
   async mounted() {
     // The QR code opens /road#key=zr_…: keep the key on the phone and take it out of the address bar.
@@ -158,16 +194,19 @@ createApp({
         if (e instanceof KeyProblem) this.keyProblem = e.message;
       }
     },
+    serverTripFor(clientId) { return (this.summary?.trips ?? []).find((t) => t.fromClientId === clientId) ?? null; },
     projectLabel(id) { const p = this.summary?.projects?.find((x) => x.id === id); return p ? (p.code ?? p.name) : 'project'; },
     toggleJob(id) { const j = this.tripForm.jobIds; const i = j.indexOf(id); if (i >= 0) j.splice(i, 1); else j.push(id); },
     newTrip() { this.tripForm = { name: '', startDate: today(), endDate: '', jobIds: [], newProjects: '', notes: '' }; this.projectSearch = ''; },
+    /** A trip planned ahead (Homer, 2026-11-06): the New trip form starting tomorrow; its bookings go on it once saved. */
+    planTrip() { this.newTrip(); this.tripForm.startDate = nextDay(today()); this.tripForm.planning = true; },
     /**
      * Change an item (Homer, 2026-10-28): one still on the phone, or one sent but not yet reviewed at the desk. The same
      * form opens, filled in; Save sends the change. Once accepted it is in the books, and it's changed at the desk.
      */
     canChange(i) { return !['accepted', 'dismissed'].includes(i.status); },
     changeItem(i) {
-      this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null;
+      this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null;
       const d = i.data; const base = { editId: i.clientId, sentPhotos: [...(i.sentPhotos ?? [])] };
       if (i.kind === 'trip') {
         this.tripForm = { ...base, name: d.name, startDate: d.startDate, endDate: d.endDate ?? '', jobIds: [...(d.jobIds ?? [])],
@@ -175,7 +214,10 @@ createApp({
         this.projectSearch = '';
       } else if (i.kind === 'cost') {
         this.costForm = { ...base, kind: d.kind, date: d.date, amount: d.amount ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? lastMileRate(),
-          vendor: d.vendor ?? '', description: d.description === KINDS[d.kind] ? '' : (d.description ?? ''), photos: [...(i.photos ?? [])] };
+          vendor: d.vendor ?? '', description: d.description === KINDS[d.kind] ? '' : (d.description ?? ''), photos: [...(i.photos ?? [])], booking: d.booking ?? null };
+      } else if (i.kind === 'booking') {
+        this.bookingForm = { ...base, kind: d.kind, vendor: d.vendor ?? '', confirmation: d.confirmation ?? '', startsOn: d.startsOn, startTime: d.startTime ?? '',
+          endsOn: d.endsOn ?? '', endTime: d.endTime ?? '', amount: d.amount ?? '', details: d.details ?? '' };
       } else if (i.kind === 'time') {
         this.timeForm = { ...base, date: d.date, hours: d.start ? '' : d.hours, start: d.start ?? '', end: d.end ?? '', breaks: d.breaks ?? '', notes: d.notes ?? '' };
       } else if (i.kind === 'check') {
@@ -210,12 +252,48 @@ createApp({
       if (!item) return;
       this.tripForm = null;
       if (!f.editId) this.tripKey = `c:${item.clientId}`;
-      this.flash(f.editId ? 'Change saved.' : 'Trip saved on this phone.');
+      this.flash(f.editId ? 'Change saved.' : f.planning || f.startDate > today() ? 'Trip saved on this phone. Now add its bookings: + Booking.' : 'Trip saved on this phone.');
     },
     // A new cost or day of travel starts on today's date (it used to copy the last item's date, which was easy to miss:
     // Homer, 2026-10-28). For the days after, "Save, then next day".
-    newCost() { this.timeForm = null; this.costForm = { kind: 'other', date: today(), dateDefault: today(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [] }; },
-    newCheck() { this.costForm = null; this.timeForm = null; this.checkForm = { date: today(), amount: '', from: '', checkNumber: '', invoices: '', notes: '', photos: [] }; },
+    newCost() { this.timeForm = null; this.bookingForm = null; this.costForm = { kind: 'other', date: today(), dateDefault: today(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [], booking: null }; },
+    // ---- Bookings: the flight, hotel and rental car for a trip planned ahead. Not money until paid.
+    newBooking() {
+      this.costForm = null; this.timeForm = null;
+      const t = this.tripChoices.ahead.concat(this.tripChoices.rest).find((x) => x.key === this.tripKey);
+      this.bookingForm = { kind: 'airfare', vendor: '', confirmation: '', startsOn: t?.startDate ?? today(), startTime: '', endsOn: t?.endDate ?? '', endTime: '', amount: '', details: '' };
+    },
+    async saveBooking() {
+      const f = this.bookingForm;
+      if (f.amount && (!/\d/.test(f.amount) || !/^\$?\d{1,3}(,?\d{3})*(\.\d{1,2})?$|^\$?\d*(\.\d{1,2})?$/.test(f.amount))) { this.flash('Enter the price like 412.30, or leave it empty.', 'bad'); return; }
+      if (!f.vendor.trim() && !f.confirmation.trim() && !f.details.trim()) { this.flash('Say who it is with (Southwest, Hilton, Avis…) or the confirmation number.', 'bad'); return; }
+      if (f.endsOn && f.endsOn < f.startsOn) { this.flash(`The ${BOOKING_DATES[f.kind][1].toLowerCase()} date is before the ${BOOKING_DATES[f.kind][0].toLowerCase()} date.`, 'bad'); return; }
+      const data = { trip: this.tripRef, kind: f.kind, vendor: f.vendor.trim() || null, confirmation: f.confirmation.trim() || null, startsOn: f.startsOn,
+        startTime: f.startTime || null, endsOn: f.endsOn || null, endTime: f.endTime || null, amount: f.amount.replace(/[$,]/g, '') || null, details: f.details.trim() || null };
+      if (await this.saveItem('booking', f, data)) { this.bookingForm = null; this.flash(f.editId ? 'Change saved.' : 'Booking saved on this phone.'); }
+    },
+    /** A booking paid for: the cost form, filled in from it, and the cost is linked to the booking when accepted. */
+    payBooking(x) {
+      this.timeForm = null; this.bookingForm = null;
+      const b = x.b;
+      this.costForm = { kind: b.kind, date: today(), dateDefault: today(), amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : (b.amount ?? ''), miles: '', mileRate: lastMileRate(),
+        vendor: b.vendor ?? '', description: b.confirmation ? `${KINDS[b.kind]}, confirmation ${b.confirmation}` : '', photos: [], booking: x.ref };
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    /** Paid, as far as this phone knows: the desk says so, or a cost for it was saved here. */
+    bookingPaid(x) {
+      if (x.b.paid) return true;
+      return this.items.some((i) => i.kind === 'cost' && i.status !== 'dismissed' && i.data.booking
+        && ((x.ref.id && i.data.booking.id === x.ref.id) || (x.ref.clientId && i.data.booking.clientId === x.ref.clientId)
+          || (x.b.fromClientId && i.data.booking.clientId === x.b.fromClientId)));
+    },
+    bookingWhen(b) {
+      const [a, z] = BOOKING_DATES[b.kind] ?? BOOKING_DATES.other;
+      const at = (d, t) => `${this.usDate(d)}${t ? ' ' + clock12(t) : ''}`;
+      return `${a} ${at(b.startsOn, b.startTime)}${b.endsOn ? ` · ${z} ${at(b.endsOn, b.endTime)}` : ''}`;
+    },
+    bookingPrice(b) { return b.amountCents != null ? money(b.amountCents) : (b.amount ? money(Math.round(Number(b.amount) * 100)) : ''); },
+    newCheck() { this.costForm = null; this.timeForm = null; this.bookingForm = null; this.checkForm = { date: today(), amount: '', from: '', checkNumber: '', invoices: '', notes: '', photos: [] }; },
     async saveCheck() {
       const f = this.checkForm;
       if (!/^\$?\d{1,3}(,?\d{3})*(\.\d{1,2})?$|^\$?\d*(\.\d{1,2})?$/.test(f.amount) || !/\d/.test(f.amount)) { this.flash('Enter the amount like 4915.83', 'bad'); return; }
@@ -224,7 +302,7 @@ createApp({
         invoices: f.invoices.trim() || null, notes: f.notes.trim() || null };
       if (await this.saveItem('check', f, data, f.photos)) { this.checkForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
     },
-    newTime() { this.costForm = null; this.timeForm = { date: today(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
+    newTime() { this.costForm = null; this.bookingForm = null; this.timeForm = { date: today(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
     clockTime,
     // A screenshot or photo copied to the clipboard: the same as choosing it.
     async pastePhotos() {
@@ -278,6 +356,7 @@ createApp({
       const data = { trip: this.tripRef, date: f.date, kind: f.kind, vendor: f.vendor.trim() || null, description: f.description.trim() || KINDS[f.kind] };
       if (f.kind === 'mileage') Object.assign(data, { miles: f.miles, mileRate: f.mileRate });
       else data.amount = f.amount.replace(/[$,]/g, '');
+      if (f.booking) data.booking = f.booking;
       if (await this.saveItem('cost', f, data, f.photos)) { this.costForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
     },
     // One day's travel: the hours, or start and end less breaks. "Save, then next day" keeps the times for the next date.
@@ -301,6 +380,7 @@ createApp({
     },
     itemText(i) {
       if (i.kind === 'trip') return `Trip: ${i.data.name}`;
+      if (i.kind === 'booking') return `${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''}`;
       if (i.kind === 'check') return `Check${i.data.checkNumber ? ' #' + i.data.checkNumber : ''}${i.data.from ? ' from ' + i.data.from : ''} · ${money(Math.round(Number(i.data.amount) * 100))}${i.data.invoices ? ' · inv ' + i.data.invoices : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''}`;
       if (i.kind === 'time') return `Travel time ${i.data.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
       const amount = i.data.kind === 'mileage' ? `${i.data.miles} mi × $${i.data.mileRate} = ${money(mileageCents(i.data.miles, i.data.mileRate))}` : money(Math.round(Number(i.data.amount) * 100));
@@ -311,19 +391,20 @@ createApp({
       return !i.sentItem || (i.edited && i.status === 'pending') || (this.canChange(i) && (i.photos ?? []).some((p) => !(i.sentPhotos ?? []).includes(p.clientId)));
     },
     statusText(i) {
-      if (i.status === 'accepted') return 'In the books';
+      if (i.status === 'accepted') return i.kind === 'booking' ? 'On the trip' : 'In the books';
       if (i.status === 'dismissed') return 'Dismissed at desk';
       if (i.error) return 'Needs a fix';
       if (this.notSent(i)) return 'On phone';
       return 'Sent';
     },
     statusClass(i) { return { ok: i.status === 'accepted' || (this.statusText(i) === 'Sent'), warn: this.statusText(i) === 'On phone', bad: Boolean(i.error) }; },
-    /** Send what hasn't been sent: trips first (their costs name them), then the rest in the order they were made. */
+    /** Send what hasn't been sent: trips first (their costs name them), then bookings (a cost may name one), then the rest in order. */
     async sync() {
       if (this.syncing || !this.key || !this.online) return;
       this.syncing = true;
       try {
-        const order = [...this.items].sort((a, b) => (a.kind === 'trip') === (b.kind === 'trip') ? a.createdAt.localeCompare(b.createdAt) : (a.kind === 'trip' ? -1 : 1));
+        const rank = (i) => ({ trip: 0, booking: 1 }[i.kind] ?? 2);
+        const order = [...this.items].sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt));
         for (const i of order) {
           try {
             if (!i.sentItem) {
@@ -350,13 +431,15 @@ createApp({
         }
         // Which have been accepted at the desk?
         const sent = this.items.filter((i) => i.sentItem && i.status === 'pending').map((i) => i.clientId);
+        let changed = false;
         if (sent.length) {
           for (const s of await this.call('POST', '/status', { clientIds: sent })) {
             const i = this.items.find((x) => x.clientId === s.clientId);
-            if (i && i.status !== s.status) { i.status = s.status; await putItem(i); }
+            if (i && i.status !== s.status) { i.status = s.status; await putItem(i); changed = true; }
           }
         }
-        if (this.items.some((i) => i.kind === 'trip' && i.status === 'accepted')) await this.refresh();
+        // Something was accepted at the desk: fetch the trips and bookings again (a planned trip's bookings show from there).
+        if (changed) await this.refresh();
       } catch (e) {
         if (e instanceof KeyProblem) this.keyProblem = e.message;
       } finally { this.syncing = false; }

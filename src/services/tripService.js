@@ -10,7 +10,7 @@ import { insertEntry, reverseEntry, cleanIdempotencyKey } from './ledgerService.
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
 import { createTimeEntry, updateTimeEntry, deleteTimeEntry } from './timesheetService.js';
-import { minutesToHours } from '../core/timesheets.js';
+import { minutesToHours, parseClock } from '../core/timesheets.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
@@ -179,6 +179,7 @@ export async function listTrips(db, companyId, { includeClosed = true } = {}) {
     `SELECT t.id, t.name, to_char(t.start_date, 'YYYY-MM-DD') AS "startDate", to_char(t.end_date, 'YYYY-MM-DD') AS "endDate", t.is_active AS "isActive",
             COALESCE((SELECT sum(amount_cents) FROM trip_costs WHERE trip_id = t.id AND status = 'posted'), 0)::bigint AS "totalCents",
             (SELECT count(*) FROM trip_costs WHERE trip_id = t.id AND status = 'posted')::int AS "costCount",
+            (SELECT count(*) FROM trip_bookings WHERE trip_id = t.id AND status = 'booked')::int AS "bookingCount",
             COALESCE((SELECT string_agg(coalesce(j.code, j.name) || ' ' || (tj.share_bp / 100.0)::numeric(6,2)::text || '%', ', ' ORDER BY tj.share_bp DESC, j.name)
                         FROM trip_jobs tj JOIN jobs j ON j.id = tj.job_id WHERE tj.trip_id = t.id), '') AS "projectsText"
        FROM trips t WHERE t.company_id = $1 AND (t.is_active OR $2) ORDER BY t.start_date DESC, t.created_at DESC LIMIT 500`, [companyId, includeClosed]);
@@ -210,6 +211,7 @@ export async function getTrip(db, companyId, tripId) {
             COALESCE((SELECT json_agg(json_build_object('jobId', l.job_id, 'number', d.number)) FROM document_lines l JOIN documents d ON d.id = l.document_id
                        WHERE l.time_entry_id = te.id AND d.status = 'posted'), '[]') AS billed
        FROM time_entries te JOIN users u ON u.id = te.user_id WHERE te.trip_id = $1 ORDER BY te.work_date, te.created_at`, [t.id]);
+  const bookings = await listBookings(db, companyId, [t.id]);
   const shareTotal = jobs.reduce((s, j) => s + j.shareBp, 0);
   const posted = costs.filter((x) => x.status === 'posted');
   return {
@@ -219,6 +221,7 @@ export async function getTrip(db, companyId, tripId) {
     totalCents: posted.reduce((s, x) => s + Number(x.amountCents), 0),
     time: time.map((x) => ({ ...x, hours: minutesToHours(x.minutes) })),
     travelMinutes: time.filter((x) => x.status !== 'rejected').reduce((s, x) => s + x.minutes, 0),
+    bookings,
   };
 }
 
@@ -277,6 +280,8 @@ export async function addTripCost(pool, companyId, tripId, input, { actor = null
       [id, companyId, trip.id, date, vendor, description, amount, exp.id, from.id, je.id, idempotencyKey, actor, kind, mileage?.miles ?? null, mileage?.rateCentsText ?? null]);
     await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: 'trip_cost', entityId: id, actor,
       payload: { ...(replacesId ? { replacesId } : {}), tripId: trip.id, date, kind, vendor, description, amountCents: amount, ...(mileage ? { miles: mileage.miles, mileRateCents: mileage.rateCentsText } : {}), entryId: je.id } });
+    // Paying for a booking ("Paid: record the cost"): the booking points at this cost from now on.
+    if (input?.bookingId) await linkBookingCost(c, companyId, trip.id, input.bookingId, id, actor);
     return { ...(await getTrip(c, companyId, trip.id)), costId: id };
   });
 }
@@ -314,6 +319,8 @@ export async function replaceTripCost(pool, companyId, costId, input, { actor = 
     const saved = await addTripCost(c, companyId, old.trip_id, input, { actor, idempotencyKey, costId: newId, replacesId: costId });
     await c.query(`INSERT INTO trip_cost_photos (company_id, trip_cost_id, picture, picture_type, created_at, created_by)
       SELECT company_id, $2, picture, picture_type, created_at, created_by FROM trip_cost_photos WHERE trip_cost_id = $1`, [costId, newId]);
+    // A booking it paid for now points at the corrected copy.
+    await c.query('UPDATE trip_bookings SET trip_cost_id = $2, updated_at = now() WHERE company_id = $3 AND trip_cost_id = $1', [costId, newId, companyId]);
     return { ...(await getTrip(c, companyId, saved.id)), costId: newId };
   });
 }
@@ -391,4 +398,113 @@ export async function removeTravelTime(pool, companyId, viewer, tripId, timeEntr
     await deleteTimeEntry(c, companyId, viewer, timeEntryId, { actor });
     return getTrip(c, companyId, tripId);
   });
+}
+
+// ---------------------------------------------------------------- Bookings (a trip planned ahead)
+
+// Bookings (Homer, 2026-11-06): a trip two weeks out gets its flight, hotel and rental car booked now. A booking is
+// the reservation, not money: nothing reaches the books until it is paid and recorded as a trip cost ("Paid: record
+// the cost", which links the cost to the booking). Changed in place, every change audited (migration 040).
+export const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
+const MAX_BOOKINGS_PER_TRIP = 60;
+
+/**
+ * A booking as typed (on the phone or at the desk), checked: kind, vendor, confirmation, startsOn/startTime,
+ * endsOn/endTime, details, amount (the price, optional). Errors are pushed onto `errors`.
+ */
+export function cleanBooking(input, errors) {
+  const d = input && typeof input === 'object' ? input : {};
+  const out = {
+    kind: BOOKING_KINDS[d.kind] ? d.kind : 'other',
+    vendor: text(d.vendor, 120), confirmation: text(d.confirmation, 40), details: text(d.details, 500),
+    startsOn: d.startsOn, endsOn: d.endsOn || null, startTime: null, endTime: null, amountCents: null,
+  };
+  if (!isIsoDate(out.startsOn)) errors.push(`the ${{ airfare: 'departure', lodging: 'check-in', rental_car: 'pick-up' }[out.kind] ?? 'first'} date must be a real date`);
+  if (out.endsOn && (!isIsoDate(out.endsOn) || out.endsOn < out.startsOn)) errors.push('the last date must be a real date, on or after the first');
+  for (const [k, col] of [['startTime', 'start'], ['endTime', 'end']]) {
+    if (d[k] == null || String(d[k]).trim() === '') continue;
+    out[k] = parseClock(d[k]);
+    if (!out[k]) errors.push(`the ${col} time must be a time like 7:30 AM`);
+  }
+  if (d.amount != null && String(d.amount).trim() !== '') {
+    try { out.amountCents = toCents(String(d.amount).replace(/[$,\s]/g, '')); } catch { /* reported below */ }
+    if (out.amountCents == null || out.amountCents <= 0) errors.push('the price must be a dollar amount over $0.00 (or leave it empty)');
+  }
+  if (!out.vendor && !out.confirmation && !out.details) errors.push('say who it is with (Southwest, Hilton, Avis…) or the confirmation number');
+  return out;
+}
+
+const BOOKING_COLS = `b.id, b.trip_id AS "tripId", b.kind, b.vendor, b.confirmation, to_char(b.starts_on, 'YYYY-MM-DD') AS "startsOn",
+  to_char(b.start_time, 'HH24:MI') AS "startTime", to_char(b.ends_on, 'YYYY-MM-DD') AS "endsOn", to_char(b.end_time, 'HH24:MI') AS "endTime",
+  b.details, b.amount_cents AS "amountCents", b.status,
+  CASE WHEN tc.status = 'posted' THEN b.trip_cost_id END AS "tripCostId", CASE WHEN tc.status = 'posted' THEN tc.amount_cents END AS "paidCents"`;
+
+/** The bookings on these trips, in date order (a cost voided without a correction un-pays its booking). */
+export async function listBookings(db, companyId, tripIds) {
+  if (!tripIds.length) return [];
+  const { rows } = await db.query(
+    `SELECT ${BOOKING_COLS} FROM trip_bookings b LEFT JOIN trip_costs tc ON tc.id = b.trip_cost_id
+      WHERE b.company_id = $1 AND b.trip_id = ANY($2::uuid[]) ORDER BY b.starts_on, b.start_time NULLS LAST, b.created_at`, [companyId, tripIds]);
+  return rows.map((r) => ({ ...r, amountCents: r.amountCents == null ? null : Number(r.amountCents), paidCents: r.paidCents == null ? null : Number(r.paidCents) }));
+}
+
+async function getBookingRow(c, companyId, tripId, bookingId) {
+  if (!isId(bookingId)) throw new LedgerError('Booking not found');
+  const { rows: [b] } = await c.query('SELECT * FROM trip_bookings WHERE company_id = $1 AND trip_id = $2 AND id = $3 FOR UPDATE', [companyId, tripId, bookingId]);
+  if (!b) throw new LedgerError('Booking not found');
+  return b;
+}
+
+/** Add a booking to a trip. Returns the trip (with bookingId). Used by the desk and by accepting one from the road. */
+export async function addBooking(pool, companyId, tripId, input, { actor = null } = {}) {
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    const trip = await getTripRow(c, companyId, tripId);
+    const errors = [];
+    const v = cleanBooking(input, errors);
+    const { rows: [{ n }] } = await c.query('SELECT count(*)::int AS n FROM trip_bookings WHERE trip_id = $1', [trip.id]);
+    if (n >= MAX_BOOKINGS_PER_TRIP) errors.push(`a trip can have at most ${MAX_BOOKINGS_PER_TRIP} bookings`);
+    if (errors.length) throw new LedgerError('Booking is not valid', errors);
+    const { rows: [b] } = await c.query(
+      `INSERT INTO trip_bookings (company_id, trip_id, kind, vendor, confirmation, starts_on, start_time, ends_on, end_time, details, amount_cents, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      [companyId, trip.id, v.kind, v.vendor, v.confirmation, v.startsOn, v.startTime, v.endsOn, v.endTime, v.details, v.amountCents, actor]);
+    await appendAudit(c, companyId, { action: 'create', entity: 'trip_booking', entityId: b.id, actor, payload: { tripId: trip.id, ...v } });
+    return { ...(await getTrip(c, companyId, trip.id)), bookingId: b.id };
+  });
+}
+
+/** Change a booking (new dates, a seat upgrade…), or cancel it ({ status: 'cancelled' }) or book it again ('booked'). */
+export async function updateBooking(pool, companyId, tripId, bookingId, input, { actor = null } = {}) {
+  return withTransaction(pool, async (c) => {
+    await lockCompany(c, companyId);
+    await getTripRow(c, companyId, tripId);
+    const old = await getBookingRow(c, companyId, tripId, bookingId);
+    const status = input?.status === undefined ? old.status : input.status;
+    if (!['booked', 'cancelled'].includes(status)) throw new LedgerError('Booking is not valid', ['the status must be booked or cancelled']);
+    const onlyStatus = input && Object.keys(input).every((k) => k === 'status');
+    let v = null;
+    if (!onlyStatus) {
+      const errors = [];
+      v = cleanBooking(input, errors);
+      if (errors.length) throw new LedgerError('Booking is not valid', errors);
+      await c.query(`UPDATE trip_bookings SET kind = $2, vendor = $3, confirmation = $4, starts_on = $5, start_time = $6, ends_on = $7, end_time = $8,
+        details = $9, amount_cents = $10, status = $11, updated_at = now() WHERE id = $1`,
+        [old.id, v.kind, v.vendor, v.confirmation, v.startsOn, v.startTime, v.endsOn, v.endTime, v.details, v.amountCents, status]);
+    } else await c.query('UPDATE trip_bookings SET status = $2, updated_at = now() WHERE id = $1', [old.id, status]);
+    await appendAudit(c, companyId, { action: onlyStatus ? (status === 'cancelled' ? 'cancel' : 'rebook') : 'update', entity: 'trip_booking', entityId: old.id, actor,
+      payload: v ? { ...v, status } : { status } });
+    return getTrip(c, companyId, tripId);
+  });
+}
+
+/** The cost that paid for a booking (a cost on the same trip). Called inside addTripCost's transaction. */
+async function linkBookingCost(c, companyId, tripId, bookingId, costId, actor) {
+  const b = await getBookingRow(c, companyId, tripId, bookingId);
+  if (b.trip_cost_id) {
+    const { rows: [paid] } = await c.query('SELECT status FROM trip_costs WHERE id = $1', [b.trip_cost_id]);
+    if (paid?.status === 'posted') throw new LedgerError('That booking is already paid; its cost is on the trip');
+  }
+  await c.query('UPDATE trip_bookings SET trip_cost_id = $2, updated_at = now() WHERE id = $1', [b.id, costId]);
+  await appendAudit(c, companyId, { action: 'paid', entity: 'trip_booking', entityId: b.id, actor, payload: { tripCostId: costId } });
 }

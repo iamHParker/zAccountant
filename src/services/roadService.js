@@ -17,7 +17,7 @@ import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
 import { createTimeEntry } from './timesheetService.js';
 import { receiptReadingOn } from './receiptReader.js';
-import { createTrip, addTripCost, COST_KINDS, mileageAmount, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_COST } from './tripService.js';
+import { createTrip, addTripCost, addBooking, listBookings, cleanBooking, COST_KINDS, BOOKING_KINDS, mileageAmount, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_COST } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
@@ -98,16 +98,41 @@ export async function findRoadKey(pool, token) {
   return k ?? null;
 }
 
-/** What the phone may see: the company and person's names, open trips and active projects (names only). */
+/**
+ * What the phone may see: the company and person's names, open trips and active projects (names only), and the
+ * bookings on those open trips (Homer, 2026-11-06: the trip's plan, its flight, hotel and rental car with their
+ * confirmation numbers, is what the traveller needs on the road). No amounts paid, no accounts, nothing else.
+ */
 export async function roadSummary(db, key) {
   const { rows: [who] } = await db.query(
-    'SELECT c.name AS company, u.name AS "user" FROM companies c, users u WHERE c.id = $1 AND u.id = $2', [key.companyId, key.userId]);
+    `SELECT c.name AS company, u.name AS "user", to_char(now() AT TIME ZONE 'America/Chicago', 'YYYY-MM-DD') AS today
+       FROM companies c, users u WHERE c.id = $1 AND u.id = $2`, [key.companyId, key.userId]);
+  // fromClientId: a trip this phone sent, so the phone knows its own trip once it is accepted at the desk.
   const { rows: trips } = await db.query(
-    `SELECT id, name, to_char(start_date, 'YYYY-MM-DD') AS "startDate", to_char(end_date, 'YYYY-MM-DD') AS "endDate"
-       FROM trips WHERE company_id = $1 AND is_active ORDER BY start_date DESC LIMIT 50`, [key.companyId]);
+    `SELECT t.id, t.name, to_char(t.start_date, 'YYYY-MM-DD') AS "startDate", to_char(t.end_date, 'YYYY-MM-DD') AS "endDate",
+            (SELECT i.client_id FROM road_items i WHERE i.key_id = $2 AND i.kind = 'trip' AND i.trip_id = t.id LIMIT 1) AS "fromClientId"
+       FROM trips t WHERE t.company_id = $1 AND t.is_active ORDER BY t.start_date DESC LIMIT 50`, [key.companyId, key.id]);
   const { rows: projects } = await db.query(
     'SELECT id, code, name FROM jobs WHERE company_id = $1 AND is_active ORDER BY code NULLS LAST, name LIMIT 3000', [key.companyId]);
-  return { ...who, keyName: key.name, expiresOn: key.expiresOn, trips, projects, costKinds: COST_KINDS, receiptReading: receiptReadingOn() };
+  const all = await listBookings(db, key.companyId, trips.map((t) => t.id));
+  const { rows: sent } = all.length ? await db.query(
+    "SELECT client_id, trip_booking_id FROM road_items WHERE key_id = $1 AND kind = 'booking' AND trip_booking_id = ANY($2::uuid[])", [key.id, all.map((b) => b.id)]) : { rows: [] };
+  const fromItem = new Map(sent.map((r) => [r.trip_booking_id, r.client_id]));
+  const bookings = all.map(({ paidCents, tripCostId, ...b }) => ({ ...b, paid: Boolean(tripCostId), fromClientId: fromItem.get(b.id) ?? null }));
+  return { ...who, keyName: key.name, expiresOn: key.expiresOn, trips, projects, bookings, costKinds: COST_KINDS, bookingKinds: BOOKING_KINDS, receiptReading: receiptReadingOn() };
+}
+
+/** A booking named by a cost ("Paid: record the cost"): { id } of a saved booking, or { clientId } of one sent from this phone. */
+async function bookingRef(db, key, ref) {
+  if (ref && isId(ref.id)) {
+    const { rows: [b] } = await db.query('SELECT id FROM trip_bookings WHERE company_id = $1 AND id = $2', [key.companyId, ref.id]);
+    return b ? { id: b.id } : null;
+  }
+  if (ref && typeof ref.clientId === 'string' && CLIENT_ID.test(ref.clientId)) {
+    const { rows: [b] } = await db.query("SELECT 1 FROM road_items WHERE key_id = $1 AND client_id = $2 AND kind = 'booking'", [key.id, ref.clientId]);
+    return b ? { clientId: ref.clientId } : null;
+  }
+  return null;
 }
 
 /** A trip named by an item: { id } of a saved trip, or { clientId } of a trip sent from this phone. */
@@ -146,6 +171,9 @@ async function cleanItem(db, key, kind, d) {
       out.kind = COST_KINDS[d.kind] ? d.kind : 'other';
       out.vendor = text(d.vendor, 120);
       out.description = text(d.description, 300) ?? (out.kind !== 'other' ? COST_KINDS[out.kind] : null);
+      // Paying for a booking sent or seen on the phone: the cost is linked to it when accepted.
+      const booking = await bookingRef(db, key, d.booking);
+      if (booking) out.booking = booking;
       if (!out.description) errors.push('say what it was');
       if (out.kind === 'mileage') {
         const m = mileageAmount(d.miles, d.mileRate);
@@ -171,6 +199,9 @@ async function cleanItem(db, key, kind, d) {
       out.minutes = minutes;
       out.notes = text(d.notes, 300);
     }
+  } else if (kind === 'booking') {
+    // A flight, hotel or rental car booked for the trip (Homer, 2026-11-06). Not money: a plan, put on the trip at the desk.
+    out = { trip: await tripRef(db, key, d.trip, errors), ...cleanBooking(d, errors) };
   } else if (kind === 'check') {
     // A check received (Homer, 2026-10-26): who paid, how much, its number and the invoice numbers it pays.
     out = { date: d.date, from: text(d.from, 120), checkNumber: text(d.checkNumber, 30), invoices: text(d.invoices, 200), notes: text(d.notes, 300) };
@@ -311,7 +342,7 @@ async function lockItem(c, companyId, itemId) {
  */
 async function deskData(c, companyId, item, changes) {
   const d = item.data;
-  const base = item.kind === 'cost'
+  const base = item.kind === 'cost' || item.kind === 'booking'
     ? { ...d, amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : '' }
     : item.kind === 'time'
       ? { ...d, hours: `${Math.floor(d.minutes / 60)}:${String(d.minutes % 60).padStart(2, '0')}`,
@@ -348,6 +379,24 @@ async function tripFor(c, companyId, item, chosen) {
   throw new LedgerError(t?.status === 'dismissed' ? 'Its trip was dismissed; choose a trip for it' : 'Accept its trip first (above), or choose a trip for it');
 }
 
+/**
+ * The booking a cost from the road paid for, if it is on the same trip and not paid yet; otherwise none (the cost
+ * still goes in, just not linked: a booking still waiting in the inbox, or one already paid at the desk).
+ */
+async function paidBooking(c, companyId, item, tripId) {
+  const ref = item.data.booking;
+  let id = ref?.id ?? null;
+  if (!id && ref?.clientId) {
+    const { rows: [b] } = await c.query("SELECT trip_booking_id FROM road_items WHERE key_id = $1 AND client_id = $2 AND kind = 'booking'", [item.key_id, ref.clientId]);
+    id = b?.trip_booking_id ?? null;
+  }
+  if (!id) return null;
+  const { rows: [b] } = await c.query(
+    `SELECT b.id FROM trip_bookings b LEFT JOIN trip_costs tc ON tc.id = b.trip_cost_id
+      WHERE b.company_id = $1 AND b.id = $2 AND b.trip_id = $3 AND (b.trip_cost_id IS NULL OR tc.status = 'void')`, [companyId, id, tripId]);
+  return b?.id ?? null;
+}
+
 /** Split 100% evenly in hundredths of a percent; any leftover hundredths go to the first projects (3 → 33.34, 33.33, 33.33). */
 export function evenShares(n) {
   if (n <= 0) return [];
@@ -360,7 +409,8 @@ export function evenShares(n) {
  *   trip → new project numbers become projects (an existing project with the same name or number is used instead),
  *          and the trip is made with the projects sharing it evenly (change the shares on the trip afterwards);
  *   cost → a trip cost (input: expenseAccountId, paidFromAccountId; optional tripId), with its receipt photos;
- *   time → travel time for the person who sent it.
+ *   time → travel time for the person who sent it;
+ *   booking → a booking on the trip (not in the books; nothing to choose).
  */
 export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, { actor = null } = {}) {
   return withTransaction(db, async (c) => {
@@ -397,11 +447,18 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
       return { accepted: true, tripId: trip.id };
     }
     const tripId = await tripFor(c, companyId, item, input.tripId || null);
+    if (item.kind === 'booking') {
+      const { trip, amountCents, ...b } = d;
+      const r = await addBooking(c, companyId, tripId, { ...b, amount: amountCents != null ? (amountCents / 100).toFixed(2) : null }, { actor });
+      await done({ trip_booking_id: r.bookingId, trip_id: tripId });
+      return { accepted: true, tripId, bookingId: r.bookingId };
+    }
     if (item.kind === 'cost') {
+      const bookingId = await paidBooking(c, companyId, item, tripId);
       const r = await addTripCost(c, companyId, tripId, {
         date: d.date, kind: d.kind, vendor: d.vendor, description: d.description, miles: d.miles, mileRate: d.mileRate,
         amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : undefined,
-        expenseAccountId: input.expenseAccountId, paidFromAccountId: input.paidFromAccountId,
+        expenseAccountId: input.expenseAccountId, paidFromAccountId: input.paidFromAccountId, bookingId,
       }, { actor, idempotencyKey: `road-${item.id}` });
       await c.query(
         `INSERT INTO trip_cost_photos (company_id, trip_cost_id, picture, picture_type, created_by)
@@ -429,7 +486,7 @@ export async function acceptRoadItems(db, companyId, viewer, { itemIds, expenseA
     await lockCompany(c, companyId);
     const { rows } = await c.query(
       `SELECT id, kind FROM road_items WHERE company_id = $1 AND id = ANY($2::uuid[]) AND status = 'pending' AND kind <> 'check'
-        ORDER BY (kind = 'trip') DESC, received_at, id`, [companyId, [...new Set(itemIds)]]);
+        ORDER BY (kind = 'trip') DESC, (kind = 'booking') DESC, received_at, id`, [companyId, [...new Set(itemIds)]]);
     if (rows.length !== new Set(itemIds).size) throw new LedgerError('Some of those items were already reviewed (or are checks); refresh and try again');
     const out = [];
     for (const r of rows) {

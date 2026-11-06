@@ -152,6 +152,16 @@ Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tri
 `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share to 2 decimals, `sharedHoursQuantity`). Those invoice
 lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
 
+**Bookings** (migration 040, Homer 2026-11-06): `trip_bookings` holds a trip's plan, a flight, hotel, rental car or
+other reservation (kind, vendor, confirmation, `starts_on`/`start_time`, `ends_on`/`end_time`, details, quoted
+`amount_cents`, status booked/cancelled). It is not a ledger record: nothing posts, it is changed in place
+(`updateBooking`, every change audited) and a cancelled one stays. Routes `POST …/trips/:tripId/bookings` and
+`PATCH …/trips/:tripId/bookings/:bookingId` (`bills`; `{ status }` alone cancels or re-books). Paying for one is an
+ordinary trip cost with `bookingId` in the body: `addTripCost` sets `trip_bookings.trip_cost_id` in the same
+transaction (refused if already paid by a posted cost); `replaceTripCost` moves the link to the corrected copy; a cost
+voided without a copy un-pays it (`listBookings` shows `tripCostId` only while the cost is posted). `getTrip` returns
+`bookings`; `listTrips` a `bookingCount` of booked ones.
+
 ## Road page (migration 026, `src/services/roadService.js`, `public/road.html` + `road.js` + `road-sw.js`)
 The phone
 keeps items in IndexedDB and sends them with its road key (see Security); each item and photo has the phone's own
@@ -163,6 +173,13 @@ job with that name or number exists; even shares via `evenShares`), a cost (`add
 invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
 The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
 { paymentId }` (`invoices`) links it (`road_items.payment_id`) and copies its photos to `payment_photos`.
+A **booking** item (migration 040: `kind = 'booking'`, data = the trip ref + `cleanBooking`) is accepted with
+`addBooking` (no accounts) and recorded in `road_items.trip_booking_id`; accept-all takes trips, then bookings, then
+the rest. A cost item may name `booking: { id }` (a saved booking) or `{ clientId }` (one sent from the same key);
+on accept `paidBooking` links it if that booking is on the same trip and unpaid, else the cost goes in unlinked. The
+summary (`GET /api/road`) also returns `today` (Central), each open trip's `fromClientId` (the trip item this key
+sent), and the open trips' `bookings` (no cost ids or paid amounts, just `paid`), so the phone shows the trip plan;
+the phone syncs trips, then bookings, then the rest, and refreshes the summary when anything is accepted.
 Changing a sent item: `PUT /api/road/items/:clientId { data }` (`editItem`) re-checks the data like a new item
 and replaces `road_items.data`, only while `status = 'pending'`; the phone marks the item `edited` and sends the
 change on its next sync. Accepted items are fixed at the desk (`PATCH …/trips/:tripId/travel-time/:timeEntryId`

@@ -303,7 +303,7 @@ export function createApp(pool, { log } = {}) {
   const route = (permission, handler, status = 200) => async (req, res) => {
     const companyId = req.params.companyId ?? null;
     if (companyId && !UUID.test(companyId)) return res.status(404).json({ error: 'Company not found' });
-    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId', 'itemId', 'tripId', 'costId', 'photoId', 'keyId', 'itemId']) {
+    for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId', 'itemId', 'tripId', 'bookingId', 'costId', 'photoId', 'keyId', 'itemId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
     const body = await afterScope(await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
@@ -655,6 +655,10 @@ export function createApp(pool, { log } = {}) {
     trips.updateTravelTime(db, companyId, viewer, req.params.tripId, req.params.timeEntryId, req.body ?? {}, { actor })));
   api.delete(`${TR}/:tripId/travel-time/:timeEntryId`, route('bills', ({ db, req, companyId, viewer, actor }) =>
     trips.removeTravelTime(db, companyId, viewer, req.params.tripId, req.params.timeEntryId, { actor })));
+  // Bookings on a trip planned ahead (flight, hotel, rental car): not in the books until paid and recorded as a cost.
+  api.post(`${TR}/:tripId/bookings`, route('bills', ({ db, req, companyId, actor }) => trips.addBooking(db, companyId, req.params.tripId, req.body ?? {}, { actor }), 201));
+  api.patch(`${TR}/:tripId/bookings/:bookingId`, route('bills', ({ db, req, companyId, actor }) =>
+    trips.updateBooking(db, companyId, req.params.tripId, req.params.bookingId, req.body ?? {}, { actor })));
   // Edit = void + corrected copy, and Void reverses a posted entry: the same permission as for bills ("post").
   api.put(TC, route('post', ({ db, req, companyId, actor }) => trips.replaceTripCost(db, companyId, req.params.costId, req.body ?? {}, { actor, idempotencyKey: idemKey(req) })));
   api.post(`${TC}/void`, route('post', ({ db, req, companyId, actor }) => trips.voidTripCost(db, companyId, req.params.costId, { actor })));
