@@ -342,6 +342,7 @@ while you travel, even with no signal, without signing in to your books on the p
 2. On the road: **+ New trip** (name, dates, the projects it's for; type new project numbers like *2610 Garcia Barn*
    one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other; the amount or
    the miles and rate; receipt photos: **📷 Take photo**, **🖼 Choose photo** from Photos, or **📋 Paste**) and **+ Travel time** (one per day: hours, or start, end and breaks; **Save, then next day**). Everything is saved on the phone first and sent when
+   there is signal. The top of the page says how many are waiting; **Send** sends them at once.
    there is signal. The top of the page says how many are waiting; **Send now** sends them at once.
    **Planning a trip ahead:** make the trip with its future dates, then **+ Booking** for the flight, hotel and rental
    car (who, confirmation number, dates and times, price if known, details). The **Trip** pull-down lists trips under
@@ -352,6 +353,16 @@ while you travel, even with no signal, without signing in to your books on the p
    then **Accept** the new trip first (its projects share it evenly; open the trip to change the shares), then its
    bookings (nothing to choose; they go on the trip, not in the books), costs and travel time. **Dismiss** anything that shouldn't go in the books. On the phone each item then says
    *In the books*; **Clear items already in the books** tidies the list.
+
+**The four buttons.** The Road page opens on four coloured buttons, one for each job: **Check in** (green, a
+check you received), **Trip now** (orange, costs and receipts on the trip you are on), **Future trip** (blue, plan a
+trip ahead; trips coming up are listed there) and **Time** (purple, travel hours for a trip). Each button opens its own
+screen; **‹ Home** at the top, or the phone's own Back, returns to the four buttons.
+
+**Hiding amounts from people nearby.** The eye button at the top right blurs every dollar amount on the page, and the
+receipt and check photos, so someone looking over your shoulder can't read how much you deposited or spent. An amount
+you type shows as a smudge while it is hidden; it is saved exactly as typed. Amounts start hidden, and the phone
+remembers your choice. Tap the eye to show them, tap again to hide them.
 
 **A screenshot or an emailed receipt as the receipt photo.** Take the screenshot, tap its little picture in the
 corner, then **Share → Copy** (or press and hold a picture in an email or web page and choose **Copy**). Then tap

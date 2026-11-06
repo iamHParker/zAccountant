@@ -67,6 +67,13 @@ function mileageCents(miles, rate) {
   return Number((n + 5000n) / 10000n);
 }
 const money = (c) => (c == null ? '' : `$${(c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`);
+// The screens behind the four home buttons: title and icon colour (classes in styles.css, .road-icon.c-*).
+const SCREENS = {
+  check: { title: 'Check in', color: 'c-check' },
+  trip: { title: 'Trip now', color: 'c-trip' },
+  plan: { title: 'Future trip', color: 'c-plan' },
+  time: { title: 'Time', color: 'c-time' },
+};
 const KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
 // Bookings on a trip planned ahead (Homer, 2026-11-06): the reservation, not money. The words for its two dates.
 const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
@@ -85,11 +92,25 @@ createApp({
       items: [], tripKey: getLocal('zacc.roadTrip') ?? '',
       tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, kinds: KINDS,
       bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
+      screen: 'home', screens: SCREENS,
+      // Amounts start hidden (blurred) and the phone remembers the choice: someone beside you sees no deposit totals.
+      hide: getLocal('zacc.roadHide') !== 'show',
     };
   },
   computed: {
     waiting() { return this.items.filter((i) => this.notSent(i)).length; },
     checkItems() { return this.items.filter((i) => i.kind === 'check').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20); },
+    checksWaiting() { return this.items.filter((i) => i.kind === 'check' && !['accepted', 'dismissed'].includes(i.status)).length; },
+    tripName() {
+      const ref = this.tripRef;
+      if (!ref) return '';
+      if (ref.clientId) return this.localTrips.find((t) => t.clientId === ref.clientId)?.data.name ?? '';
+      return (this.summary?.trips ?? []).find((t) => t.id === ref.id)?.name ?? '';
+    },
+    /** Trips that start after today, from this phone and from zAccountant, soonest first. */
+    upcomingTrips() { return this.tripChoices.ahead; },
+    /** The Time screen lists only travel time; Trip now lists everything on the trip. */
+    shownTripItems() { return this.screen === 'time' ? this.tripEntries.filter((i) => i.kind === 'time') : this.tripEntries; },
     localTrips() { return this.items.filter((i) => i.kind === 'trip' && i.status !== 'dismissed'); },
     /**
      * Every trip to pick from, split into "Coming up" (planned ahead: it starts after today) and the rest, soonest
@@ -149,13 +170,16 @@ createApp({
     },
   },
   watch: {
-    tripKey(v) { setLocal('zacc.roadTrip', v || null); this.costForm = null; this.timeForm = null; this.bookingForm = null; },
+    hide: { immediate: true, handler(v) { document.body.classList.toggle('hush', v); } },
+    tripKey(v) { setLocal('zacc.roadTrip', v || null); this.costForm = null; this.timeForm = null; this.bookingForm = null; if (v && this.screen === 'time') this.newTime(); },
   },
   async mounted() {
     // The QR code opens /road#key=zr_…: keep the key on the phone and take it out of the address bar.
     const m = /^#key=(zr_[A-Za-z0-9_-]+)$/.exec(location.hash);
     if (m) { this.setKey(m[1]); history.replaceState(null, '', '/road'); }
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/road-sw.js', { scope: '/road' }).catch(() => {});
+    // The phone's own Back button goes from a screen back to the four buttons.
+    window.addEventListener('popstate', () => { this.closeForms(); this.screen = SCREENS[history.state?.road] ? history.state.road : 'home'; });
     window.addEventListener('online', () => { this.online = true; this.sync(); });
     window.addEventListener('offline', () => { this.online = false; });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.sync(); });
@@ -195,6 +219,21 @@ createApp({
     serverTripFor(clientId) { return (this.summary?.trips ?? []).find((t) => t.fromClientId === clientId) ?? null; },
     projectLabel(id) { const p = this.summary?.projects?.find((x) => x.id === id); return p ? (p.code ?? p.name) : 'project'; },
     toggleJob(id) { const j = this.tripForm.jobIds; const i = j.indexOf(id); if (i >= 0) j.splice(i, 1); else j.push(id); },
+    // ---- The four home buttons. Each screen is a history entry, so Back (or the ‹ Home link) returns to them.
+    go(screen) {
+      this.closeForms();
+      if (this.screen === 'home') history.pushState({ road: screen }, ''); else history.replaceState({ road: screen }, '');
+      this.screen = screen;
+      window.scrollTo({ top: 0 });
+    },
+    goHome() {
+      this.closeForms();
+      if (history.state?.road) history.back(); else this.screen = 'home';
+    },
+    goTime() { this.go('time'); if (this.tripKey) this.newTime(); },
+    openTrip(key) { this.tripKey = key; this.go('trip'); },
+    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; },
+    toggleHide() { this.hide = !this.hide; setLocal('zacc.roadHide', this.hide ? null : 'show'); },
     newTrip() { this.tripForm = { name: '', startDate: today(), endDate: '', jobIds: [], newProjects: '', notes: '' }; this.projectSearch = ''; },
     /** A trip planned ahead (Homer, 2026-11-06): the New trip form starting tomorrow; its bookings go on it once saved. */
     planTrip() { this.newTrip(); this.tripForm.startDate = nextDay(today()); this.tripForm.planning = true; },
@@ -250,6 +289,7 @@ createApp({
       if (!item) return;
       this.tripForm = null;
       if (!f.editId) this.tripKey = `c:${item.clientId}`;
+      if (!f.editId && this.screen === 'plan') this.go('trip'); // a planned trip: on to Trip now, where its bookings go
       this.flash(f.editId ? 'Change saved.' : f.planning || f.startDate > today() ? 'Trip saved on this phone. Now add its bookings: + Booking.' : 'Trip saved on this phone.');
     },
     // A new cost or day of travel starts on today's date (it used to copy the last item's date, which was easy to miss:
@@ -353,10 +393,15 @@ createApp({
     itemText(i) {
       if (i.kind === 'trip') return `Trip: ${i.data.name}`;
       if (i.kind === 'booking') return `${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''}`;
-      if (i.kind === 'check') return `Check${i.data.checkNumber ? ' #' + i.data.checkNumber : ''}${i.data.from ? ' from ' + i.data.from : ''} · ${money(Math.round(Number(i.data.amount) * 100))}${i.data.invoices ? ' · inv ' + i.data.invoices : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''}`;
+      if (i.kind === 'check') return `Check${i.data.checkNumber ? ' #' + i.data.checkNumber : ''}${i.data.from ? ' from ' + i.data.from : ''}${i.data.invoices ? ' · inv ' + i.data.invoices : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'time') return `Travel time ${i.data.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
-      const amount = i.data.kind === 'mileage' ? `${i.data.miles} mi × $${i.data.mileRate} = ${money(mileageCents(i.data.miles, i.data.mileRate))}` : money(Math.round(Number(i.data.amount) * 100));
-      return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''} · ${amount}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''}`;
+      return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
+    },
+    /** The money part of an item, shown on its own so the privacy switch can blur it (empty for trips and time). */
+    itemAmount(i) {
+      if (i.kind === 'cost' && i.data.kind === 'mileage') return `${i.data.miles} mi × $${i.data.mileRate} = ${money(mileageCents(i.data.miles, i.data.mileRate))}`;
+      if (i.kind === 'cost' || i.kind === 'check') return money(Math.round(Number(i.data.amount) * 100));
+      return '';
     },
     /** Something of this item still to send: the item, a change to it, or a photo. */
     notSent(i) {
