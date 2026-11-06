@@ -70,7 +70,7 @@
           <button class="road-tile" @click="goTime">
             <span class="road-icon c-time"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>
             <strong>Time</strong>
-            <span class="muted small">Travel hours</span>
+            <span class="muted small">Travel, site and office</span>
           </button>
           <button class="road-tile" @click="go('equipment')">
             <span class="road-icon c-equip"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="1.5"/><path d="M9 8V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V8M3 13h18M10.5 13v2.5h3V13"/></svg></span>
@@ -176,6 +176,58 @@
         </section>
       </template>
 
+      <!-- Time: the day in blocks (Homer, 2026-11-06). Travel, site time, office or drafting, each from a start to an end
+           on its project; lunch and breaks are the gaps. Travel between two jobs can be split between both projects. -->
+      <template v-if="screen === 'time'">
+        <section class="card" v-if="blockForm">
+          <h2>{{ blockForm.editId ? 'Change this block' : 'New block' }}</h2>
+          <form @submit.prevent="saveBlock()">
+            <div class="chips">
+              <button type="button" v-for="(label, k) in blockTypes" :class="{ active: blockForm.type === k }" @click="blockForm.type = k">{{ blockIcon[k] }} {{ label }}</button>
+            </div>
+            <div class="grid2">
+              <label>Date <input type="date" v-model="blockForm.date" required></label>
+              <label v-if="!(blockForm.start && blockForm.end)">Hours (or start and end) <input v-model.trim="blockForm.hours" inputmode="decimal" placeholder="1.5 or 1:30"></label>
+              <label v-else>Hours <input :value="blockHours(blockForm)" readonly></label>
+              <label>Start <input type="time" v-model="blockForm.start"></label>
+              <label>End <input type="time" v-model="blockForm.end"></label>
+            </div>
+            <label v-if="blockForm.type === 'travel' && (tripChoices.ahead.length || tripChoices.rest.length)">On a trip (optional)
+              <select v-model="blockForm.tripKey"><option value="">No, on projects</option>
+                <option v-for="t in [...tripChoices.rest, ...tripChoices.ahead]" :value="t.key">{{ t.name }}</option></select></label>
+            <template v-if="!(blockForm.type === 'travel' && blockForm.tripKey)">
+              <label>Project{{ blockForm.type === 'office' ? ' (optional)' : '' }}
+                <select v-model="blockForm.jobId"><option value="">{{ blockForm.type === 'office' ? 'General office' : 'Choose…' }}</option>
+                  <option v-for="p in summary?.projects ?? []" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+              <label v-if="blockForm.type === 'travel' && blockForm.jobId">Split with (travel on to the next job)
+                <select v-model="blockForm.splitJobId"><option value="">Not split</option>
+                  <option v-for="p in (summary?.projects ?? []).filter(x => x.id !== blockForm.jobId)" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+              <p class="muted small" v-if="blockForm.splitJobId">Each project gets half of this block{{ blockMinutes(blockForm) ? ': ' + hhmmHalf(blockForm) : '' }}.</p>
+            </template>
+            <label>Notes <input v-model="blockForm.notes" maxlength="300" :placeholder="blockForm.type === 'travel' ? 'SAT to Boerne' : blockForm.type === 'site' ? 'Framing inspection' : 'Drafting, calcs'"></label>
+            <button class="primary">Save</button> <button type="button" v-if="!blockForm.editId && blockForm.end" @click="saveBlock(true)">Save, then next block</button>
+            <button type="button" @click="blockForm = null">Cancel</button>
+          </form>
+        </section>
+        <section class="card" v-else>
+          <label>Day <input type="date" v-model="blockDay"></label>
+          <div class="row wrap road-actions">
+            <button v-for="(label, k) in blockTypes" @click="newBlock(k)">+ {{ blockIcon[k] }} {{ label }}</button>
+          </div>
+          <p class="hint" v-if="!dayBlocks.length">No time on this day yet. Add the first block: travel out, site time, or office.</p>
+          <div class="road-item" v-for="i in dayBlocks">
+            <div class="row wrap">
+              <span>{{ itemText(i) }}</span>
+              <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
+            </div>
+            <p class="bad small" v-if="i.error">{{ i.error }}</p>
+            <span><button class="link small" v-if="canChange(i)" @click="changeItem(i)">change</button>
+              <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button></span>
+          </div>
+          <p class="small" v-if="dayBlocks.length"><strong>Day total {{ hhmm(dayMinutes) }} h</strong></p>
+        </section>
+      </template>
+
       <!-- Future trip: plan one ahead, or open one already coming up. -->
       <section class="card" v-if="screen === 'plan' && !tripForm">
         <button class="primary wide" @click="planTrip">+ Plan a trip</button>
@@ -189,7 +241,7 @@
       </section>
 
       <!-- Trip now and Time: which trip -->
-      <section class="card" v-if="(screen === 'trip' || screen === 'time') && !tripForm">
+      <section class="card" v-if="screen === 'trip' && !tripForm">
         <label>Trip
           <select v-model="tripKey">
             <option value="">Choose a trip…</option>
@@ -198,8 +250,7 @@
             <optgroup label="Now and earlier" v-if="tripChoices.rest.length">
               <option v-for="t in tripChoices.rest" :value="t.key">{{ t.name }}</option></optgroup>
           </select></label>
-        <button class="wide" v-if="screen === 'trip'" @click="newTrip">+ New trip</button>
-        <p class="hint" v-if="screen === 'time' && !tripKey">Choose the trip the travel time is for.</p>
+        <button class="wide" @click="newTrip">+ New trip</button>
       </section>
 
       <section class="card" v-if="tripForm">
@@ -227,10 +278,10 @@
         </form>
       </section>
 
-      <template v-if="tripKey && !tripForm && (screen === 'trip' || screen === 'time')">
+      <template v-if="tripKey && !tripForm && screen === 'trip'">
         <div class="row wrap road-actions" v-if="!costForm && !timeForm && !bookingForm">
-          <button class="primary" v-if="screen === 'trip'" @click="newCost">+ Cost or receipt</button>
-          <button :class="{ primary: screen === 'time' }" @click="newTime">+ Travel time</button>
+          <button class="primary" @click="newCost">+ Cost or receipt</button>
+          <button @click="newTime">+ Travel time</button>
           <button v-if="screen === 'trip'" @click="newBooking">+ Booking</button>
         </div>
 
@@ -329,7 +380,7 @@
         </section>
 
         <section class="card">
-          <h2>{{ screen === 'time' ? 'Travel time on this trip' : 'On this trip, from this phone' }}</h2>
+          <h2>On this trip, from this phone</h2>
           <p class="hint" v-if="!shownTripItems.length">Nothing yet.</p>
           <div class="road-item" v-for="i in shownTripItems">
             <div class="row wrap">

@@ -151,6 +151,28 @@ async function tripRef(db, key, ref, errors) {
   return null;
 }
 
+// ---------------------------------------------------------------- Time in blocks (Homer, 2026-11-06; migration 042)
+export const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
+const clockMinutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+const clockOf = (min) => `${String(Math.floor((min % 1440) / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+
+/**
+ * A travel block shared by two projects: half the minutes each, the odd minute to the first (61 → 31 + 30). With a
+ * start time the first part ends where the second starts, so the day still reads 7:00-8:01 then 8:01-9:01... exactly.
+ */
+export function splitBlock(minutes, start = null) {
+  const first = Math.ceil(minutes / 2), second = minutes - first;
+  if (!start) return [{ minutes: first, start: null, end: null }, { minutes: second, start: null, end: null }];
+  const s0 = clockMinutes(start);
+  return [{ minutes: first, start, end: clockOf(s0 + first) }, { minutes: second, start: clockOf(s0 + first), end: clockOf(s0 + minutes) }];
+}
+
+async function activeJob(db, companyId, id) {
+  if (!isId(id)) return null;
+  const { rows: [j] } = await db.query('SELECT id FROM jobs WHERE company_id = $1 AND id = $2 AND is_active', [companyId, id]);
+  return j?.id ?? null;
+}
+
 async function cleanItem(db, key, kind, d) {
   const errors = [];
   let out;
@@ -203,6 +225,32 @@ async function cleanItem(db, key, kind, d) {
   } else if (kind === 'booking') {
     // A flight, hotel or rental car booked for the trip (Homer, 2026-11-06). Not money: a plan, put on the trip at the desk.
     out = { trip: await tripRef(db, key, d.trip, errors), ...cleanBooking(d, errors) };
+  } else if (kind === 'block') {
+    // One block of a day: travel, site time, or office/drafting, from a start to an end time (or hours), on a project.
+    out = { date: d.date, type: BLOCK_TYPES[d.type] ? d.type : null, notes: text(d.notes, 300), jobId: null };
+    if (!out.type) errors.push('choose travel, site or office');
+    if (!isIsoDate(out.date)) errors.push('the date must be a real date');
+    let minutes = null;
+    if (d.start || d.end) {
+      const start = parseClock(d.start), end = parseClock(d.end);
+      if (!start || !end) errors.push('the start and end must be times like 7:30 AM');
+      else Object.assign(out, { start, end }), minutes = shiftMinutes(start, end);
+    } else minutes = parseDuration(d.hours);
+    if (minutes == null || minutes <= 0 || minutes > 24 * 60) { if (!errors.length) errors.push('type the start and end, or hours like 1.5'); }
+    out.minutes = minutes;
+    // Travel may go on a trip (its projects share it) instead of projects.
+    if (out.type === 'travel' && d.trip) out.trip = await tripRef(db, key, d.trip, errors);
+    if (!out.trip) {
+      out.jobId = await activeJob(db, key.companyId, d.jobId);
+      if (d.jobId && !out.jobId) errors.push('that project is closed or gone');
+      if (out.type === 'travel' && d.splitJobId) {
+        out.splitJobId = await activeJob(db, key.companyId, d.splitJobId);
+        if (!out.splitJobId) errors.push('the project to split with is closed or gone');
+        else if (out.splitJobId === out.jobId) errors.push('split it with a different project');
+        else if (!out.jobId) errors.push('choose the first project too');
+      }
+      if (out.type !== 'office' && !out.jobId) errors.push(out.type === 'travel' ? 'choose the project (or the trip) the travel is for' : 'choose the project');
+    }
   } else if (kind === 'purchase') {
     // Equipment or supplies bought, not on a trip (Homer, 2026-11-06): batteries and markers for a job, a laser level.
     out = { date: d.date, category: PURCHASE_CATEGORIES[d.category] ? d.category : null, vendor: text(d.vendor, 120),
@@ -359,13 +407,16 @@ async function lockItem(c, companyId, itemId) {
  */
 async function deskData(c, companyId, item, changes) {
   const d = item.data;
-  const base = item.kind === 'cost' || item.kind === 'booking' || item.kind === 'purchase'
+  const base = item.kind === 'block'
+    ? { ...d, hours: d.start ? '' : `${Math.floor(d.minutes / 60)}:${String(d.minutes % 60).padStart(2, '0')}` }
+    : item.kind === 'cost' || item.kind === 'booking' || item.kind === 'purchase'
     ? { ...d, amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : '' }
     : item.kind === 'time'
       ? { ...d, hours: `${Math.floor(d.minutes / 60)}:${String(d.minutes % 60).padStart(2, '0')}`,
         breaks: d.breakMinutes ? `${Math.floor(d.breakMinutes / 60)}:${String(d.breakMinutes % 60).padStart(2, '0')}` : '' }
       : { ...d };
   const merged = { ...base, ...changes, trip: d.trip };
+  if (item.kind === 'block' && changes.hours !== undefined && !changes.start && !changes.end) { delete merged.start; delete merged.end; }
   if (item.kind === 'time' && changes.hours !== undefined && !changes.start && !changes.end) { delete merged.start; delete merged.end; }
   return cleanItem(c, { id: item.key_id, companyId }, item.kind, merged);
 }
@@ -428,7 +479,8 @@ export function evenShares(n) {
  *   cost → a trip cost (input: expenseAccountId, paidFromAccountId; optional tripId), with its receipt photos;
  *   time → travel time for the person who sent it;
  *   booking → a booking on the trip (not in the books; nothing to choose);
- *   purchase → equipment or supplies (input: accountId, else the usual one; paidFromAccountId), with its photos.
+ *   purchase → equipment or supplies (input: accountId, else the usual one; paidFromAccountId), with its photos;
+ *   block → time on its project (two halves for split travel), or travel time on its trip.
  */
 export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, { actor = null } = {}) {
   return withTransaction(db, async (c) => {
@@ -475,6 +527,22 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
       await done({ purchase_id: r.id });
       return { accepted: true, purchaseId: r.id };
     }
+    if (item.kind === 'block' && !d.trip) {
+      // Time on projects: one time entry, or two halves for travel split between two projects.
+      const label = `${BLOCK_TYPES[d.type]}${d.notes ? ': ' + d.notes : ''}`;
+      const parts = d.splitJobId ? splitBlock(d.minutes, d.start ?? null).map((x, n) => ({ ...x, jobId: n ? d.splitJobId : d.jobId, notes: `${label} (split)` }))
+        : [{ minutes: d.minutes, start: d.start ?? null, end: d.end ?? null, jobId: d.jobId, notes: label }];
+      const ids = [];
+      for (const x of parts) {
+        const hm = `${Math.floor(x.minutes / 60)}:${String(x.minutes % 60).padStart(2, '0')}`;
+        const t = await createTimeEntry(c, companyId, viewer,
+          { userId: item.user_id, date: d.date, hours: hm, start: x.start, end: x.end, notes: x.notes, jobId: x.jobId, tripId: null }, { actor });
+        ids.push(t.id);
+      }
+      await done({ time_entry_id: ids[0] });
+      if (ids.length > 1) await appendAudit(c, companyId, { action: 'split', entity: 'road_item', entityId: item.id, actor, payload: { timeEntryIds: ids } });
+      return { accepted: true, timeEntryIds: ids };
+    }
     const tripId = await tripFor(c, companyId, item, input.tripId || null);
     if (item.kind === 'booking') {
       const { trip, amountCents, ...b } = d;
@@ -497,7 +565,7 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
     }
     const t = await createTimeEntry(c, companyId, viewer,
       { userId: item.user_id, date: d.date, hours: `${Math.floor(d.minutes / 60)}:${String(d.minutes % 60).padStart(2, '0')}`, start: d.start, end: d.end,
-        notes: d.notes, tripId, jobId: null }, { actor });
+        notes: item.kind === 'block' ? `Travel${d.notes ? ': ' + d.notes : ''}` : d.notes, tripId, jobId: null }, { actor });
     await done({ time_entry_id: t.id, trip_id: tripId });
     return { accepted: true, tripId, timeEntryId: t.id };
   });

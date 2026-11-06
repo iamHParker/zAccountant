@@ -342,7 +342,6 @@ while you travel, even with no signal, without signing in to your books on the p
 2. On the road: **+ New trip** (name, dates, the projects it's for; type new project numbers like *2610 Garcia Barn*
    one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other; the amount or
    the miles and rate; receipt photos: **📷 Take photo**, **🖼 Choose photo** from Photos, or **📋 Paste**) and **+ Travel time** (one per day: hours, or start, end and breaks; **Save, then next day**). Everything is saved on the phone first and sent when
-   there is signal. The top of the page says how many are waiting; **Send** sends them at once.
    there is signal. The top of the page says how many are waiting; **Send now** sends them at once.
    **Planning a trip ahead:** make the trip with its future dates, then **+ Booking** for the flight, hotel and rental
    car (who, confirmation number, dates and times, price if known, details). The **Trip** pull-down lists trips under
@@ -356,9 +355,18 @@ while you travel, even with no signal, without signing in to your books on the p
 
 **The buttons.** The Road page opens on six coloured buttons, one for each job: **Check in** (green, a
 check you received), **Trip now** (orange, costs and receipts on the trip you are on), **Future trip** (blue, plan a
-trip ahead; trips coming up are listed there), **Time** (purple, travel hours for a trip), **Equipment** (teal) and
+trip ahead; trips coming up are listed there), **Time** (purple, your day in blocks: travel, site and office), **Equipment** (teal) and
 **Supplies** (amber) for things you buy that aren't on a trip. Each button opens its own
-screen; **‹ Home** at the top, or the phone's own Back, returns to the four buttons.
+screen; **‹ Home** at the top, or the phone's own Back, returns to the buttons.
+
+**Time in blocks.** Tap **Time**, pick the **Day**, and add the day one block at a time: **+ 🚗 Travel**, **+ 🏗️ Site**
+or **+ 📐 Office / drafting**. Type the **Start** and **End** (or just the hours), choose the project, and add a note
+if you like. **Save, then next block** starts the next block where this one ended, on the same project; lunch and
+breaks are simply the gaps between blocks. A travel block between two jobs can be **Split with** the next project:
+each gets half (a 1:01 drive is 0:31 and 0:30, the first ending where the second starts). Office or drafting time
+may have no project (general office). Travel for a trip can go on the trip instead. The list shows the day's blocks
+and the **Day total**. At your desk, **Trips → From the road** lists them under *Time on projects*; **Accept** makes
+each block a time entry on its project (a split block makes two), ready for the timesheet and payroll.
 
 **Equipment and supplies bought on the road.** Batteries and markers for a job, survey stakes, a new laser level:
 tap **Supplies** (used up) or **Equipment** (lasts), then **+ Supplies bought** or **+ Equipment bought**. Type the

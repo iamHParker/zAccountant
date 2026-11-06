@@ -46,6 +46,7 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `039_move_payments_on_correction.sql` | an edited invoice or bill keeps its payments: `payment_applications.document_id` may move only from a voided document to its corrected copy (trigger `payment_applications_move`) |
 | `040_trip_bookings.sql` | `trip_bookings`: a trip's plan (flight, hotel, rental car), not money; `trip_cost_id` = the cost that paid it. Road items may be `kind = 'booking'`, with `road_items.trip_booking_id` |
 | `041_road_purchases.sql` | `purchases` + `purchase_photos`: equipment (asset, with `serial_number`) or supplies (expense) bought on the road, each posting its own entry; void reverses it. Road items may be `kind = 'purchase'`, with `road_items.purchase_id` |
+| `042_road_time_blocks.sql` | Road items may be `kind = 'block'`: one block of a day (travel, site or office; start/end or minutes; project, a second project to split travel with, or a trip). Accepted as time entries; a split becomes two |
 
 ## How migrations run
 

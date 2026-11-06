@@ -223,6 +223,8 @@ const TAB_FEATURE = { payroll: 'payroll', time: 'timesheets' };
 // A trip's share table: each project's percent of each kind of cost; Travel time is the trip share (migration 038).
 // Bookings on a trip planned ahead (Homer, 2026-11-06): the flight, hotel and rental car. Not money until paid.
 const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
+// Time blocks from the Road page (migration 042).
+const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
 const BOOKING_DATES = { airfare: ['Depart', 'Return'], lodging: ['Check in', 'Check out'], rental_car: ['Pick up', 'Drop off'], other: ['From', 'To'] };
 const COST_LABEL = { airfare: 'Airfare', lodging: 'Lodging', rental_car: 'Rental car', other: 'Other' };
 const SHARE_COLS = [{ key: 'air', label: 'Air' }, { key: 'hotel', label: 'Hotel' }, { key: 'car', label: 'Rental car' }, { key: 'rest', label: 'Rest' }, { key: 'share', label: 'Travel time' }];
@@ -1644,7 +1646,7 @@ createApp({
     roadGroups() {
       const groups = new Map();
       for (const i of this.road.items) {
-        const name = i.trip?.name ?? 'Trip';
+        const name = i.trip?.name ?? (i.kind === 'block' ? 'Time on projects' : 'Trip');
         if (!groups.has(name)) groups.set(name, []);
         groups.get(name).push(i);
       }
@@ -1657,12 +1659,17 @@ createApp({
         return `New trip${i.data.endDate ? ' to ' + this.usDate(i.data.endDate) : ''}${codes.length ? ' · ' + codes.join(', ') : ''}`;
       }
       if (i.kind === 'time') return `Travel time ${i.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
+      if (i.kind === 'block') {
+        const job = (id) => this.jobLabel(this.ar.jobs.find((j) => j.id === id) ?? { name: 'a project' });
+        const where = i.trip ? '' : ` · ${i.data.jobId ? job(i.data.jobId) : 'no project'}${i.data.splitJobId ? ' + ' + job(i.data.splitJobId) + ' (split in half)' : ''}`;
+        return `${BLOCK_TYPES[i.data.type]} ${i.data.start ? i.data.start + '–' + i.data.end + ' ' : ''}(${i.hours} h)${where}${i.data.notes ? ' · ' + i.data.notes : ''}`;
+      }
       if (i.kind === 'booking') return `Booking: ${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''} · ${this.bookingWhen(i.data)}`;
       const what = i.data.kind === 'mileage' ? `${i.data.description} · ${i.data.miles} mi × $${i.data.mileRate}` : i.data.description;
       return `${what}${i.data.vendor ? ' · ' + i.data.vendor : ''}`;
     },
     /** A cost or travel time whose trip isn't in the books yet (or was dismissed) needs a trip chosen here. */
-    roadNeedsTrip(i) { return i.kind !== 'trip' && !i.trip?.tripId && i.trip?.tripStatus !== 'pending'; },
+    roadNeedsTrip(i) { return i.kind !== 'trip' && !(i.kind === 'block' && !i.trip) && !i.trip?.tripId && i.trip?.tripStatus !== 'pending'; },
     /** The card a waiting cost goes on: the one picked on its row, else the card last used for its kind, else Paid with. */
     roadCard(i) {
       const picked = this.road.cardFor[i.id];
@@ -1690,7 +1697,7 @@ createApp({
       r.busy = true;
       try {
         const ok = await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/accept`, body),
-          i.kind === 'trip' ? 'Trip added, with its projects sharing it evenly. Open it to change the shares.' : 'Added to the trip.');
+          i.kind === 'trip' ? 'Trip added, with its projects sharing it evenly. Open it to change the shares.' : i.kind === 'block' && !i.trip ? 'Time added to its project.' : 'Added to the trip.');
         if (ok) await this.loadTrips();
       } finally { r.busy = false; }
     },
@@ -1839,7 +1846,7 @@ createApp({
       const rows = [
         ...this.tripRoadItems().filter((i) => i.kind !== 'booking').map((i) => ({ key: `r${i.id}`, type: 'road', item: i, date: i.data.date,
           entry: i.kind === 'time' ? `Travel time${i.data.notes ? ' · ' + i.data.notes : ''}` : this.roadLabel(i),
-          cents: i.kind === 'cost' ? i.data.amountCents : null, hours: i.kind === 'time' ? i.hours : null, photos: i.photos.length })),
+          cents: i.kind === 'cost' ? i.data.amountCents : null, hours: i.kind === 'time' || i.kind === 'block' ? i.hours : null, photos: i.photos.length })),
         ...t.costs.map((x) => ({ key: `c${x.id}`, type: 'cost', x, date: x.date, cents: x.amountCents, photos: x.photoCount,
           entry: `${x.description}${x.vendor ? ' · ' + x.vendor : ''}${x.kind === 'mileage' ? ' · ' + x.miles + ' mi × ' + x.mileRateCents + '¢' : ''}` })),
         ...t.time.map((x) => ({ key: `t${x.id}`, type: 'time', x, date: x.date, hours: x.hours, entry: `Travel time${x.notes ? ' · ' + x.notes : ''}` })),
