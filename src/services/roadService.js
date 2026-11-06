@@ -17,6 +17,7 @@ import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
 import { createTimeEntry } from './timesheetService.js';
 import { receiptReadingOn } from './receiptReader.js';
+import { addPurchase, PURCHASE_CATEGORIES } from './purchaseService.js';
 import { createTrip, addTripCost, addBooking, listBookings, cleanBooking, COST_KINDS, BOOKING_KINDS, mileageAmount, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_COST } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -202,6 +203,22 @@ async function cleanItem(db, key, kind, d) {
   } else if (kind === 'booking') {
     // A flight, hotel or rental car booked for the trip (Homer, 2026-11-06). Not money: a plan, put on the trip at the desk.
     out = { trip: await tripRef(db, key, d.trip, errors), ...cleanBooking(d, errors) };
+  } else if (kind === 'purchase') {
+    // Equipment or supplies bought, not on a trip (Homer, 2026-11-06): batteries and markers for a job, a laser level.
+    out = { date: d.date, category: PURCHASE_CATEGORIES[d.category] ? d.category : null, vendor: text(d.vendor, 120),
+      description: text(d.description, 300), jobId: null };
+    if (!out.category) errors.push('say whether it is equipment or supplies');
+    out.description ??= out.category ? PURCHASE_CATEGORIES[out.category] : null;
+    if (out.category === 'equipment') out.serialNumber = text(d.serialNumber, 60);
+    if (!isIsoDate(out.date)) errors.push('the date must be a real date');
+    let c = null;
+    try { c = toCents(String(d.amount ?? '')); } catch { /* reported below */ }
+    if (c == null || c <= 0) errors.push('the amount must be a dollar amount over $0.00');
+    else out.amountCents = c;
+    if (isId(d.jobId)) {
+      const { rows: [j] } = await db.query('SELECT id FROM jobs WHERE company_id = $1 AND id = $2', [key.companyId, d.jobId]);
+      out.jobId = j?.id ?? null;
+    }
   } else if (kind === 'check') {
     // A check received (Homer, 2026-10-26): who paid, how much, its number and the invoice numbers it pays.
     out = { date: d.date, from: text(d.from, 120), checkNumber: text(d.checkNumber, 30), invoices: text(d.invoices, 200), notes: text(d.notes, 300) };
@@ -253,7 +270,7 @@ export async function receivePhoto(db, key, itemClientId, { clientId, picture })
   if (p.bytes.length > MAX_PHOTO_BYTES) throw new LedgerError('The photo is too large (3 MB at most)');
   const { rows: [item] } = typeof itemClientId === 'string' ? await db.query(
     'SELECT id, kind, status FROM road_items WHERE key_id = $1 AND client_id = $2 FOR UPDATE', [key.id, itemClientId]) : { rows: [] };
-  if (!item || !['cost', 'check'].includes(item.kind)) throw new LedgerError('Send the cost before its photos');
+  if (!item || !['cost', 'check', 'purchase'].includes(item.kind)) throw new LedgerError('Send the cost before its photos');
   const { rows: [had] } = await db.query('SELECT 1 FROM road_photos WHERE item_id = $1 AND client_id = $2', [item.id, clientId]);
   if (had) return { clientId, duplicate: true };
   if (item.status !== 'pending') throw new LedgerError(`That ${item.kind} was already reviewed at the desk; add the photo there`);
@@ -342,7 +359,7 @@ async function lockItem(c, companyId, itemId) {
  */
 async function deskData(c, companyId, item, changes) {
   const d = item.data;
-  const base = item.kind === 'cost' || item.kind === 'booking'
+  const base = item.kind === 'cost' || item.kind === 'booking' || item.kind === 'purchase'
     ? { ...d, amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : '' }
     : item.kind === 'time'
       ? { ...d, hours: `${Math.floor(d.minutes / 60)}:${String(d.minutes % 60).padStart(2, '0')}`,
@@ -410,7 +427,8 @@ export function evenShares(n) {
  *          and the trip is made with the projects sharing it evenly (change the shares on the trip afterwards);
  *   cost → a trip cost (input: expenseAccountId, paidFromAccountId; optional tripId), with its receipt photos;
  *   time → travel time for the person who sent it;
- *   booking → a booking on the trip (not in the books; nothing to choose).
+ *   booking → a booking on the trip (not in the books; nothing to choose);
+ *   purchase → equipment or supplies (input: accountId, else the usual one; paidFromAccountId), with its photos.
  */
 export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, { actor = null } = {}) {
   return withTransaction(db, async (c) => {
@@ -445,6 +463,17 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
         jobs: jobIds.map((jobId, i) => ({ jobId, share: (shares[i] / 100).toFixed(2) })) }, { actor });
       await done({ trip_id: trip.id });
       return { accepted: true, tripId: trip.id };
+    }
+    if (item.kind === 'purchase') {
+      // Equipment or supplies: posted to the account chosen at the desk (else the usual one for its kind), photos kept.
+      const r = await addPurchase(c, companyId, { date: d.date, category: d.category, vendor: d.vendor, description: d.description,
+        serialNumber: d.serialNumber, amountCents: d.amountCents, jobId: d.jobId, accountId: input.accountId, paidFromAccountId: input.paidFromAccountId },
+      { actor, idempotencyKey: `road-${item.id}` });
+      await c.query(
+        `INSERT INTO purchase_photos (company_id, purchase_id, picture, picture_type, created_by)
+         SELECT company_id, $2, picture, picture_type, $3 FROM road_photos WHERE item_id = $1 ORDER BY created_at, id`, [item.id, r.id, actor]);
+      await done({ purchase_id: r.id });
+      return { accepted: true, purchaseId: r.id };
     }
     const tripId = await tripFor(c, companyId, item, input.tripId || null);
     if (item.kind === 'booking') {
@@ -485,9 +514,9 @@ export async function acceptRoadItems(db, companyId, viewer, { itemIds, expenseA
   return withTransaction(db, async (c) => {
     await lockCompany(c, companyId);
     const { rows } = await c.query(
-      `SELECT id, kind FROM road_items WHERE company_id = $1 AND id = ANY($2::uuid[]) AND status = 'pending' AND kind <> 'check'
+      `SELECT id, kind FROM road_items WHERE company_id = $1 AND id = ANY($2::uuid[]) AND status = 'pending' AND kind NOT IN ('check', 'purchase')
         ORDER BY (kind = 'trip') DESC, (kind = 'booking') DESC, received_at, id`, [companyId, [...new Set(itemIds)]]);
-    if (rows.length !== new Set(itemIds).size) throw new LedgerError('Some of those items were already reviewed (or are checks); refresh and try again');
+    if (rows.length !== new Set(itemIds).size) throw new LedgerError('Some of those items were already reviewed (or are checks or purchases); refresh and try again');
     const out = [];
     for (const r of rows) {
       const card = isId(cardFor[r.id]) ? cardFor[r.id] : paidFromAccountId;

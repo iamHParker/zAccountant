@@ -706,6 +706,56 @@
           </div>
         </div>
       </div>
+      <!-- Equipment and supplies bought on the road (the phone's Road page): accept each into the books here. -->
+      <div class="card road-inbox" v-if="tab === 'bills' && !ar.showPay && !ar.showDoc && (ar.roadBuys.length || ar.buys.length)">
+        <h2>Bought on the road</h2>
+        <template v-if="ar.roadBuys.length">
+          <p class="hint">Sent from your phone. Equipment starts on 1500 Equipment (it lasts, so it stays on the books and goes on the equipment list);
+            supplies on 6200 Office Supplies (used up). Change either on its row. When the card's statement comes into Banking, <strong>Match</strong> the line to this entry so it isn't counted twice.</p>
+          <div class="road-item" v-for="i in ar.roadBuys">
+            <div class="row wrap">
+              <span><span class="muted small">{{ usDate(i.data.date) }}</span> <span class="tag">{{ i.data.category === 'equipment' ? 'Equipment' : 'Supplies' }}</span>
+                {{ i.data.description }}{{ i.data.vendor ? ' · ' + i.data.vendor : '' }}{{ i.data.serialNumber ? ' · serial ' + i.data.serialNumber : '' }}{{ i.data.jobId ? ' · ' + jobLabel(ar.jobs.find(j => j.id === i.data.jobId) ?? { name: 'a project' }) : '' }}</span>
+              <strong class="num">{{ money(i.data.amountCents) }}</strong>
+            </div>
+            <div class="photo-strip" v-if="i.photos.length">
+              <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
+            </div>
+            <div class="grid2" v-if="can('bills')">
+              <label class="small">Goes to
+                <select :value="buyAccount(i)" @change="ar.buyAcct[i.id] = $event.target.value"><option value="">Choose…</option><option v-for="a in buyAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+              <label class="small">Paid with
+                <select :value="buyCardFor(i)" @change="ar.buyCard[i.id] = $event.target.value"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+            </div>
+            <div class="row wrap" v-if="can('bills')">
+              <span class="muted small">from {{ i.keyName }}</span>
+              <span><button class="primary small" :disabled="ar.buyBusy" @click="acceptBuy(i)">Accept</button> <button class="small" @click="dismissBuy(i)">Dismiss</button></span>
+            </div>
+          </div>
+        </template>
+        <div class="seg">
+          <button :class="{ active: ar.buyView === 'recent' }" @click="buyViewSet('recent')">Recent</button>
+          <button :class="{ active: ar.buyView === 'equipment' }" @click="buyViewSet('equipment')">Equipment list</button>
+        </div>
+        <p class="hint" v-if="!ar.buys.length">{{ ar.buyView === 'equipment' ? 'No equipment on the books yet.' : 'Nothing accepted yet.' }}</p>
+        <div class="table-scroll" v-else>
+          <table class="data">
+            <tr><th>Date</th><th>What</th><th v-if="ar.buyView === 'equipment'">Serial</th><th>From</th><th>Account</th><th class="num">Amount</th><th>Photos</th><th></th></tr>
+            <tr v-for="p in ar.buys" :class="{ muted: p.status === 'void' }">
+              <td>{{ usDate(p.date) }}</td>
+              <td>{{ p.description }}<span class="muted small" v-if="ar.buyView !== 'equipment'"> · {{ p.category === 'equipment' ? 'equipment' : 'supplies' }}</span>{{ p.jobCode ? ' · ' + p.jobCode : '' }}{{ p.status === 'void' ? ' (void)' : '' }}</td>
+              <td v-if="ar.buyView === 'equipment'">{{ p.serialNumber || '' }}</td>
+              <td>{{ p.vendor || '' }}</td>
+              <td>{{ p.accountCode }} · {{ p.accountName }}</td>
+              <td class="num">{{ money(p.amountCents) }}</td>
+              <td><a v-for="(id, n) in p.photos" :href="buyPhotoUrl(p, id)" target="_blank" rel="noopener">{{ n ? ' ' : '' }}📷</a></td>
+              <td><button class="link" v-if="p.status === 'posted' && can('bills')" @click="voidBuy(p)">void</button></td>
+            </tr>
+            <tr v-if="ar.buyView === 'equipment'"><td></td><th colspan="4">Total equipment ({{ ar.buys.length }})</th>
+              <th class="num">{{ money(ar.buys.reduce((t, p) => t + p.amountCents, 0)) }}</th><td></td><td></td></tr>
+          </table>
+        </div>
+      </div>
       <!-- Old invoices (written before zAccountant, still unpaid): drop the PDF, check the filled-in form, save, then apply payments. -->
       <label v-if="tab === 'sales' && can('invoices') && !ar.showDoc" class="logo-drop old-invoice-drop" :class="{ over: ar.pdfOver, busy: ar.pdfBusy }"
         @dragover.prevent="ar.pdfOver = true" @dragleave="ar.pdfOver = false" @drop.prevent="dropOldInvoice">

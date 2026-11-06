@@ -354,10 +354,22 @@ while you travel, even with no signal, without signing in to your books on the p
    bookings (nothing to choose; they go on the trip, not in the books), costs and travel time. **Dismiss** anything that shouldn't go in the books. On the phone each item then says
    *In the books*; **Clear items already in the books** tidies the list.
 
-**The four buttons.** The Road page opens on four coloured buttons, one for each job: **Check in** (green, a
+**The buttons.** The Road page opens on six coloured buttons, one for each job: **Check in** (green, a
 check you received), **Trip now** (orange, costs and receipts on the trip you are on), **Future trip** (blue, plan a
-trip ahead; trips coming up are listed there) and **Time** (purple, travel hours for a trip). Each button opens its own
+trip ahead; trips coming up are listed there), **Time** (purple, travel hours for a trip), **Equipment** (teal) and
+**Supplies** (amber) for things you buy that aren't on a trip. Each button opens its own
 screen; **‹ Home** at the top, or the phone's own Back, returns to the four buttons.
+
+**Equipment and supplies bought on the road.** Batteries and markers for a job, survey stakes, a new laser level:
+tap **Supplies** (used up) or **Equipment** (lasts), then **+ Supplies bought** or **+ Equipment bought**. Type the
+amount, the store, what it was and, if you like, the project it was for. For equipment, add the serial or model number:
+it goes on your equipment list. A receipt photo is optional for small supplies (the card statement shows the store),
+but keep one for equipment and anything large. At your desk, **Bills → Bought on the road** shows what arrived:
+equipment starts on **1500 Equipment** (it stays on your books as something you own), supplies on **6200 Office
+Supplies** (an expense). Change the account on the row if you like (your CPA may prefer small tools as an expense),
+choose what it was paid with, and press **Accept**. **Equipment list** shows every piece of equipment on the books,
+with its serial number and total. When the card's statement comes into Banking, **Match** the Home Depot line to the
+purchase so it isn't counted twice. **void** on a row reverses it (returned, or entered by mistake).
 
 **Hiding amounts from people nearby.** The eye button at the top right blurs every dollar amount on the page, and the
 receipt and check photos, so someone looking over your shoulder can't read how much you deposited or spent. An amount

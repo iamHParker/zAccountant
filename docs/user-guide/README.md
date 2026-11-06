@@ -60,6 +60,7 @@ Find the task, follow the link.
 - [add projects, many at once from folder names](tier-1-books.md#projects)
 - [track a trip's costs, mileage and travel time, shared by projects](tier-1-books.md#trips)
 - [jot down costs, receipts and checks on my phone (Road page)](tier-1-books.md#your-phone-on-the-road)
+- [record equipment or supplies I bought on the road, and see my equipment list](tier-1-books.md#your-phone-on-the-road)
 - [import mileage from MileIQ](tier-1-books.md#mileage-from-mileiq)
 
 **Banking**

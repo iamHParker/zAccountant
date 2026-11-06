@@ -72,6 +72,16 @@
             <strong>Time</strong>
             <span class="muted small">Travel hours</span>
           </button>
+          <button class="road-tile" @click="go('equipment')">
+            <span class="road-icon c-equip"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="1.5"/><path d="M9 8V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V8M3 13h18M10.5 13v2.5h3V13"/></svg></span>
+            <strong>Equipment</strong>
+            <span class="muted small">{{ buysWaiting('equipment') ? `${buysWaiting('equipment')} not in the books yet` : 'Tools that last' }}</span>
+          </button>
+          <button class="road-tile" @click="go('supplies')">
+            <span class="road-icon c-supply"><svg viewBox="0 0 24 24" fill="none" stroke="#1d1500" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h16l-1.3 11.2a1.5 1.5 0 0 1-1.5 1.3H6.8a1.5 1.5 0 0 1-1.5-1.3Z"/><path d="M8.5 8V6.5a3.5 3.5 0 0 1 7 0V8"/></svg></span>
+            <strong>Supplies</strong>
+            <span class="muted small">{{ buysWaiting('supplies') ? `${buysWaiting('supplies')} not in the books yet` : 'Batteries, markers…' }}</span>
+          </button>
         </div>
         <p class="muted small center" v-if="summary">{{ summary.company }} · {{ summary.user }} · key works until {{ usDate(summary.expiresOn) }}</p>
         <p class="muted small center" v-if="!waiting && items.length">Everything on this phone has been sent.</p>
@@ -118,6 +128,48 @@
             </div>
             <p class="bad small" v-if="i.error">{{ i.error }}</p>
             <p class="muted small" v-if="i.status === 'accepted'">To change it now, use your desk: Sales → Receive payment.</p>
+            <span><button class="link small" v-if="canChange(i)" @click="changeItem(i)">change</button>
+              <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button></span>
+          </div>
+        </section>
+      </template>
+
+      <!-- Equipment and Supplies: bought, not on a trip (Homer, 2026-11-06). The desk books each to the right account. -->
+      <template v-if="screen === 'equipment' || screen === 'supplies'">
+        <section class="card" v-if="buyForm">
+          <h2>{{ buyForm.editId ? 'Change this purchase' : (buyForm.category === 'equipment' ? 'Equipment bought' : 'Supplies bought') }}</h2>
+          <form @submit.prevent="saveBuy">
+            <div class="grid2">
+              <label>Date <input type="date" v-model="buyForm.date" required></label>
+              <label>Amount ($) <input class="amt" v-model.trim="buyForm.amount" inputmode="decimal" placeholder="0.00" required autocomplete="off"></label>
+            </div>
+            <label>Store (optional) <input v-model="buyForm.vendor" maxlength="120" placeholder="Home Depot, Lowe's…"></label>
+            <label>What it was <input v-model="buyForm.description" maxlength="300" :placeholder="buyForm.category === 'equipment' ? 'Laser level' : 'Batteries, markers'"></label>
+            <label v-if="buyForm.category === 'equipment'">Serial or model number (optional) <input v-model.trim="buyForm.serialNumber" maxlength="60" autocapitalize="characters" autocomplete="off"></label>
+            <label>For a project (optional)
+              <select v-model="buyForm.jobId"><option value="">None</option><option v-for="p in summary?.projects ?? []" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+            <div class="photo-row" @dragover.prevent @drop.prevent="dropPhotos"><span class="label-like">Receipt photos (optional, but keep one for a big purchase)</span>
+              <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
+              <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
+              <button type="button" class="photo-btn" @click="pastePhotos">📋 Paste</button>
+              <button type="button" class="photo-btn" v-if="canRead && buyForm.photos.length" :disabled="reading" @click="readReceipt">{{ reading ? 'Reading the receipt…' : '✨ Fill in from the receipt' }}</button></div>
+            <div class="photo-strip" v-if="buyForm.photos.length">
+              <span v-for="(p, i) in buyForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Receipt"><button type="button" class="link" v-if="!photoSent(buyForm, p)" @click="buyForm.photos.splice(i, 1)">remove</button></span>
+            </div>
+            <button class="primary" :disabled="busy">Save</button> <button type="button" @click="buyForm = null">Cancel</button>
+          </form>
+        </section>
+        <section class="card" v-else>
+          <button class="primary wide" @click="newBuy">+ {{ screen === 'equipment' ? 'Equipment bought' : 'Supplies bought' }}</button>
+          <p class="hint" v-if="screen === 'equipment'">Something that lasts: a tool, an instrument, a computer. At your desk it goes on the equipment list.</p>
+          <p class="hint" v-else>Used up: batteries, markers, stakes, paper.</p>
+          <div class="road-item" v-for="i in buyItems">
+            <div class="row wrap">
+              <span><span class="muted small">{{ usDate(i.data.date) }}</span> {{ itemText(i) }} <span class="amt">{{ itemAmount(i) }}</span></span>
+              <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
+            </div>
+            <p class="bad small" v-if="i.error">{{ i.error }}</p>
+            <p class="muted small" v-if="i.status === 'accepted'">In the books. To change it now, use your desk: Bills → Bought on the road.</p>
             <span><button class="link small" v-if="canChange(i)" @click="changeItem(i)">change</button>
               <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button></span>
           </div>
