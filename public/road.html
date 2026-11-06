@@ -18,8 +18,13 @@
     <div class="brand">z<span>Accountant</span> <span class="muted small">Road</span></div>
     <div class="road-status" v-if="key">
       <span class="pill" :class="online ? 'ok' : 'warn'">{{ online ? 'Online' : 'No signal' }}</span>
-      <button class="small" v-if="waiting" :disabled="syncing || !online" @click="sync">{{ syncing ? 'Sending…' : `Send ${waiting} now` }}</button>
-      <span class="muted small" v-else-if="items.length">All sent</span>
+      <button class="small" v-if="waiting" :disabled="syncing || !online" @click="sync">{{ syncing ? 'Sending…' : `Send ${waiting}` }}</button>
+      <!-- Privacy (Homer, 2026-11-06): blur every dollar amount and receipt photo, so nobody reading over a shoulder sees a deposit. -->
+      <button class="eye-btn" :aria-pressed="hide ? 'true' : 'false'" :title="hide ? 'Amounts hidden. Tap to show them' : 'Amounts showing. Tap to hide them'"
+        :aria-label="hide ? 'Show amounts' : 'Hide amounts'" @click="toggleHide">
+        <svg v-if="hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c5 0 9 4.5 10 7a13 13 0 0 1-3 4.1M6.5 6.6C4.3 8 2.7 10.1 2 12c1 2.5 5 7 10 7a9.6 9.6 0 0 0 4.6-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12c1-2.5 5-7 10-7s9 4.5 10 7c-1 2.5-5 7-10 7S3 14.5 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
     </div>
   </header>
   <main>
@@ -43,48 +48,96 @@
         <p class="hint">What's on this phone is kept. Make a new key at your desk and scan it; then press Send.</p>
         <button @click="forgetKey">Scan a new key</button>
       </section>
-      <p class="muted small" v-if="summary">{{ summary.company }} · {{ summary.user }} · key works until {{ usDate(summary.expiresOn) }}</p>
 
-      <!-- A check received (the road is also when deposits get made): it becomes the payment at the desk, on Sales. -->
-      <section class="card" v-if="checkForm">
-        <h2>{{ checkForm.editId ? 'Change this check' : 'Check received' }}</h2>
-        <form @submit.prevent="saveCheck">
-          <div class="grid2">
-            <label>Date <input type="date" v-model="checkForm.date" required></label>
-            <label>Amount ($) <input v-model.trim="checkForm.amount" inputmode="decimal" placeholder="0.00" required></label>
+      <!-- Home: four coloured buttons, one per job (Homer, 2026-11-06; colours and look borrowed from Lighthouse's tool rail). -->
+      <template v-if="screen === 'home'">
+        <div class="road-home" role="group" aria-label="What to record">
+          <button class="road-tile" @click="go('check')">
+            <span class="road-icon c-check"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="1.5"/><path d="M6 14.5h6M6 11h3"/><path d="M17 9.2v5.6M18.6 10.2c-.4-.6-1-.9-1.7-.9-.9 0-1.6.5-1.6 1.3 0 1.8 3.4 1 3.4 2.8 0 .8-.8 1.3-1.7 1.3-.8 0-1.4-.3-1.8-.9"/></svg></span>
+            <strong>Check in</strong>
+            <span class="muted small">{{ checksWaiting ? `${checksWaiting} not in the books yet` : 'A check you received' }}</span>
+          </button>
+          <button class="road-tile" @click="go('trip')">
+            <span class="road-icon c-trip"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5V12l2.2-4.8A1.5 1.5 0 0 1 6.6 6.3h10.8a1.5 1.5 0 0 1 1.4.9L21 12v4.5a1 1 0 0 1-1 1h-1.5M5.5 17.5H4a1 1 0 0 1-1-1M3 12h18"/><circle cx="7.5" cy="17.5" r="2"/><circle cx="16.5" cy="17.5" r="2"/><path d="M9.5 17.5h5"/></svg></span>
+            <strong>Trip now</strong>
+            <span class="muted small">{{ tripName || 'Costs and receipts' }}</span>
+          </button>
+          <button class="road-tile" @click="go('plan')">
+            <span class="road-icon c-plan"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="1.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><path d="M10 15h6M13.5 12.5 16 15l-2.5 2.5"/></svg></span>
+            <strong>Future trip</strong>
+            <span class="muted small">{{ upcomingTrips.length ? `${upcomingTrips.length} coming up` : 'Plan one ahead' }}</span>
+          </button>
+          <button class="road-tile" @click="goTime">
+            <span class="road-icon c-time"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>
+            <strong>Time</strong>
+            <span class="muted small">Travel hours</span>
+          </button>
+        </div>
+        <p class="muted small center" v-if="summary">{{ summary.company }} · {{ summary.user }} · key works until {{ usDate(summary.expiresOn) }}</p>
+        <p class="muted small center" v-if="!waiting && items.length">Everything on this phone has been sent.</p>
+      </template>
+
+      <!-- Every other screen: a way back home, and its coloured icon as the title. -->
+      <div class="road-head" v-else>
+        <button class="link" @click="goHome">‹ Home</button>
+        <h1><span class="road-icon sm" :class="screens[screen].color"></span>{{ screens[screen].title }}</h1>
+      </div>
+
+      <!-- Check in: a check received (the road is also when deposits get made). It becomes the payment at the desk, on Sales. -->
+      <template v-if="screen === 'check'">
+        <section class="card" v-if="checkForm">
+          <h2>{{ checkForm.editId ? 'Change this check' : 'Check received' }}</h2>
+          <form @submit.prevent="saveCheck">
+            <div class="grid2">
+              <label>Date <input type="date" v-model="checkForm.date" required></label>
+              <label>Amount ($) <input class="amt" v-model.trim="checkForm.amount" inputmode="decimal" placeholder="0.00" required autocomplete="off"></label>
+            </div>
+            <label>From (who paid) <input v-model="checkForm.from" maxlength="120" placeholder="Doe Law"></label>
+            <div class="grid2">
+              <label>Check number <input v-model.trim="checkForm.checkNumber" maxlength="30" inputmode="numeric"></label>
+              <label>Invoice number(s) <input v-model="checkForm.invoices" maxlength="200" placeholder="26-124, 26-130"></label>
+            </div>
+            <label>Notes <input v-model="checkForm.notes" maxlength="300" placeholder="Deposited at Frost, Selma"></label>
+            <div class="photo-row"><span class="label-like">Photos (check, remittance)</span>
+              <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
+              <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
+              <button type="button" class="photo-btn" @click="pastePhotos">📋 Paste</button></div>
+            <div class="photo-strip" v-if="checkForm.photos.length">
+              <span v-for="(p, i) in checkForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Check"><button type="button" class="link" v-if="!photoSent(checkForm, p)" @click="checkForm.photos.splice(i, 1)">remove</button></span>
+            </div>
+            <button class="primary" :disabled="busy">Save</button> <button type="button" @click="checkForm = null">Cancel</button>
+          </form>
+        </section>
+        <section class="card" v-else>
+          <button class="primary wide" @click="newCheck">+ Check received</button>
+          <p class="hint" v-if="!checkItems.length">No checks on this phone yet.</p>
+          <div class="road-item" v-for="i in checkItems">
+            <div class="row wrap">
+              <span><span class="muted small">{{ usDate(i.data.date) }}</span> {{ itemText(i) }} <span class="amt">{{ itemAmount(i) }}</span></span>
+              <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
+            </div>
+            <p class="bad small" v-if="i.error">{{ i.error }}</p>
+            <p class="muted small" v-if="i.status === 'accepted'">To change it now, use your desk: Sales → Receive payment.</p>
+            <span><button class="link small" v-if="canChange(i)" @click="changeItem(i)">change</button>
+              <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button></span>
           </div>
-          <label>From (who paid) <input v-model="checkForm.from" maxlength="120" placeholder="Doe Law"></label>
-          <div class="grid2">
-            <label>Check number <input v-model.trim="checkForm.checkNumber" maxlength="30" inputmode="numeric"></label>
-            <label>Invoice number(s) <input v-model="checkForm.invoices" maxlength="200" placeholder="26-124, 26-130"></label>
-          </div>
-          <label>Notes <input v-model="checkForm.notes" maxlength="300" placeholder="Deposited at Frost, Selma"></label>
-          <div class="photo-row"><span class="label-like">Photos (check, remittance)</span>
-            <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
-            <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
-            <button type="button" class="photo-btn" @click="pastePhotos">📋 Paste</button></div>
-          <div class="photo-strip" v-if="checkForm.photos.length">
-            <span v-for="(p, i) in checkForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Check"><button type="button" class="link" v-if="!photoSent(checkForm, p)" @click="checkForm.photos.splice(i, 1)">remove</button></span>
-          </div>
-          <button class="primary" :disabled="busy">Save</button> <button type="button" @click="checkForm = null">Cancel</button>
-        </form>
-      </section>
-      <section class="card" v-else-if="!tripForm && !costForm && !timeForm">
-        <button class="wide" @click="newCheck">+ Check received</button>
-        <div class="road-item" v-for="i in checkItems">
+        </section>
+      </template>
+
+      <!-- Future trip: plan one ahead, or open one already coming up. -->
+      <section class="card" v-if="screen === 'plan' && !tripForm">
+        <button class="primary wide" @click="planTrip">+ Plan a trip</button>
+        <p class="hint" v-if="!upcomingTrips.length">No trips coming up.</p>
+        <div class="road-item" v-for="t in upcomingTrips">
           <div class="row wrap">
-            <span><span class="muted small">{{ usDate(i.data.date) }}</span> {{ itemText(i) }}</span>
-            <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
+            <span><span class="muted small">{{ usDate(t.startDate) }}</span> {{ t.name }}</span>
+            <button class="small" @click="openTrip(t.key)">Open</button>
           </div>
-          <p class="bad small" v-if="i.error">{{ i.error }}</p>
-          <p class="muted small" v-if="i.status === 'accepted'">To change it now, use your desk: Sales → Receive payment.</p>
-          <span><button class="link small" v-if="canChange(i)" @click="changeItem(i)">change</button>
-            <button class="link small" v-if="!i.sentItem" @click="removeItem(i)">remove</button></span>
         </div>
       </section>
 
-      <!-- Which trip -->
-      <section class="card" v-if="!tripForm && !checkForm">
+      <!-- Trip now and Time: which trip -->
+      <section class="card" v-if="(screen === 'trip' || screen === 'time') && !tripForm">
         <label>Trip
           <select v-model="tripKey">
             <option value="">Choose a trip…</option>
@@ -93,11 +146,12 @@
             <optgroup label="In zAccountant" v-if="serverTrips.length">
               <option v-for="t in serverTrips" :value="'s:' + t.id">{{ t.name }}</option></optgroup>
           </select></label>
-        <button class="primary wide" @click="newTrip">+ New trip</button>
+        <button class="wide" v-if="screen === 'trip'" @click="newTrip">+ New trip</button>
+        <p class="hint" v-if="screen === 'time' && !tripKey">Choose the trip the travel time is for.</p>
       </section>
 
       <section class="card" v-if="tripForm">
-        <h2>{{ tripForm.editId ? 'Change this trip' : 'New trip' }}</h2>
+        <h2>{{ tripForm.editId ? 'Change this trip' : (tripForm.planning ? 'Plan a trip' : 'New trip') }}</h2>
         <form @submit.prevent="saveTrip">
           <label>Name <input v-model="tripForm.name" maxlength="120" required placeholder="Dallas, Oct 4-6"></label>
           <div class="grid2">
@@ -120,10 +174,10 @@
         </form>
       </section>
 
-      <template v-if="tripKey && !tripForm && !checkForm">
+      <template v-if="tripKey && !tripForm && (screen === 'trip' || screen === 'time')">
         <div class="row wrap road-actions" v-if="!costForm && !timeForm">
-          <button class="primary" @click="newCost">+ Cost or receipt</button>
-          <button @click="newTime">+ Travel time</button>
+          <button class="primary" v-if="screen === 'trip'" @click="newCost">+ Cost or receipt</button>
+          <button :class="{ primary: screen === 'time' }" @click="newTime">+ Travel time</button>
         </div>
 
         <section class="card" v-if="costForm">
@@ -138,9 +192,9 @@
                 <label>Miles <input v-model.trim="costForm.miles" inputmode="decimal" placeholder="212.4" required></label>
                 <label>Rate per mile ($) <input v-model.trim="costForm.mileRate" inputmode="decimal" placeholder="e.g. 0.70" required></label>
               </div>
-              <p class="muted small" v-if="mileageText">{{ mileageText }}</p>
+              <p class="muted small" v-if="mileageText"><span class="amt">{{ mileageText }}</span></p>
             </template>
-            <label v-else>Amount ($) <input v-model.trim="costForm.amount" inputmode="decimal" placeholder="0.00" required></label>
+            <label v-else>Amount ($) <input class="amt" v-model.trim="costForm.amount" inputmode="decimal" placeholder="0.00" required autocomplete="off"></label>
             <label>Paid to (optional) <input v-model="costForm.vendor" maxlength="120" placeholder="Southwest, Avis, NTTA…"></label>
             <label>What it was <input v-model="costForm.description" maxlength="300" :placeholder="kinds[costForm.kind]"></label>
             <div class="photo-row"><span class="label-like">Receipt photos</span>
@@ -153,7 +207,6 @@
             <button class="primary" :disabled="busy">Save</button> <button type="button" @click="costForm = null">Cancel</button>
           </form>
         </section>
-
         <section class="card" v-if="timeForm">
           <h2>{{ timeForm.editId ? 'Change this travel time' : 'Travel time' }}</h2>
           <form @submit.prevent="saveTime()">
@@ -176,11 +229,11 @@
         </section>
 
         <section class="card">
-          <h2>On this trip, from this phone</h2>
-          <p class="hint" v-if="!tripItems.length">Nothing yet.</p>
-          <div class="road-item" v-for="i in tripItems">
+          <h2>{{ screen === 'time' ? 'Travel time on this trip' : 'On this trip, from this phone' }}</h2>
+          <p class="hint" v-if="!shownTripItems.length">Nothing yet.</p>
+          <div class="road-item" v-for="i in shownTripItems">
             <div class="row wrap">
-              <span><span class="muted small">{{ usDate(i.data.date ?? i.data.startDate) }}</span> {{ itemText(i) }}</span>
+              <span><span class="muted small">{{ usDate(i.data.date ?? i.data.startDate) }}</span> {{ itemText(i) }} <span class="amt" v-if="itemAmount(i)">{{ itemAmount(i) }}</span></span>
               <span class="pill" :class="statusClass(i)">{{ statusText(i) }}</span>
             </div>
             <p class="bad small" v-if="i.error">{{ i.error }}</p>
@@ -191,7 +244,7 @@
         </section>
       </template>
 
-      <p class="center"><button class="link small" v-if="items.some(i => ['accepted', 'dismissed'].includes(i.status))" @click="clearDone">Clear items already in the books</button></p>
+      <p class="center" v-if="screen === 'home'"><button class="link small" v-if="items.some(i => ['accepted', 'dismissed'].includes(i.status))" @click="clearDone">Clear items already in the books</button></p>
     </template>
   </main>
 </div>
