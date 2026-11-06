@@ -16,6 +16,7 @@ import { randomToken } from '../security/crypto.js';
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
 import { createTimeEntry } from './timesheetService.js';
+import { receiptReadingOn } from './receiptReader.js';
 import { createTrip, addTripCost, COST_KINDS, mileageAmount, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_COST } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -106,7 +107,7 @@ export async function roadSummary(db, key) {
        FROM trips WHERE company_id = $1 AND is_active ORDER BY start_date DESC LIMIT 50`, [key.companyId]);
   const { rows: projects } = await db.query(
     'SELECT id, code, name FROM jobs WHERE company_id = $1 AND is_active ORDER BY code NULLS LAST, name LIMIT 3000', [key.companyId]);
-  return { ...who, keyName: key.name, expiresOn: key.expiresOn, trips, projects, costKinds: COST_KINDS };
+  return { ...who, keyName: key.name, expiresOn: key.expiresOn, trips, projects, costKinds: COST_KINDS, receiptReading: receiptReadingOn() };
 }
 
 /** A trip named by an item: { id } of a saved trip, or { clientId } of a trip sent from this phone. */

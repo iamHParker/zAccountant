@@ -1605,12 +1605,13 @@
               <label>Paid with <select v-model="trip.cost.paidFromAccountId" required><option value="">Choose…</option>
                 <option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}{{ a.type === 'equity' ? ' (paid personally)' : '' }}</option></select></label>
             </div>
-            <div class="photo-pick">
-              <strong>Receipt photos</strong> <span class="muted small">(optional)</span>
+            <div class="photo-pick" @dragover.prevent @drop.prevent="dropTripCostPhotos">
+              <strong>Receipt photos</strong> <span class="muted small">(optional{{ siteFeatures.receiptReading && trip.cost.kind !== 'mileage' ? '; add one first and the amount, date and who was paid fill in from it. You can drag a receipt picture here' : '' }})</span>
               <p class="muted small" v-if="trip.cost.keptPhotos">{{ trip.cost.keptPhotos }} photo{{ trip.cost.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected cost.</p>
               <div class="row wrap">
                 <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addTripCostPhotos"></label>
                 <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addTripCostPhotos"></label> <button type="button" @click="pastePhotos('addTripCostPhotos')">📋 Paste</button>
+                <button type="button" v-if="siteFeatures.receiptReading && trip.cost.photos.length && trip.cost.kind !== 'mileage'" :disabled="trip.cost.reading" @click="readTripReceipt">{{ trip.cost.reading ? 'Reading the receipt…' : '✨ Fill in from the receipt' }}</button>
                 <span class="muted small" v-if="trip.cost.photoBusy">Preparing photo…</span>
               </div>
               <div class="row wrap" v-if="trip.cost.photos.length">

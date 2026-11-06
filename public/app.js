@@ -6,6 +6,7 @@ import { render } from '/app.render.js';
 import { HELP, helpForTab, searchHelp } from '/help.js';
 import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
 import { picturesFromClipboard } from '/paste.js';
+import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
 import { clockTime, hhmm, nextDay } from '/clock.js';
 import { payeeKey, payeeRuleText } from '/payee.js';
 
@@ -114,8 +115,8 @@ const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', descripti
   jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '', row: ++lineRow });
 const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
 const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', jobs: [{ jobId: '', share: '' }] });
-const blankTripCost = (date = today()) => ({ date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
-  expenseAccountId: '', paidFromAccountId: '', photos: [], photoBusy: false, key: newKey() });
+const blankTripCost = (date = today()) => ({ date, dateDefault: date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
+  expenseAccountId: '', paidFromAccountId: '', photos: [], photoBusy: false, reading: false, key: newKey() });
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 // Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
 const ZOOM_MIN = 50; const ZOOM_MAX = 200;
@@ -304,7 +305,7 @@ createApp({
         { id: 'accounts', label: 'Accounts' }, { id: 'payroll', label: 'Payroll' }, { id: 'settings', label: 'Settings' },
       ],
       help: { q: '', id: 'start', from: 'home' },
-      version: '',
+      version: '', siteFeatures: { receiptReading: false },
       zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, NEW_CONTACT, renaming: null, ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
       MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
@@ -456,6 +457,7 @@ createApp({
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.statusMenu = false; });
     startRecorder();
     onSignInNeeded = (next) => this.goAuth(next ?? 'signin');
+    api('GET', '/public/features').then((f) => { this.siteFeatures = f; }).catch(() => {}); // e.g. receipt reading on or off
     try {
       const me = await api('GET', '/auth/me');
       this.auth.user = me.user;
@@ -1926,8 +1928,33 @@ createApp({
     async addTripCostPhotos(e) {
       const files = [...(e.target.files ?? [])]; e.target.value = '';
       const c = this.trip.cost; c.photoBusy = true;
+      const first = c.photos.length;
       try { for (const f of files) if (c.photos.length + (c.keptPhotos ?? 0) < 6) c.photos.push(await pictureFromFile(f, { maxSide: PHOTO_SIDE })); }
       catch (err) { this.flash(err.message, 'bad'); } finally { c.photoBusy = false; }
+      // A new cost's first receipt is read right away, to fill in the amount, date and who was paid (Homer, 2026-11-06).
+      if (first === 0 && c.photos.length && !c.keptPhotos && !this.trip.editCostId && !c.roadItem && this.siteFeatures.receiptReading && !String(c.amount).trim()) {
+        this.readTripReceipt();
+      }
+    },
+    // A receipt picture dragged from the desktop or an email onto the photo box: the same as choosing it.
+    dropTripCostPhotos(e) {
+      const files = droppedPictures(e);
+      if (files.length) this.addTripCostPhotos({ target: { files, value: '' } });
+    },
+    /** Read the newest receipt photo and fill in the boxes still empty (public/receipt.js). Nothing is saved until Save. */
+    async readTripReceipt() {
+      const c = this.trip.cost;
+      const picture = c?.photos.at(-1);
+      if (!picture || c.reading) return;
+      c.reading = true;
+      try {
+        const read = await this.run(() => api('POST', `${this.tripBase()}/receipts/read`, { picture }));
+        if (!read || this.trip.cost !== c) return;
+        const kindBefore = c.kind;
+        const filled = fillFromReceipt(c, read);
+        if (c.kind !== kindBefore) { c.kind = kindBefore; this.pickCostKind(read.kind); } // and the card last used for that kind
+        this.flash(filledText(filled, read));
+      } finally { c.reading = false; }
     },
     async saveTripCost() {
       const tr = this.trip; const c = tr.cost;

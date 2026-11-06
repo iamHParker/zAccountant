@@ -24,6 +24,7 @@ import * as time from './services/timesheetService.js';
 import * as projects from './services/projectService.js';
 import * as trips from './services/tripService.js';
 import * as roadSvc from './services/roadService.js';
+import { readReceipt, receiptReadingOn, ReceiptError } from './services/receiptReader.js';
 import * as bookFiles from './services/bookFileService.js';
 import * as mileIq from './services/mileIqService.js';
 import * as homeLayout from './services/homeLayoutService.js';
@@ -48,6 +49,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const today = () => new Date().toISOString().slice(0, 10);
 const q = (v) => (typeof v === 'string' && v !== '' ? v : null); // ignore repeated (?a=1&a=2) or empty params
 const FILE = Symbol('file'); // a handler returning { [FILE]: { name, type, body } } sends a download instead of JSON
+// A handler returning { [AFTER]: fn } has its permission checked inside the database scope, and fn runs after that scope
+// has ended: for slow outside calls (reading a receipt takes seconds) that must not hold a database connection meanwhile.
+const AFTER = Symbol('after');
+const afterScope = async (body) => (typeof body?.[AFTER] === 'function' ? body[AFTER]() : body);
 
 /**
  * Route permissions. ℹ️ Each route names the permission it needs (see src/core/permissions.js), or a
@@ -139,6 +144,7 @@ export function createApp(pool, { log } = {}) {
   app.use(/^\/api\/companies\/[^/]+\/payments\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a check photo, as base64 (3 MB at most)
   app.use(/^\/api\/companies\/[^/]+\/trip-costs\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a receipt photo, likewise
   app.use(/^\/api\/road\/items\/[^/]+\/photos$/, express.json({ limit: '5mb' })); // a receipt photo from the Road page
+  app.use(/^\/api\/(road\/receipt|companies\/[^/]+\/receipts\/read)$/, express.json({ limit: '6mb' })); // a receipt photo to read (4 MB at most)
   app.use('/api/feedback', express.json({ limit: '6mb' })); // a picture of the screen, as base64
   app.use(express.json({ limit: '1mb' }));
   app.use((req, res, next) => {
@@ -256,22 +262,25 @@ export function createApp(pool, { log } = {}) {
     const m = /^Bearer (\S{1,100})$/.exec(req.headers.authorization ?? '');
     const key = m ? await roadSvc.findRoadKey(pool, m[1]) : null;
     if (!key) return res.status(401).json({ error: 'This road key no longer works. Make a new one at your desk: Trips → Your phone on the road.', roadKey: 'invalid' });
-    const body = await withScope(pool, { userId: key.userId, companyId: key.companyId }, async (db) => {
+    const body = await afterScope(await withScope(pool, { userId: key.userId, companyId: key.companyId }, async (db) => {
       const access = await auth.getAccess(db, key.userId, key.companyId);
       if (!access?.permissions.has('bills')) throw new AuthError('This road key no longer works: your role in the company has changed.', 403);
       return handler({ db, req, key });
-    });
+    }));
     res.status(status).json(body);
   };
   roadApi.get('/', roadRoute(({ db, key }) => roadSvc.roadSummary(db, key)));
   roadApi.post('/items', roadRoute(({ db, req, key }) => roadSvc.receiveItem(db, key, req.body ?? {}), 201));
   roadApi.put('/items/:clientId', roadRoute(({ db, req, key }) => roadSvc.editItem(db, key, req.params.clientId, req.body ?? {})));
   roadApi.post('/items/:clientId/photos', roadRoute(({ db, req, key }) => roadSvc.receivePhoto(db, key, req.params.clientId, req.body ?? {}), 201));
+  roadApi.post('/receipt', roadRoute(({ req, key }) => ({ [AFTER]: () => readReceipt(key.companyId, req.body ?? {}) })));
   roadApi.post('/status', roadRoute(({ db, req, key }) => roadSvc.itemStatuses(db, key, req.body?.clientIds)));
   app.use('/api/road', roadApi);
 
   // The front page lists the plans and their prices from the same catalog the Admin dashboard uses, so a price
   // set there shows here too. Public: names and prices only.
+  // What this site has turned on, for the screens to show or hide a button (no sign-in: no company data).
+  app.get('/api/public/features', (req, res) => res.json({ receiptReading: receiptReadingOn() }));
   app.get('/api/public/plans', (req, res) => {
     const list = (o) => Object.entries(o).map(([key, p]) => ({ key, name: p.name, monthlyCents: p.monthlyCents, annualCents: p.annualCents, note: p.note ?? null, points: p.points ?? [] }));
     res.json({ plans: list(PLANS), addOns: list(ADD_ONS) });
@@ -297,7 +306,7 @@ export function createApp(pool, { log } = {}) {
     for (const p of ['accountId', 'entryId', 'employeeId', 'paycheckId', 'userId', 'recurringId', 'bankAccountId', 'bankTxId', 'reconId', 'ruleId', 'batchId', 'contactId', 'documentId', 'paymentId', 'runId', 'roleId', 'departmentId', 'jobId', 'timeEntryId', 'depositId', 'itemId', 'tripId', 'costId', 'photoId', 'keyId', 'itemId']) {
       if (req.params[p] !== undefined && !UUID.test(req.params[p])) return res.status(404).json({ error: 'Not found' });
     }
-    const body = await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
+    const body = await afterScope(await withScope(pool, { userId: req.user.id, companyId }, async (db) => {
       let access = null;
       if (companyId) {
         access = await auth.getAccess(db, req.user.id, companyId);
@@ -315,7 +324,7 @@ export function createApp(pool, { log } = {}) {
       const can = (p) => Boolean(access?.permissions.has(p));
       const viewer = { userId: req.user.id, can, departmentId: access?.departmentId ?? null };
       return handler({ db, req, companyId, role: access?.role ?? null, access, can, viewer, actor: req.user.email });
-    });
+    }));
     if (body?.[FILE]) {
       const f = body[FILE];
       return res.status(status).type(f.type).set('Content-Disposition', `${f.inline ? 'inline' : 'attachment'}; filename="${f.name}"`).send(f.body);
@@ -628,6 +637,8 @@ export function createApp(pool, { log } = {}) {
   api.get(`${RI}/:itemId/photos/:photoId`, route(['view_books', 'bills', 'invoices'], async ({ db, req, companyId }) =>
     ({ [FILE]: await roadSvc.getRoadPhoto(db, companyId, req.params.itemId, req.params.photoId) })));
   api.patch(`${RI}/:itemId`, route('bills', ({ db, req, companyId, actor }) => roadSvc.editRoadItem(db, companyId, req.params.itemId, req.body ?? {}, { actor })));
+  // Read a receipt picture: vendor, total, date (src/services/receiptReader.js). Nothing is saved; it fills the cost form.
+  api.post('/companies/:companyId/receipts/read', route('bills', ({ req, companyId }) => ({ [AFTER]: () => readReceipt(companyId, req.body ?? {}) })));
   api.post(`${RI}/accept-all`, route('bills', ({ db, req, companyId, viewer, actor }) => roadSvc.acceptRoadItems(db, companyId, viewer, req.body ?? {}, { actor })));
   api.post(`${RI}/:itemId/accept`, route('bills', ({ db, req, companyId, viewer, actor }) => roadSvc.acceptRoadItem(db, companyId, viewer, req.params.itemId, req.body ?? {}, { actor })));
   api.post(`${RI}/:itemId/accept-check`, route('invoices', ({ db, req, companyId, actor }) => roadSvc.acceptRoadCheck(db, companyId, req.params.itemId, req.body ?? {}, { actor })));
@@ -850,7 +861,7 @@ export function createApp(pool, { log } = {}) {
   // Errors -> JSON. User mistakes are 4xx with a readable message; anything else is 500 without internals.
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
-    if (err instanceof AuthError) return res.status(err.status).json({ error: err.message });
+    if (err instanceof AuthError || err instanceof ReceiptError) return res.status(err.status).json({ error: err.message });
     if (err instanceof LedgerError || err instanceof PayrollError) {
       const status = /not found/i.test(err.message) ? 404 : 400;
       return res.status(status).json({ error: err.message, details: err.details ?? [] });

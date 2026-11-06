@@ -93,6 +93,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
   fresh authenticator code. Settings card + sign-in button.
 - Road page `/road` (migration 026, `src/services/roadService.js`, `public/road.*`): phone key (Bearer, hash only,
   90 days) → inbox `road_items`; Trips → From the road accepts into the books. Offline via IndexedDB + service worker.
+- Receipt reading (`src/services/receiptReader.js`, `public/receipt.js`): photo → Claude → vendor/total/date fill empty
+  cost boxes, saves nothing. Off until Homer sets `ANTHROPIC_API_KEY` (runbook step 12). Never log the picture.
 - Book file `.zacc` (`src/services/bookFileService.js`): zip of every company table + manifest SHA-256s; QuickBooks
   .iif / Online CSV exports. Whole-file re-import not built yet.
 - MileIQ import (migration 028, `src/core/mileiq.js`, `src/services/mileIqService.js`): monthly CSV → one mileage trip

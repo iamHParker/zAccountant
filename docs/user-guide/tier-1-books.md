@@ -342,6 +342,15 @@ corner, then **Share → Copy** (or press and hold a picture in an email or web 
 **📋 Paste** on the cost; Safari shows a small **Paste** bubble, tap it. Screenshots are also in Photos, so
 **🖼 Choose photo** works too. The same three buttons are on payment photos (checks and remittances).
 
+**Let the receipt fill in the cost.** On a new cost, the first receipt photo you take, choose, paste or drag in is
+read for you: the amount, the date, who was paid, the kind (airfare, hotel, rental car…) and a few words on what it
+was fill in by themselves, in a few seconds. Only empty boxes are filled; anything you already typed stays. Check
+what it filled in, then **Save** as usual: nothing goes in the books until you do. **✨ Fill in from the receipt**
+reads the newest photo again (handy after you add a clearer one). It works the same at your desk in **Trips → + Add
+cost**, where you can also drag a receipt picture from an email or your desktop onto the photo box. Reading needs
+signal; with none, type the cost in, or tap the button later. A receipt in another currency is read as printed:
+change the amount to dollars. (This shows only once zAccountant has turned receipt reading on for the site.)
+
 **Checks received on the road.** Tap **+ Check received** (no trip needed): the date, amount, who paid, the check
 number, the invoice number(s) it pays (like 26-124, 26-130), a note (where you deposited it) and photos of the check
 and the remittance. At your desk, **Sales → Checks from the road** shows it with the invoices it found. Press
