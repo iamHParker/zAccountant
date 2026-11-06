@@ -44,6 +44,7 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `037_late_charges.sql` | late-charge settings on `companies` (APR, fee, grace days), `contacts.is_homeowner` / `no_late_charges`, invoice `no_late_charges` and `late_charge_month`, one late-charge invoice per customer per month |
 | `038_trip_shares_by_kind.sql` | a project's trip share by kind of cost: `trip_jobs.air_bp / hotel_bp / car_bp / rest_bp` (NULL = follow `share_bp`) |
 | `039_move_payments_on_correction.sql` | an edited invoice or bill keeps its payments: `payment_applications.document_id` may move only from a voided document to its corrected copy (trigger `payment_applications_move`) |
+| `040_trip_bookings.sql` | `trip_bookings`: a trip's plan (flight, hotel, rental car), not money; `trip_cost_id` = the cost that paid it. Road items may be `kind = 'booking'`, with `road_items.trip_booking_id` |
 
 ## How migrations run
 

@@ -6,7 +6,7 @@ import { render } from '/app.render.js';
 import { HELP, helpForTab, searchHelp } from '/help.js';
 import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
 import { picturesFromClipboard } from '/paste.js';
-import { clockTime, hhmm, nextDay } from '/clock.js';
+import { clockTime, clock12, hhmm, nextDay } from '/clock.js';
 import { payeeKey, payeeRuleText } from '/payee.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -220,6 +220,10 @@ const TAB_FEATURE = { payroll: 'payroll', time: 'timesheets' };
 // adds, removes and moves (kept per person per company: /home-layout). `perms`: any one of them shows the card;
 // `feature`: the plan must include it. `go` runs on a press. The server keeps only the ids; an unknown id is skipped.
 // A trip's share table: each project's percent of each kind of cost; Travel time is the trip share (migration 038).
+// Bookings on a trip planned ahead (Homer, 2026-11-06): the flight, hotel and rental car. Not money until paid.
+const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
+const BOOKING_DATES = { airfare: ['Depart', 'Return'], lodging: ['Check in', 'Check out'], rental_car: ['Pick up', 'Drop off'], other: ['From', 'To'] };
+const COST_LABEL = { airfare: 'Airfare', lodging: 'Lodging', rental_car: 'Rental car', other: 'Other' };
 const SHARE_COLS = [{ key: 'air', label: 'Air' }, { key: 'hotel', label: 'Hotel' }, { key: 'car', label: 'Rental car' }, { key: 'rest', label: 'Rest' }, { key: 'share', label: 'Travel time' }];
 const HOME_CARDS = [
   { id: 'stats', icon: '📊', title: 'Statistics', hint: 'Income, expenses and cash, month by month', perms: ['view_books'] },
@@ -292,7 +296,7 @@ createApp({
   render,
   data() {
     return {
-      SHARE_COLS, companies: [], companyId: null, company: null, tab: 'home', message: null,
+      SHARE_COLS, BOOKING_KINDS, BOOKING_DATES, companies: [], companyId: null, company: null, tab: 'home', message: null,
       auth: { screen: 'loading', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
       passkeys: { list: [], name: '', code: '', busy: false, supported: canPasskey() },
       members: [], newMember: { email: '', role: 'bookkeeper', departmentId: '' },
@@ -363,7 +367,7 @@ createApp({
         pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
-      trip: { list: [], cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
+      trip: { list: [], cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
@@ -1615,6 +1619,7 @@ createApp({
         return `New trip${i.data.endDate ? ' to ' + this.usDate(i.data.endDate) : ''}${codes.length ? ' · ' + codes.join(', ') : ''}`;
       }
       if (i.kind === 'time') return `Travel time ${i.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
+      if (i.kind === 'booking') return `Booking: ${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''} · ${this.bookingWhen(i.data)}`;
       const what = i.data.kind === 'mileage' ? `${i.data.description} · ${i.data.miles} mi × $${i.data.mileRate}` : i.data.description;
       return `${what}${i.data.vendor ? ' · ' + i.data.vendor : ''}`;
     },
@@ -1745,15 +1750,56 @@ createApp({
       await this.addTripJobs([j.id]);
     },
     /** Pick a trip from the pull-down (newest first); empty goes back to the list. */
-    pickTrip(id) { if (id) { Object.assign(this.trip, { form: null, cost: null, editCostId: null, travel: null, viewRow: null, find: { q: '', pick: {}, newJob: null, customers: this.trip.find.customers } }); this.openTrip(id); } else this.closeTripView(); },
+    pickTrip(id) { if (id) { Object.assign(this.trip, { form: null, booking: null, cost: null, editCostId: null, travel: null, viewRow: null, find: { q: '', pick: {}, newJob: null, customers: this.trip.find.customers } }); this.openTrip(id); } else this.closeTripView(); },
     /** Road items waiting for the open trip (sent from the phone, not in the books yet). */
     tripRoadItems() { return this.trip.cur ? this.road.items.filter((i) => i.kind !== 'trip' && i.trip?.tripId === this.trip.cur.id) : []; },
+    // ---- Bookings: the trip's plan (flight, hotel, rental car), booked ahead. "Paid" records the cost, linked to it.
+    bookingWhen(b) {
+      const [a, z] = BOOKING_DATES[b.kind] ?? BOOKING_DATES.other;
+      const at = (d, t) => `${this.usDate(d)}${t ? ' ' + clock12(t) : ''}`;
+      return `${a} ${at(b.startsOn, b.startTime)}${b.endsOn ? ` · ${z} ${at(b.endsOn, b.endTime)}` : ''}`;
+    },
+    tripAhead(t) { return t.startDate > today(); },
+    /** Bookings sent from the phone for the open trip, waiting in the inbox. */
+    tripRoadBookings() { return this.tripRoadItems().filter((i) => i.kind === 'booking'); },
+    newBooking() {
+      const t = this.trip.cur;
+      Object.assign(this.trip, { cost: null, travel: null, booking: { editId: null, kind: 'airfare', vendor: '', confirmation: '', startsOn: t.startDate, startTime: '',
+        endsOn: t.endDate ?? '', endTime: '', amount: '', details: '' } });
+    },
+    editBooking(b) {
+      Object.assign(this.trip, { cost: null, travel: null, booking: { editId: b.id, kind: b.kind, vendor: b.vendor ?? '', confirmation: b.confirmation ?? '',
+        startsOn: b.startsOn, startTime: b.startTime ?? '', endsOn: b.endsOn ?? '', endTime: b.endTime ?? '',
+        amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : '', details: b.details ?? '' } });
+    },
+    async saveBooking() {
+      const tr = this.trip; const f = tr.booking;
+      const { editId, ...body } = f;
+      const r = editId
+        ? await this.run(() => api('PATCH', `${this.tripBase()}/trips/${tr.cur.id}/bookings/${editId}`, body), 'Booking saved.')
+        : await this.run(() => api('POST', `${this.tripBase()}/trips/${tr.cur.id}/bookings`, body), 'Booking added. When you pay for it, press Paid to record the cost.');
+      if (r) { tr.cur = r; tr.booking = null; }
+    },
+    async setBookingStatus(b, status) {
+      if (status === 'cancelled' && !confirm(`Mark the ${BOOKING_KINDS[b.kind].toLowerCase()}${b.vendor ? ' with ' + b.vendor : ''} cancelled? It stays on the trip, marked cancelled.`)) return;
+      const r = await this.run(() => api('PATCH', `${this.tripBase()}/trips/${this.trip.cur.id}/bookings/${b.id}`, { status }), status === 'cancelled' ? 'Booking cancelled.' : 'Booked again.');
+      if (r) this.trip.cur = r;
+    },
+    /** Paid for a booking: the cost form, filled in from it; saving links the cost to the booking. */
+    payBooking(b) {
+      this.newTripCost();
+      const c = this.trip.cost;
+      Object.assign(c, { bookingId: b.id, bookingText: `${BOOKING_KINDS[b.kind]}${b.vendor ? ' · ' + b.vendor : ''}`, kind: b.kind, vendor: b.vendor ?? '',
+        description: b.confirmation ? `${COST_LABEL[b.kind]}, confirmation ${b.confirmation}` : '', amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : '', date: today() });
+      this.pickCostKind(b.kind);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
     /** The open trip's grid: costs, travel time and what the phone sent for it, by date. */
     tripGrid() {
       const t = this.trip.cur;
       if (!t) return [];
       const rows = [
-        ...this.tripRoadItems().map((i) => ({ key: `r${i.id}`, type: 'road', item: i, date: i.data.date,
+        ...this.tripRoadItems().filter((i) => i.kind !== 'booking').map((i) => ({ key: `r${i.id}`, type: 'road', item: i, date: i.data.date,
           entry: i.kind === 'time' ? `Travel time${i.data.notes ? ' · ' + i.data.notes : ''}` : this.roadLabel(i),
           cents: i.kind === 'cost' ? i.data.amountCents : null, hours: i.kind === 'time' ? i.hours : null, photos: i.photos.length })),
         ...t.costs.map((x) => ({ key: `c${x.id}`, type: 'cost', x, date: x.date, cents: x.amountCents, photos: x.photoCount,
@@ -1869,7 +1915,7 @@ createApp({
       const t = await this.run(() => api('GET', `${this.tripBase()}/trips/${id}`));
       if (t) { this.trip.cur = t; this.trip.photoView = null; }
     },
-    closeTripView() { Object.assign(this.trip, { cur: null, form: null, editing: false, cost: null, editCostId: null, travel: null, photoView: null }); this.loadTrips(); },
+    closeTripView() { Object.assign(this.trip, { cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null }); this.loadTrips(); },
     newTrip() { Object.assign(this.trip, { cur: null, form: blankTrip(), editing: false }); },
     editTrip() {
       const t = this.trip.cur;
@@ -1911,6 +1957,7 @@ createApp({
     tripPaidFromAccounts() { return this.accounts.filter((a) => a.isActive && (a.cashFlow === 'cash' || a.subtype === 'credit_card' || (a.type === 'equity' && a.key !== 'retained_earnings'))); },
     tripExpenseAccounts() { return this.accounts.filter((a) => a.isActive && a.type === 'expense'); },
     newTripCost() {
+      this.trip.booking = null;
       const last = this.trip.cur.costs.filter((x) => x.status === 'posted').at(-1);
       const c = blankTripCost(last?.date ?? this.trip.cur.startDate);
       c.expenseAccountId = last?.expenseAccountId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
@@ -1932,7 +1979,7 @@ createApp({
     async saveTripCost() {
       const tr = this.trip; const c = tr.cost;
       const body = { date: c.date, kind: c.kind, vendor: c.vendor, description: c.description, amount: c.amount, miles: c.miles, mileRate: c.mileRate,
-        expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId };
+        expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId, ...(c.bookingId && !tr.editCostId ? { bookingId: c.bookingId } : {}) };
       if (c.kind === 'mileage') keepMileRate(c.mileRate);
       if (!c.roadItem) keepCardFor(c.kind, c.paidFromAccountId);
       if (c.roadItem) {
@@ -1984,7 +2031,7 @@ createApp({
       const v = this.trip.photoView;
       if (await this.run(() => api('DELETE', `${this.tripBase()}/trip-costs/${v.cost.id}/photos/${ph.id}`), 'Photo removed.')) await this.openTripPhotos(v.cost);
     },
-    newTravel() { Object.assign(this.trip, { travel: { date: this.trip.cur.startDate, hours: '', start: '', end: '', breaks: '', notes: '' }, cost: null }); },
+    newTravel() { Object.assign(this.trip, { booking: null, travel: { date: this.trip.cur.startDate, hours: '', start: '', end: '', breaks: '', notes: '' }, cost: null }); },
     clockTime,
     /** One day's travel: the hours, or start and end less breaks. "Save, then next day" keeps the times for the next date. */
     async saveTravel(next = false) {
