@@ -45,6 +45,7 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `038_trip_shares_by_kind.sql` | a project's trip share by kind of cost: `trip_jobs.air_bp / hotel_bp / car_bp / rest_bp` (NULL = follow `share_bp`) |
 | `039_move_payments_on_correction.sql` | an edited invoice or bill keeps its payments: `payment_applications.document_id` may move only from a voided document to its corrected copy (trigger `payment_applications_move`) |
 | `040_trip_bookings.sql` | `trip_bookings`: a trip's plan (flight, hotel, rental car), not money; `trip_cost_id` = the cost that paid it. Road items may be `kind = 'booking'`, with `road_items.trip_booking_id` |
+| `041_road_purchases.sql` | `purchases` + `purchase_photos`: equipment (asset, with `serial_number`) or supplies (expense) bought on the road, each posting its own entry; void reverses it. Road items may be `kind = 'purchase'`, with `road_items.purchase_id` |
 
 ## How migrations run
 

@@ -74,6 +74,8 @@ const SCREENS = {
   trip: { title: 'Trip now', color: 'c-trip' },
   plan: { title: 'Future trip', color: 'c-plan' },
   time: { title: 'Time', color: 'c-time' },
+  equipment: { title: 'Equipment', color: 'c-equip' },
+  supplies: { title: 'Supplies', color: 'c-supply' },
 };
 const KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
 // Bookings on a trip planned ahead (Homer, 2026-11-06): the reservation, not money. The words for its two dates.
@@ -91,7 +93,7 @@ createApp({
       summary: (() => { try { return JSON.parse(getLocal(SUMMARY_STORE) ?? 'null'); } catch { return null; } })(),
       online: navigator.onLine, syncing: false, busy: false,
       items: [], tripKey: getLocal('zacc.roadTrip') ?? '',
-      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, kinds: KINDS, reading: false,
+      tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, buyForm: null, kinds: KINDS, reading: false,
       bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
       screen: 'home', screens: SCREENS,
       // Amounts start hidden (blurred) and the phone remembers the choice: someone beside you sees no deposit totals.
@@ -101,6 +103,9 @@ createApp({
   computed: {
     waiting() { return this.items.filter((i) => this.notSent(i)).length; },
     checkItems() { return this.items.filter((i) => i.kind === 'check').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20); },
+    /** Equipment or supplies on this phone for the screen showing (newest first). */
+    buyItems() { return this.items.filter((i) => i.kind === 'purchase' && i.data.category === this.screen).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20); },
+    buysWaiting() { return (cat) => this.items.filter((i) => i.kind === 'purchase' && i.data.category === cat && !['accepted', 'dismissed'].includes(i.status)).length; },
     checksWaiting() { return this.items.filter((i) => i.kind === 'check' && !['accepted', 'dismissed'].includes(i.status)).length; },
     tripName() {
       const ref = this.tripRef;
@@ -234,7 +239,7 @@ createApp({
     },
     goTime() { this.go('time'); if (this.tripKey) this.newTime(); },
     openTrip(key) { this.tripKey = key; this.go('trip'); },
-    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; },
+    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; },
     toggleHide() { this.hide = !this.hide; setLocal('zacc.roadHide', this.hide ? null : 'show'); },
     newTrip() { this.tripForm = { name: '', startDate: today(), endDate: '', jobIds: [], newProjects: '', notes: '' }; this.projectSearch = ''; },
     /** A trip planned ahead (Homer, 2026-11-06): the New trip form starting tomorrow; its bookings go on it once saved. */
@@ -245,7 +250,7 @@ createApp({
      */
     canChange(i) { return !['accepted', 'dismissed'].includes(i.status); },
     changeItem(i) {
-      this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null;
+      this.closeForms();
       const d = i.data; const base = { editId: i.clientId, sentPhotos: [...(i.sentPhotos ?? [])] };
       if (i.kind === 'trip') {
         this.tripForm = { ...base, name: d.name, startDate: d.startDate, endDate: d.endDate ?? '', jobIds: [...(d.jobIds ?? [])],
@@ -262,6 +267,9 @@ createApp({
       } else if (i.kind === 'check') {
         this.checkForm = { ...base, date: d.date, amount: d.amount, from: d.from ?? '', checkNumber: d.checkNumber ?? '', invoices: d.invoices ?? '',
           notes: d.notes ?? '', photos: [...(i.photos ?? [])] };
+      } else if (i.kind === 'purchase') {
+        this.buyForm = { ...base, kind: 'purchase', category: d.category, date: d.date, amount: d.amount ?? '', vendor: d.vendor ?? '',
+          description: d.description ?? '', serialNumber: d.serialNumber ?? '', jobId: d.jobId ?? '', photos: [...(i.photos ?? [])] };
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
@@ -342,6 +350,20 @@ createApp({
         invoices: f.invoices.trim() || null, notes: f.notes.trim() || null };
       if (await this.saveItem('check', f, data, f.photos)) { this.checkForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
     },
+    // ---- Equipment and supplies bought, not on a trip (Homer, 2026-11-06). Equipment lasts and goes on the equipment
+    // list at the desk (with its serial number); supplies are used up. The desk puts each in the right account.
+    newBuy() {
+      this.closeForms();
+      this.buyForm = { kind: 'purchase', category: this.screen, date: today(), dateDefault: today(), amount: '', vendor: '', description: '', serialNumber: '', jobId: '', photos: [] };
+    },
+    async saveBuy() {
+      const f = this.buyForm;
+      if (!/^\$?\d{1,3}(,?\d{3})*(\.\d{1,2})?$|^\$?\d*(\.\d{1,2})?$/.test(f.amount) || !/\d/.test(f.amount)) { this.flash('Enter the amount like 23.47', 'bad'); return; }
+      const data = { date: f.date, category: f.category, amount: f.amount.replace(/[$,]/g, ''), vendor: f.vendor.trim() || null,
+        description: f.description.trim() || SCREENS[f.category].title, jobId: f.jobId || null };
+      if (f.category === 'equipment') data.serialNumber = f.serialNumber.trim() || null;
+      if (await this.saveItem('purchase', f, data, f.photos)) { this.buyForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
+    },
     newTime() { this.costForm = null; this.bookingForm = null; this.timeForm = { date: today(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
     clockTime,
     // A screenshot or photo copied to the clipboard: the same as choosing it.
@@ -352,7 +374,7 @@ createApp({
     async addPhotos(ev) {
       const files = [...(ev.target.files ?? [])];
       ev.target.value = '';
-      const form = this.checkForm ?? this.costForm;
+      const form = this.checkForm ?? this.buyForm ?? this.costForm;
       const first = form.photos.length;
       this.busy = true;
       try {
@@ -362,7 +384,7 @@ createApp({
         }
       } catch { this.flash('That photo could not be read. Try taking it again.', 'bad'); } finally { this.busy = false; }
       // A new cost's first receipt is read right away (with signal), to fill in the amount, date and who was paid.
-      if (form === this.costForm && first === 0 && form.photos.length && !form.editId && this.canRead && this.online && !String(form.amount).trim()) {
+      if ((form === this.costForm || form === this.buyForm) && first === 0 && form.photos.length && !form.editId && this.canRead && this.online && !String(form.amount).trim()) {
         this.readReceipt();
       }
     },
@@ -373,14 +395,14 @@ createApp({
     },
     /** Read the cost's newest receipt photo and fill in the boxes still empty (public/receipt.js). Nothing is saved. */
     async readReceipt() {
-      const form = this.costForm;
+      const form = this.costForm ?? this.buyForm;
       const photo = form?.photos.at(-1);
       if (!photo || this.reading) return;
       if (!this.online) { this.flash('Reading a receipt needs signal. Type it in, or tap "Fill in from the receipt" later.', 'bad'); return; }
       this.reading = true;
       try {
         const read = await this.call('POST', '/receipt', { picture: photo.dataUrl }, { seconds: 90 });
-        if (this.costForm !== form) return; // the form was closed meanwhile
+        if (this.costForm !== form && this.buyForm !== form) return; // the form was closed meanwhile
         this.flash(filledText(fillFromReceipt(form, read), read));
       } catch (e) {
         if (e instanceof KeyProblem) this.keyProblem = e.message;
@@ -421,6 +443,7 @@ createApp({
     itemText(i) {
       if (i.kind === 'trip') return `Trip: ${i.data.name}`;
       if (i.kind === 'booking') return `${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''}`;
+      if (i.kind === 'purchase') return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.serialNumber ? ' · serial ' + i.data.serialNumber : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'check') return `Check${i.data.checkNumber ? ' #' + i.data.checkNumber : ''}${i.data.from ? ' from ' + i.data.from : ''}${i.data.invoices ? ' · inv ' + i.data.invoices : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'time') return `Travel time ${i.data.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
       return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
@@ -428,7 +451,7 @@ createApp({
     /** The money part of an item, shown on its own so the privacy switch can blur it (empty for trips and time). */
     itemAmount(i) {
       if (i.kind === 'cost' && i.data.kind === 'mileage') return `${i.data.miles} mi × $${i.data.mileRate} = ${money(mileageCents(i.data.miles, i.data.mileRate))}`;
-      if (i.kind === 'cost' || i.kind === 'check') return money(Math.round(Number(i.data.amount) * 100));
+      if (i.kind === 'cost' || i.kind === 'check' || i.kind === 'purchase') return money(Math.round(Number(i.data.amount) * 100));
       return '';
     },
     /** Something of this item still to send: the item, a change to it, or a photo. */

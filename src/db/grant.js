@@ -15,7 +15,7 @@ export async function grantRuntimeRole(pool, role) {
                     contacts, documents, document_lines, payments, payment_applications, payroll_runs, company_roles, departments, jobs, time_entries, payroll_deposits,
                     users, sessions, memberships, feedback_reports, company_plans, plan_changes,
                     company_logos, invoice_items, account_tax_categories, payment_photos, trips, trip_jobs, trip_costs, trip_cost_photos, trip_bookings,
-                    passkeys, auth_challenges, road_keys, road_items, road_photos, mileage_drives, home_layouts TO ${role};
+                    passkeys, auth_challenges, road_keys, road_items, road_photos, mileage_drives, home_layouts, purchases, purchase_photos TO ${role};
     GRANT UPDATE (next_entry_number, next_invoice_number, locked_through, sui_rate_pct, calculate_only_payroll, famli_headcount, futa_credit_reduction, default_sales_tax_rate,
                   invoice_address, invoice_note, invoice_footer, entity_type, books_start_date, setup_done, name, home_state, fiscal_year_start_month,
                   late_apr, late_fee_cents, late_grace_days, late_holiday_grace_days) ON companies TO ${role};
@@ -39,7 +39,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (sign_count, last_used_at, name) ON passkeys TO ${role};
     GRANT DELETE ON passkeys, auth_challenges TO ${role};
     GRANT UPDATE (last_used_at, revoked_at) ON road_keys TO ${role};
-    GRANT UPDATE (data, status, reviewed_by, reviewed_at, trip_id, trip_cost_id, time_entry_id, payment_id, trip_booking_id) ON road_items TO ${role};
+    GRANT UPDATE (data, status, reviewed_by, reviewed_at, trip_id, trip_cost_id, time_entry_id, payment_id, trip_booking_id, purchase_id) ON road_items TO ${role};
     GRANT UPDATE (role, custom_role_id, department_id) ON memberships TO ${role};
     GRANT UPDATE (name, permissions) ON company_roles TO ${role};
     GRANT DELETE ON company_roles, departments TO ${role};
@@ -55,6 +55,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (share_bp, air_bp, hotel_bp, car_bp, rest_bp) ON trip_jobs TO ${role};
     GRANT DELETE ON trip_jobs, trip_cost_photos TO ${role};
     GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at, replaced_by_id) ON trip_costs TO ${role};
+    GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at) ON purchases TO ${role};
     GRANT UPDATE (category, updated_at, updated_by) ON account_tax_categories TO ${role};
     GRANT DELETE ON account_tax_categories TO ${role};
     GRANT UPDATE (status, claude_text, developer_note, updated_at, updated_by) ON feedback_reports TO ${role};

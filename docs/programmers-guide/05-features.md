@@ -173,8 +173,15 @@ job with that name or number exists; even shares via `evenShares`), a cost (`add
 invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
 The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
 { paymentId }` (`invoices`) links it (`road_items.payment_id`) and copies its photos to `payment_photos`.
-Screens (Homer, 2026-11-06): the page opens on four coloured buttons (`screen = 'home'`; `SCREENS` in `road.js`:
-check, trip, plan, time; icon colours `.road-icon.c-*` in `styles.css`, the Lighthouse tool-rail look). `go(screen)`
+Purchases (migration 041, `src/services/purchaseService.js`): a road item of kind `purchase` (`date, category
+equipment|supplies, amount, vendor, description, serialNumber` (equipment only), `jobId`) has no trip. Bills →
+"Bought on the road" (`loadBuys` in `app.js`) accepts it with `accept { accountId, paidFromAccountId }`; no
+`accountId` = `DEFAULT_PURCHASE_CODES` (1500 Equipment, 6200 Office Supplies). `addPurchase` posts Dr account / Cr paid
+from (`source = 'purchase'`), idempotency key `road-<item id>`, and the photos are copied to `purchase_photos`.
+Accept-all refuses purchases (each is its own account). `GET …/purchases?category=equipment` is the equipment list
+(posted only); `POST …/purchases/:id/void` reverses the entry.
+Screens (Homer, 2026-11-06): the page opens on six coloured buttons (`screen = 'home'`; `SCREENS` in `road.js`:
+check, trip, plan, time, equipment, supplies; icon colours `.road-icon.c-*` in `styles.css`, the Lighthouse tool-rail look). `go(screen)`
 pushes a history entry so the phone's Back returns home (`popstate`). Privacy: `hide` (localStorage `zacc.roadHide`,
 hidden unless `'show'`) puts `hush` on `<body>`; CSS then blurs every `.amt` (wrap shown money in `<span class="amt">`,
 give amount inputs `class="amt"`) and the photo thumbnails. `itemAmount(i)` is an item's money part, kept out of

@@ -24,6 +24,7 @@ import * as time from './services/timesheetService.js';
 import * as projects from './services/projectService.js';
 import * as trips from './services/tripService.js';
 import * as roadSvc from './services/roadService.js';
+import * as purchaseSvc from './services/purchaseService.js';
 import { readReceipt, receiptReadingOn, ReceiptError } from './services/receiptReader.js';
 import * as bookFiles from './services/bookFileService.js';
 import * as mileIq from './services/mileIqService.js';
@@ -642,6 +643,12 @@ export function createApp(pool, { log } = {}) {
   api.post(`${RI}/accept-all`, route('bills', ({ db, req, companyId, viewer, actor }) => roadSvc.acceptRoadItems(db, companyId, viewer, req.body ?? {}, { actor })));
   api.post(`${RI}/:itemId/accept`, route('bills', ({ db, req, companyId, viewer, actor }) => roadSvc.acceptRoadItem(db, companyId, viewer, req.params.itemId, req.body ?? {}, { actor })));
   api.post(`${RI}/:itemId/accept-check`, route('invoices', ({ db, req, companyId, actor }) => roadSvc.acceptRoadCheck(db, companyId, req.params.itemId, req.body ?? {}, { actor })));
+  // Equipment and supplies bought on the road, once accepted (Bills → Bought on the road; migration 041).
+  const PU = '/companies/:companyId/purchases';
+  api.get(PU, route(['view_books', 'bills'], ({ db, req, companyId }) => purchaseSvc.listPurchases(db, companyId, { limit: req.query.limit, category: req.query.category })));
+  api.get(`${PU}/:purchaseId/photos/:photoId`, route(['view_books', 'bills'], async ({ db, req, companyId }) =>
+    ({ [FILE]: await purchaseSvc.getPurchasePhoto(db, companyId, req.params.purchaseId, req.params.photoId) })));
+  api.post(`${PU}/:purchaseId/void`, route('bills', ({ db, req, companyId, actor }) => purchaseSvc.voidPurchase(db, companyId, req.params.purchaseId, { actor })));
   api.post(`${RI}/:itemId/dismiss`, route(['bills', 'invoices'], ({ db, req, companyId, actor }) => roadSvc.dismissRoadItem(db, companyId, req.params.itemId, { actor })));
   api.get(TR, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.listTrips(db, companyId, { includeClosed: req.query.closed !== '0' })));
   api.post(TR, route('bills', ({ db, req, companyId, actor }) => trips.createTrip(db, companyId, req.body ?? {}, { actor }), 201));

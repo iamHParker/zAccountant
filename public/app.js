@@ -365,7 +365,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], docSort: { invoice: docSort('invoice'), bill: docSort('bill') }, contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
-        pdfOver: false, pdfBusy: false, roadChecks: [], plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        pdfOver: false, pdfBusy: false, roadChecks: [], roadBuys: [], buys: [], buyView: 'recent', buyAcct: {}, buyCard: {}, buyBusy: false, plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
@@ -1434,7 +1434,43 @@ createApp({
       if (ar.panel === 'payments') ar.payments = (await this.run(() => api('GET', `${base}/${S.payPath}`))) ?? [];
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
       if (S.kind === 'invoice') ar.roadChecks = ((await this.run(() => api('GET', `${base}/road-items`))) ?? []).filter((i) => i.kind === 'check');
+      if (S.kind === 'bill') await this.loadBuys();
     },
+    // ---- Equipment and supplies bought on the road (Road page → Equipment / Supplies; migration 041), on Bills.
+    async loadBuys() {
+      const ar = this.ar; const base = this.arBase();
+      ar.roadBuys = ((await this.run(() => api('GET', `${base}/road-items`))) ?? []).filter((i) => i.kind === 'purchase');
+      ar.buys = (await this.run(() => api('GET', `${base}/purchases${ar.buyView === 'equipment' ? '?category=equipment' : ''}`))) ?? [];
+    },
+    /** Where a purchase goes: the account picked on its row, else Equipment (1500) or Office Supplies (6200). */
+    buyAccount(i) {
+      return this.ar.buyAcct[i.id] ?? this.buyAccounts().find((a) => a.code === (i.data.category === 'equipment' ? '1500' : '6200'))?.id ?? '';
+    },
+    buyCardFor(i) { return this.ar.buyCard[i.id] ?? lastRoadAccounts().buyCardId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? ''; },
+    /** Equipment (an asset that isn't cash or a control account) or any expense. */
+    buyAccounts() { return this.accounts.filter((a) => a.isActive && (a.type === 'expense' || (a.type === 'asset' && a.cashFlow !== 'cash' && !a.key))); },
+    buyPhotoUrl(p, id) { return `/api${this.arBase()}/purchases/${p.id}/photos/${id}`; },
+    async acceptBuy(i) {
+      const ar = this.ar;
+      const body = { accountId: this.buyAccount(i), paidFromAccountId: this.buyCardFor(i) };
+      if (!body.accountId || !body.paidFromAccountId) { this.flash('Choose the account and what it was paid with.', 'bad'); return; }
+      ar.buyBusy = true;
+      try {
+        if (await this.run(() => api('POST', `${this.arBase()}/road-items/${i.id}/accept`, body), i.data.category === 'equipment' ? 'In the books, and on the equipment list.' : 'In the books.')) {
+          keepRoadAccounts({ ...lastRoadAccounts(), buyCardId: body.paidFromAccountId });
+          await this.loadBuys();
+        }
+      } finally { ar.buyBusy = false; }
+    },
+    async dismissBuy(i) {
+      if (!confirm('Dismiss this purchase from the road? It will not go into the books.')) return;
+      if (await this.run(() => api('POST', `${this.arBase()}/road-items/${i.id}/dismiss`), 'Dismissed.')) this.loadBuys();
+    },
+    async voidBuy(p) {
+      if (!confirm(`Void "${p.description}" (${this.money(p.amountCents)})? Its entry is reversed today; the record and photos stay.`)) return;
+      if (await this.run(() => api('POST', `${this.arBase()}/purchases/${p.id}/void`), 'Voided.')) this.loadBuys();
+    },
+    buyViewSet(v) { this.ar.buyView = v; this.loadBuys(); },
     // ---- Checks received on the road (Road page → "Check received"): each becomes a payment here.
     roadCheckPhotoUrl(i, id) { return `/api${this.arBase()}/road-items/${i.id}/photos/${id}`; },
     /** Opens Receive payment filled in from the check: the customer and invoices it names, the amount spread over them. */
@@ -1585,7 +1621,7 @@ createApp({
     // ---- The Road page: keys for the phone, and the inbox of what it sent (src/services/roadService.js)
     async loadRoad() {
       const r = this.road;
-      r.items = ((await this.run(() => api('GET', `${this.tripBase()}/road-items`))) ?? []).filter((i) => i.kind !== 'check'); // checks: on Sales
+      r.items = ((await this.run(() => api('GET', `${this.tripBase()}/road-items`))) ?? []).filter((i) => i.kind !== 'check' && i.kind !== 'purchase'); // checks: Sales; purchases: Bills
       if (this.can('bills')) r.keys = (await this.run(() => api('GET', `${this.tripBase()}/road-keys`))) ?? [];
       const last = lastRoadAccounts();
       if (!r.expenseId) r.expenseId = last.expenseId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
