@@ -173,6 +173,12 @@ job with that name or number exists; even shares via `evenShares`), a cost (`add
 invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
 The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
 { paymentId }` (`invoices`) links it (`road_items.payment_id`) and copies its photos to `payment_photos`.
+Screens (Homer, 2026-11-06): the page opens on four coloured buttons (`screen = 'home'`; `SCREENS` in `road.js`:
+check, trip, plan, time; icon colours `.road-icon.c-*` in `styles.css`, the Lighthouse tool-rail look). `go(screen)`
+pushes a history entry so the phone's Back returns home (`popstate`). Privacy: `hide` (localStorage `zacc.roadHide`,
+hidden unless `'show'`) puts `hush` on `<body>`; CSS then blurs every `.amt` (wrap shown money in `<span class="amt">`,
+give amount inputs `class="amt"`) and the photo thumbnails. `itemAmount(i)` is an item's money part, kept out of
+`itemText(i)` so it can be blurred.
 A **booking** item (migration 040: `kind = 'booking'`, data = the trip ref + `cleanBooking`) is accepted with
 `addBooking` (no accounts) and recorded in `road_items.trip_booking_id`; accept-all takes trips, then bookings, then
 the rest. A cost item may name `booking: { id }` (a saved booking) or `{ clientId }` (one sent from the same key);
