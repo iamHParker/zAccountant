@@ -21,7 +21,7 @@ that aren't obvious from the code. Read the entry for a feature before changing 
   `purchase` (no trip; equipment has a serial number) → Bills → "Bought on the road" accepts it to 1500 Equipment / 6200
   Office Supplies (or another account) and posts its own entry; Void reverses. Equipment list = posted equipment purchases.
 - Road time blocks (migration 042): Time screen = the day in blocks (travel / site / office, start-end, project). Travel can
-  be split evenly with a second project (`splitBlock`; even halves for now; asked Homer 2026-11-06 if he ever splits 70/30). Desk → time entries.
+  be split with a second project by `splitPercent` (default 50; Homer asked for it 2026-11-07; `splitBlock`). Desk → time entries.
 - Receipt reading (`src/services/receiptReader.js`, `public/receipt.js`): photo → Claude → vendor/total/date fill empty
   cost boxes, saves nothing. Off until Homer sets `ANTHROPIC_API_KEY` (runbook step 12). Never log the picture.
 - Book file `.zacc` (`src/services/bookFileService.js`): zip of every company table + manifest SHA-256s; QuickBooks

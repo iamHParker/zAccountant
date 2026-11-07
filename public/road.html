@@ -202,7 +202,11 @@
               <label v-if="blockForm.type === 'travel' && blockForm.jobId">Split with (travel on to the next job)
                 <select v-model="blockForm.splitJobId"><option value="">Not split</option>
                   <option v-for="p in (summary?.projects ?? []).filter(x => x.id !== blockForm.jobId)" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
-              <p class="muted small" v-if="blockForm.splitJobId">Each project gets half of this block{{ blockMinutes(blockForm) ? ': ' + hhmmHalf(blockForm) : '' }}.</p>
+              <template v-if="blockForm.splitJobId">
+                <label>First project's share (%) <input type="number" v-model.number="blockForm.splitPercent" min="1" max="99" step="1" inputmode="numeric"></label>
+                <div class="chips"><button type="button" v-for="p in [50, 60, 70, 75]" :class="{ active: blockForm.splitPercent === p }" @click="blockForm.splitPercent = p">{{ p }}/{{ 100 - p }}</button></div>
+                <p class="muted small">{{ projectName(blockForm.jobId) }} gets {{ blockForm.splitPercent }}%, {{ projectName(blockForm.splitJobId) }} the rest{{ blockMinutes(blockForm) ? ': ' + hhmmSplit(blockForm) : '' }}.</p>
+              </template>
             </template>
             <label>Notes <input v-model="blockForm.notes" maxlength="300" :placeholder="blockForm.type === 'travel' ? 'SAT to Boerne' : blockForm.type === 'site' ? 'Framing inspection' : 'Drafting, calcs'"></label>
             <button class="primary">Save</button> <button type="button" v-if="!blockForm.editId && blockForm.end" @click="saveBlock(true)">Save, then next block</button>

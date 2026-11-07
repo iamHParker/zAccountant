@@ -1661,7 +1661,7 @@ createApp({
       if (i.kind === 'time') return `Travel time ${i.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
       if (i.kind === 'block') {
         const job = (id) => this.jobLabel(this.ar.jobs.find((j) => j.id === id) ?? { name: 'a project' });
-        const where = i.trip ? '' : ` · ${i.data.jobId ? job(i.data.jobId) : 'no project'}${i.data.splitJobId ? ' + ' + job(i.data.splitJobId) + ' (split in half)' : ''}`;
+        const where = i.trip ? '' : ` · ${i.data.jobId ? job(i.data.jobId) : 'no project'}${i.data.splitJobId ? ' + ' + job(i.data.splitJobId) + ` (split ${i.data.splitPercent ?? 50}/${100 - (i.data.splitPercent ?? 50)})` : ''}`;
         return `${BLOCK_TYPES[i.data.type]} ${i.data.start ? i.data.start + '–' + i.data.end + ' ' : ''}(${i.hours} h)${where}${i.data.notes ? ' · ' + i.data.notes : ''}`;
       }
       if (i.kind === 'booking') return `Booking: ${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''} · ${this.bookingWhen(i.data)}`;

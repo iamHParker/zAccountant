@@ -279,7 +279,7 @@ createApp({
           notes: d.notes ?? '', photos: [...(i.photos ?? [])] };
       } else if (i.kind === 'block') {
         this.blockForm = { ...base, type: d.type, date: d.date, start: d.start ?? '', end: d.end ?? '', hours: d.start ? '' : d.hours ?? '',
-          jobId: d.jobId ?? '', splitJobId: d.splitJobId ?? '', tripKey: d.trip ? (d.trip.clientId ? `c:${d.trip.clientId}` : `s:${d.trip.id}`) : '', notes: d.notes ?? '' };
+          jobId: d.jobId ?? '', splitJobId: d.splitJobId ?? '', splitPercent: d.splitPercent ?? 50, tripKey: d.trip ? (d.trip.clientId ? `c:${d.trip.clientId}` : `s:${d.trip.id}`) : '', notes: d.notes ?? '' };
       } else if (i.kind === 'purchase') {
         this.buyForm = { ...base, kind: 'purchase', category: d.category, date: d.date, amount: d.amount ?? '', vendor: d.vendor ?? '',
           description: d.description ?? '', serialNumber: d.serialNumber ?? '', jobId: d.jobId ?? '', photos: [...(i.photos ?? [])] };
@@ -384,18 +384,20 @@ createApp({
     newBlock(type) {
       const last = this.dayBlocks.filter((i) => i.data.end).at(-1)?.data;
       this.closeForms();
-      this.blockForm = { type, date: this.blockDay, start: last?.end ?? '', end: '', hours: '', jobId: last?.jobId ?? '', splitJobId: '', tripKey: '', notes: '' };
+      this.blockForm = { type, date: this.blockDay, start: last?.end ?? '', end: '', hours: '', jobId: last?.jobId ?? '', splitJobId: '', splitPercent: 50, tripKey: '', notes: '' };
     },
     async saveBlock(next = false) {
       const f = this.blockForm;
       if (!(f.start && f.end) && !durationMinutes(f.hours)) { this.flash('Type the start and end times, or the hours.', 'bad'); return; }
       if (f.type !== 'office' && !f.jobId && !(f.type === 'travel' && f.tripKey)) { this.flash(f.type === 'travel' ? 'Choose the project, or the trip.' : 'Choose the project.', 'bad'); return; }
       if (f.splitJobId && f.splitJobId === f.jobId) { this.flash('Split it with a different project.', 'bad'); return; }
+      const pct = Number(f.splitPercent);
+      if (f.splitJobId && !(Number.isInteger(pct) && pct >= 1 && pct <= 99)) { this.flash('The first project\'s share is a whole percent from 1 to 99.', 'bad'); return; }
       const data = { date: f.date, type: f.type, notes: f.notes.trim() || null,
         ...(f.start && f.end ? { start: f.start, end: f.end } : { hours: f.hours }) };
       const trip = f.type === 'travel' ? keyRef(f.tripKey) : null;
       if (trip) data.trip = trip;
-      else { data.jobId = f.jobId || null; if (f.type === 'travel' && f.splitJobId) data.splitJobId = f.splitJobId; }
+      else { data.jobId = f.jobId || null; if (f.type === 'travel' && f.splitJobId) Object.assign(data, { splitJobId: f.splitJobId, splitPercent: pct }); }
       if (!(await this.saveItem('block', f, data))) return;
       this.blockDay = f.date;
       this.blockForm = null;
@@ -403,8 +405,11 @@ createApp({
       this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.');
     },
     hhmm,
-    /** "0:31 and 0:30": the two halves of a split block. */
-    hhmmHalf(d) { const m = this.blockMinutes(d); return `${hhmm(Math.ceil(m / 2))} and ${hhmm(m - Math.ceil(m / 2))}`; },
+    /** "0:31 and 0:30": the two parts of a split block (the same half-up rounding as the server's splitBlock). */
+    hhmmSplit(d) {
+      const m = this.blockMinutes(d), first = Math.floor((m * (Number(d.splitPercent) || 50) + 50) / 100);
+      return `${hhmm(first)} and ${hhmm(m - first)}`;
+    },
     projectName(id) { const p = this.summary?.projects?.find((x) => x.id === id); return p ? (p.code ? `${p.code} ${p.name}` : p.name) : 'a project'; },
     newTime() { this.costForm = null; this.bookingForm = null; this.timeForm = { date: today(), hours: '', start: '', end: '', breaks: '', notes: '' }; },
     clockTime,
@@ -487,7 +492,7 @@ createApp({
       if (i.kind === 'booking') return `${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''}`;
       if (i.kind === 'block') {
         const d = i.data;
-        const where = d.trip ? 'trip' : d.jobId ? this.projectName(d.jobId) + (d.splitJobId ? ' + ' + this.projectName(d.splitJobId) + ' (split)' : '') : 'no project';
+        const where = d.trip ? 'trip' : d.jobId ? this.projectName(d.jobId) + (d.splitJobId ? ' + ' + this.projectName(d.splitJobId) + ` (split ${d.splitPercent ?? 50}/${100 - (d.splitPercent ?? 50)})` : '') : 'no project';
         return `${BLOCK_ICON[d.type]} ${d.start ? clock12(d.start) + '–' + clock12(d.end) + ' ' : ''}${this.blockHours(d)} h · ${where}${d.notes ? ' · ' + d.notes : ''}`;
       }
       if (i.kind === 'purchase') return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.serialNumber ? ' · serial ' + i.data.serialNumber : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;

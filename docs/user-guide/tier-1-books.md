@@ -362,8 +362,10 @@ screen; **‹ Home** at the top, or the phone's own Back, returns to the buttons
 **Time in blocks.** Tap **Time**, pick the **Day**, and add the day one block at a time: **+ 🚗 Travel**, **+ 🏗️ Site**
 or **+ 📐 Office / drafting**. Type the **Start** and **End** (or just the hours), choose the project, and add a note
 if you like. **Save, then next block** starts the next block where this one ended, on the same project; lunch and
-breaks are simply the gaps between blocks. A travel block between two jobs can be **Split with** the next project:
-each gets half (a 1:01 drive is 0:31 and 0:30, the first ending where the second starts). Office or drafting time
+breaks are simply the gaps between blocks. A travel block between two jobs can be **Split with** the next project.
+**First project's share (%)** starts at 50; type another whole percent or tap **60/40**, **70/30** or **75/25**. The
+line under it shows the minutes each project gets (70% of a 1:01 drive is 0:43 and 0:18, rounded to the nearest
+minute, the first ending where the second starts). Office or drafting time
 may have no project (general office). Travel for a trip can go on the trip instead. The list shows the day's blocks
 and the **Day total**. At your desk, **Trips → From the road** lists them under *Time on projects*; **Accept** makes
 each block a time entry on its project (a split block makes two), ready for the timesheet and payroll.
