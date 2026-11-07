@@ -10,24 +10,26 @@
 </head>
 <body>
 <div id="app" v-cloak>
-  <header class="top">
-    <div class="brand">z<span>Accountant</span></div>
-    <template v-if="!auth.screen">
-      <select v-if="companies.length" v-model="companyId" aria-label="Company">
+  <!-- Desk header (Homer, 2026-11-07): a blue banner (icon, name, company on the left; feedback, who you are, sign out on the right)
+       with the page links on their own rail underneath. Help sits at the end of the rail, after Settings. -->
+  <header class="top desk-top">
+    <div class="top-banner">
+      <div class="brand"><span class="brand-tile" aria-hidden="true">z</span><span class="brand-name">z<span>Accountant</span></span></div>
+      <select v-if="!auth.screen && companies.length" v-model="companyId" aria-label="Company">
         <option v-for="c in companies" :value="c.id">{{ c.name }}</option>
       </select>
-      <nav v-if="company">
-        <button v-for="t in tabs.filter(t => canTab(t.id))" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
-      </nav>
-      <div class="who" v-if="auth.user">
+      <div class="who" v-if="!auth.screen && auth.user">
         <button class="help-btn beta-btn" @click="openFeedback" title="Something wrong or confusing? Tell the zAccountant team">🐞 Beta feedback</button>
-        <button v-if="company" class="help-btn" :class="{ active: tab === 'help' }" @click="openHelp" :title="tab === 'help' ? 'Back' : 'Help for this screen'" >? Help</button>
         <button v-if="['admin', 'developer'].includes(auth.user.platformRole)" class="help-btn" :class="{ active: tab === 'admin' }" @click="openAdmin" :title="tab === 'admin' ? 'Back' : 'Admin dashboard: plans'">Admin</button>
         <button v-if="auth.user.platformRole === 'developer'" class="help-btn" :class="{ active: tab === 'developer' }" @click="openDeveloper" :title="tab === 'developer' ? 'Back' : 'Developer dashboard'">Developer</button>
-        <span class="user-chip"><span class="user-name">{{ auth.user.name }}</span><span class="role-pill" v-if="company">{{ company.roleName }}</span></span>
+        <span class="user-chip"><span class="user-name">{{ auth.user.name }}</span><template v-if="company"><span class="user-sep" aria-hidden="true">|</span><span class="user-job">{{ company.roleName }}</span></template></span>
         <button class="link" @click="signOut">Sign out</button>
       </div>
-    </template>
+    </div>
+    <nav class="rail" v-if="!auth.screen && company" aria-label="Pages">
+      <button v-for="t in tabs.filter(t => canTab(t.id))" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
+      <button :class="{ active: tab === 'help' }" @click="openHelp" :title="tab === 'help' ? 'Back' : 'Help for this screen'">Help</button>
+    </nav>
   </header>
 
   <div class="toast" v-if="message" :class="message.kind" @click="message = null">{{ message.text }}</div>

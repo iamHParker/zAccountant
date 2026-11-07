@@ -4,7 +4,7 @@ zAccountant keeps a small business's books, sends invoices, pays bills, reconcil
 companies in Texas, Colorado, California and Washington DC.
 
 This guide is arranged **by tier**: what everyone uses first, then what each plan adds. Read the chapters for the
-tiers your company has. Inside the app, the **? Help** button opens the short guide for the screen you are on, and
+tiers your company has. Inside the app, the **Help** link (after Settings) opens the short guide for the screen you are on, and
 **🐞 Beta feedback** sends us a problem report.
 
 | Tier | Chapter | Who has it |

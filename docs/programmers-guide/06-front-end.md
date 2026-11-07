@@ -68,6 +68,11 @@ that shows it redraws by itself. You never write "find this element and change i
   `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The status bar at the
   bottom shows it after the company name as `Build …`, and beta reports record the same string.
 
+Desk header (`header.top.desk-top` in `index.html`): a blue `.top-banner` (brand tile, company box; `.who` pushed right
+with `margin-left: auto`) over a `nav.rail` of page tabs, Help last. Colours are `--banner*` tokens in `styles.css`.
+It is sticky on wide screens and scrolls away below 640px. The Road page keeps its own one-line `body.road .top`.
+(`.banner` is the unrelated yellow notice box, hence the name `.top-banner`.)
+
 Zoom: the status bar's slider sets the CSS variable `--zoom` on `<html>` (CSSOM, allowed by the CSP), and
 `.top, main { zoom: var(--zoom) }` scales the header and page, never the status bar. The choice is kept in
 `localStorage` (`zacc.zoom`); print resets it to 1. Sizes in `styles.css` are px, so `zoom` (not `font-size`) is what scales them.
