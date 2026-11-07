@@ -40,6 +40,9 @@ company**.
 
 ## 3. Finding your way
 
+The blue banner at the top holds the company box on the left, and on the right **🐞 Beta feedback**, your name and
+job, and **Sign out**. The pages are on the light strip just below it, ending with **Help**.
+
 | Tab | What it's for | Tier |
 |---|---|---|
 | Home | cash, income, expenses and profit this year; record a quick transaction; your shortcut cards | 1 |
@@ -56,7 +59,7 @@ company**.
 
 You see only the tabs your role and your company's plan include.
 
-**? Help** opens the guide for the screen you are on, and its search box finds any guide. The bar along the bottom
+**Help** (the last link on the strip) opens the guide for the screen you are on, and its search box finds any guide. The bar along the bottom
 of the screen has the zoom slider, full screen, Options and the build number.
 
 ## 4. When something goes wrong

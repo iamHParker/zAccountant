@@ -23,6 +23,37 @@ nav { display: flex; gap: 4px; flex-wrap: wrap; }
 nav button { background: none; border: 0; padding: 6px 10px; border-radius: 6px; color: var(--muted); cursor: pointer; font: inherit; }
 nav button.active { background: var(--brand); color: var(--brand-ink); }
 main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+/* Desk header (Homer, 2026-11-07): a contrasting blue banner on top, the page links on a light rail below it.
+   The Road page keeps its own one-line header (body.road .top). */
+:root { --banner: #1d4f91; --banner-ink: #fff; --banner-soft: rgba(255, 255, 255, .16); }
+@media (prefers-color-scheme: dark) { :root { --banner: #1a3d6e; } }
+.desk-top { display: block; padding: 0; border-bottom: 0; }
+.desk-top .top-banner { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 8px 16px; background: var(--banner); color: var(--banner-ink); }
+.desk-top .brand { display: flex; align-items: center; gap: 8px; color: #9fe6cf; }
+.desk-top .brand .brand-name { color: #9fe6cf; }
+.desk-top .brand .brand-name span { color: var(--banner-ink); }
+.desk-top .brand .brand-tile { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: #1f6f5c;
+  color: #fff; font-size: 19px; font-weight: 800; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .7); }
+.desk-top .top-banner select { background: #fff; color: #1d2433; border-color: transparent; }
+.desk-top .who button.help-btn { background: transparent; color: var(--banner-ink); border-color: rgba(255, 255, 255, .7); }
+.desk-top .who button.help-btn:hover { background: var(--banner-soft); }
+.desk-top .who button.help-btn.active { background: #fff; color: var(--banner); border-color: #fff; }
+.desk-top .user-chip { background: var(--banner-soft); color: var(--banner-ink); padding: 3px 12px; }
+.desk-top .user-sep { opacity: .6; }
+.desk-top .user-job { font-weight: 500; }
+.desk-top .who button.link { color: var(--banner-ink); }
+.rail { display: flex; gap: 2px; flex-wrap: wrap; padding: 5px 12px; background: var(--card); border-bottom: 1px solid var(--line); }
+.rail button { margin: 0; padding: 6px 12px; font-weight: 500; color: var(--ink); }
+.rail button:hover:not(.active) { background: var(--tint); }
+.rail button.active { background: var(--banner); color: var(--banner-ink); }
+@media (max-width: 640px) {
+  .desk-top { position: static; } /* on a phone the two rows would cover too much of the screen, so they scroll away */
+  .desk-top .top-banner { gap: 8px 10px; padding: 8px 12px; }
+  .desk-top .top-banner select { flex: 1 1 140px; max-width: none; }
+  .desk-top .who { flex: 1 1 100%; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+  .rail { padding: 4px 8px; }
+  .rail button { padding: 5px 9px; }
+}
 /* Zoom from the status bar (--zoom set by app.js; 1 = 100%): enlarges the header and page, never the status bar itself. */
 .top, main { zoom: var(--zoom, 1); }
 body:has(.status-bar) { padding-bottom: 44px; }
