@@ -13,6 +13,9 @@ test('split travel: half each, the odd minute to the first, the first ends where
   // 7:00 to 8:01 = 61 minutes → 31 + 30: 7:00-7:31 and 7:31-8:01.
   assert.deepEqual(splitBlock(61, '07:00'), [{ minutes: 31, start: '07:00', end: '07:31' }, { minutes: 30, start: '07:31', end: '08:01' }]);
   assert.deepEqual(splitBlock(90).map((x) => x.minutes), [45, 45]);
+  // 70/30: 70% of 10 = 7 (Homer, 2026-11-07); 75% of 61 = 45.75 → 46 + 15.
+  assert.deepEqual(splitBlock(10, '15:30', 70), [{ minutes: 7, start: '15:30', end: '15:37' }, { minutes: 3, start: '15:37', end: '15:40' }]);
+  assert.deepEqual(splitBlock(61, null, 75).map((x) => x.minutes), [46, 15]);
   // Past midnight: 11:50 PM + 30 min → 11:50-12:05 AM, 12:05-12:20 AM.
   assert.deepEqual(splitBlock(30, '23:50').map((x) => [x.start, x.end]), [['23:50', '00:05'], ['00:05', '00:20']]);
 });
@@ -57,6 +60,9 @@ test('Road time blocks: one entry per block, split travel in halves, travel on a
   await send('blk-site-am-001', { date: '2026-11-05', type: 'site', start: '08:01', end: '12:00', jobId: J['2601'] });
   await send('blk-site-pm-001', { date: '2026-11-05', type: 'site', start: '12:45', end: '15:30', jobId: J['2601'] });
   await send('blk-office-0001', { date: '2026-11-05', type: 'office', hours: '1.5', notes: 'Drafting' });
+  await send('blk-travel-7030', { date: '2026-11-05', type: 'travel', start: '15:30', end: '15:40', jobId: J['2601'], splitJobId: J['2602'], splitPercent: 70, notes: 'home' });
+  const badPct = await phone.call('POST', '/api/road/items', { clientId: 'blk-bad-000004', kind: 'block', data: { date: '2026-11-05', type: 'travel', hours: '1', jobId: J['2601'], splitJobId: J['2602'], splitPercent: 100 } });
+  assert.match(badPct.body.details.join(' '), /whole percent from 1 to 99/);
   // Refused: site time with no project; split with itself; no times.
   const noJob = await phone.call('POST', '/api/road/items', { clientId: 'blk-bad-000001', kind: 'block', data: { date: '2026-11-05', type: 'site', start: '08:00', end: '09:00' } });
   assert.equal(noJob.status, 400);
@@ -77,7 +83,7 @@ test('Road time blocks: one entry per block, split travel in halves, travel on a
   ok(await desk.call('POST', `${b}/road-items/${by('trip-dallas-01').id}/accept`, {}));
   const split = ok(await desk.call('POST', `${b}/road-items/${by('blk-travel-out1').id}/accept`, {}));
   assert.equal(split.timeEntryIds.length, 2);
-  for (const cid of ['blk-site-am-001', 'blk-site-pm-001', 'blk-office-0001', 'blk-trip-drive1']) ok(await desk.call('POST', `${b}/road-items/${by(cid).id}/accept`, {}));
+  for (const cid of ['blk-site-am-001', 'blk-site-pm-001', 'blk-office-0001', 'blk-travel-7030', 'blk-trip-drive1']) ok(await desk.call('POST', `${b}/road-items/${by(cid).id}/accept`, {}));
 
   const { rows } = await db.pool.query(
     `SELECT j.code, t.trip_id IS NOT NULL AS trip, t.minutes, to_char(t.start_time, 'HH24:MI') AS s, to_char(t.end_time, 'HH24:MI') AS e, t.notes
@@ -87,6 +93,8 @@ test('Road time blocks: one entry per block, split travel in halves, travel on a
     ['2602', false, 30, '07:31', '08:01', 'Travel: SAT to Boerne (split)'],
     ['2601', false, 239, '08:01', '12:00', 'Site'],
     ['2601', false, 165, '12:45', '15:30', 'Site'],
+    ['2601', false, 7, '15:30', '15:37', 'Travel: home (split 70/30)'],
+    ['2602', false, 3, '15:37', '15:40', 'Travel: home (split 70/30)'],
     [null, true, 60, '16:00', '17:00', 'Travel'],
     [null, false, 90, null, null, 'Office / drafting: Drafting'],
   ]);

@@ -157,11 +157,12 @@ const clockMinutes = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice
 const clockOf = (min) => `${String(Math.floor((min % 1440) / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 
 /**
- * A travel block shared by two projects: half the minutes each, the odd minute to the first (61 → 31 + 30). With a
- * start time the first part ends where the second starts, so the day still reads 7:00-8:01 then 8:01-9:01... exactly.
+ * A travel block shared by two projects: the first project's percent of the minutes, rounded half up, the rest to the
+ * second (50% of 61 → 31 + 30; 70% of 10 → 7 + 3; Homer, 2026-11-07). With a start time the first part ends where the
+ * second starts, so the day still reads 7:00-7:31 then 7:31-8:01 exactly.
  */
-export function splitBlock(minutes, start = null) {
-  const first = Math.ceil(minutes / 2), second = minutes - first;
+export function splitBlock(minutes, start = null, percent = 50) {
+  const first = Math.floor((minutes * percent + 50) / 100), second = minutes - first;
   if (!start) return [{ minutes: first, start: null, end: null }, { minutes: second, start: null, end: null }];
   const s0 = clockMinutes(start);
   return [{ minutes: first, start, end: clockOf(s0 + first) }, { minutes: second, start: clockOf(s0 + first), end: clockOf(s0 + minutes) }];
@@ -248,6 +249,9 @@ async function cleanItem(db, key, kind, d) {
         if (!out.splitJobId) errors.push('the project to split with is closed or gone');
         else if (out.splitJobId === out.jobId) errors.push('split it with a different project');
         else if (!out.jobId) errors.push('choose the first project too');
+        const pct = d.splitPercent == null || d.splitPercent === '' ? 50 : Number(d.splitPercent);
+        if (!Number.isInteger(pct) || pct < 1 || pct > 99) errors.push('the first project\'s share must be a whole percent from 1 to 99');
+        else out.splitPercent = pct;
       }
       if (out.type !== 'office' && !out.jobId) errors.push(out.type === 'travel' ? 'choose the project (or the trip) the travel is for' : 'choose the project');
     }
@@ -528,9 +532,12 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
       return { accepted: true, purchaseId: r.id };
     }
     if (item.kind === 'block' && !d.trip) {
-      // Time on projects: one time entry, or two halves for travel split between two projects.
+      // Time on projects: one time entry, or two parts for travel split between two projects (by its percent).
       const label = `${BLOCK_TYPES[d.type]}${d.notes ? ': ' + d.notes : ''}`;
-      const parts = d.splitJobId ? splitBlock(d.minutes, d.start ?? null).map((x, n) => ({ ...x, jobId: n ? d.splitJobId : d.jobId, notes: `${label} (split)` }))
+      const pct = d.splitPercent ?? 50;
+      const tag = pct === 50 ? '(split)' : `(split ${pct}/${100 - pct})`;
+      const parts = d.splitJobId
+        ? splitBlock(d.minutes, d.start ?? null, pct).map((x, n) => ({ ...x, jobId: n ? d.splitJobId : d.jobId, notes: `${label} ${tag}` })).filter((x) => x.minutes > 0)
         : [{ minutes: d.minutes, start: d.start ?? null, end: d.end ?? null, jobId: d.jobId, notes: label }];
       const ids = [];
       for (const x of parts) {
