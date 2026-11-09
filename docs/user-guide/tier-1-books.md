@@ -87,6 +87,10 @@ change anything yet.
     price, whether it is taxable, and the income account it goes to.
   - Leave the price empty for costs that change every time.
   - **hide** removes a rate from the invoice list without losing its history.
+  - **Changing a price** affects new invoice lines from then on. Invoices already saved keep the price they were
+    written with (like a signed drawing: a revised standard detail doesn't change sheets already issued). If an
+    open invoice, or one you are editing, has a line at the old price, a note under that line says
+    *The saved rate for … is now $X* with a **Use $X** button; press it only if you want that line re-priced.
 
 ### Customers
 

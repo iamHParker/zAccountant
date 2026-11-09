@@ -109,6 +109,11 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
 - **Professional-services invoices (migration 016):**
   - `invoice_items` holds saved rates. Kind `service` is hours × rate; kind `expense` is a cost passed on, usually
     quantity 1 and untaxed. A rate with no price means "type it on the invoice".
+  - A line copies the rate's price when the rate is picked; a later change to the rate never touches saved lines.
+    Picking a rate asks the server for today's prices first (`refreshItems`), and so does clicking into the rate
+    list and coming back to the browser tab; the Sales tab re-reads them when it opens.
+    `staleRate(l)` flags an hourly line whose price differs from today's saved rate and offers **Use $X**
+    (`useCurrentRate`). Re-picking the same rate in the list fires no change event, hence the note (Homer 2026-11-09).
   - Quantity may be a share `"1/N"` (an expense split across N jobs, Homer 2026-10-24): `lineAmount` divides the
     price by N exactly and rounds once, half-up. The invoice's *Jobs sharing these expenses* box writes `1/N` on
     every expense-kind line except ones whose quantity the user typed (`qtyTyped`). Each invoice rounds on its own,

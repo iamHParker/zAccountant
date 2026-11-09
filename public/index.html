@@ -895,7 +895,7 @@
             <tbody>
               <template v-for="(l, i) in ar.doc.lines" :key="l.row">
               <tr>
-                <td><select v-model="l.itemId" @change="pickItem(l)"><option value="">None</option>
+                <td><select v-model="l.itemId" @focus="refreshItems()" @change="pickItem(l)"><option value="">None</option>
                   <option v-if="can('admin')" :value="NEW_CONTACT">+ Add new rate…</option>
                   <optgroup label="By the hour"><option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
                   <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
@@ -912,6 +912,10 @@
                     <button v-if="lineAdjusted(l)" type="button" class="link small" @click="l.amountTyped = ''" title="Go back to hours × rate">undo</button></template></td>
                 <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
                 <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
+              </tr>
+              <tr v-if="staleRate(l)" class="line-note">
+                <td colspan="9" class="small muted">The saved rate for {{ staleRate(l).name }} is now {{ money(staleRate(l).rateCents) }}; this line has ${{ l.unitPrice }}.
+                  <button type="button" class="link" @click="useCurrentRate(l)">Use {{ money(staleRate(l).rateCents) }}</button></td>
               </tr>
               <tr v-if="itemOf(l) && itemOf(l).rateCents == null && itemOf(l).kind === 'service'" class="line-note">
                 <td colspan="9" class="small muted">No rate saved for {{ itemOf(l).name }} yet: type it in Rate / price.
