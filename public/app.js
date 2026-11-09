@@ -112,7 +112,7 @@ const blankCompany = () => ({ name: '', homeState: 'TX', fiscalYearStartMonth: 1
 // `row` is a tag for the screen only (never sent): when the lines are sorted by date, each row's boxes move with it.
 let lineRow = 0;
 const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', description: '', quantity: '1', unitPrice: '', amountTyped: '', amountOpen: false, taxable: false,
-  jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '', row: ++lineRow });
+  jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '', comment: false, row: ++lineRow });
 const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
 const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', jobs: [{ jobId: '', share: '' }] });
 const blankTripCost = (date = today()) => ({ date, dateDefault: date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
@@ -127,6 +127,8 @@ const docSort = (kind) => { try { const s = JSON.parse(localStorage.getItem(`zac
 // Projects list order, kept on this computer. The default is newest first (Homer, 2026-11-03: new work was at the bottom).
 // The key name changed with that default ('zacc.projectSort2'), so an old saved "by number" order doesn't hide it.
 const projectSort = () => { try { const s = JSON.parse(localStorage.getItem('zacc.projectSort2')); if (['added', 'code', 'name', 'customer'].includes(s?.key)) return { key: s.key, dir: s.dir < 0 ? -1 : 1 }; } catch { /* none kept */ } return { key: 'added', dir: -1 }; };
+// The "Comment" choice in an invoice line's Rate or item list: the line becomes free text with no price (Homer, 2026-11-09).
+const COMMENT_LINE = '+comment';
 const NEW_CONTACT = '+new'; // the "+ Add new customer…" (and "+ Add new project…") choice in the invoice/bill form's lists
 const lastZoom = () => { try { const z = Number(localStorage.getItem('zacc.zoom')); return z >= ZOOM_MIN && z <= ZOOM_MAX ? z : 100; } catch { return 100; } };
 const keepZoom = (z) => { try { localStorage.setItem('zacc.zoom', String(z)); } catch { /* private window: not kept */ } };
@@ -312,7 +314,7 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '', siteFeatures: { receiptReading: false },
-      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, NEW_CONTACT, renaming: null, ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, NEW_CONTACT, COMMENT_LINE, renaming: null, ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
       MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
       statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
@@ -1422,9 +1424,9 @@ createApp({
     qtyShow,
     hoursText,
     /** A line's amount: the one typed over quantity × price (a rounding adjustment), or quantity × price. */
-    lineAmt(l) { const t = String(l.amountTyped ?? '').trim() ? cents(l.amountTyped) : null; return t ?? lineCents(l.quantity, l.unitPrice); },
+    lineAmt(l) { if (l.comment) return 0; const t = String(l.amountTyped ?? '').trim() ? cents(l.amountTyped) : null; return t ?? lineCents(l.quantity, l.unitPrice); },
     /** True when a typed amount differs from quantity × price. */
-    lineAdjusted(l) { const t = String(l.amountTyped ?? '').trim() ? cents(l.amountTyped) : null; return t != null && t !== lineCents(l.quantity, l.unitPrice); },
+    lineAdjusted(l) { if (l.comment) return false; const t = String(l.amountTyped ?? '').trim() ? cents(l.amountTyped) : null; return t != null && t !== lineCents(l.quantity, l.unitPrice); },
     /** Right-click (or double-click) the amount to type it: Homer's paper invoices round 4-digit hours a cent or two differently. */
     openLineAmount(l) { if (l.amountTyped === '' || l.amountTyped == null) { const c = lineCents(l.quantity, l.unitPrice); l.amountTyped = c == null ? '' : (c / 100).toFixed(2); } l.amountOpen = true; },
     closeLineAmount(l) { l.amountOpen = false; if (!this.lineAdjusted(l)) l.amountTyped = ''; },
@@ -2324,6 +2326,7 @@ createApp({
     /** A saved rate was picked on an invoice line: fill in its price, tax and income account (all still changeable). */
     async pickItem(l) {
       // "+ Add new rate…": the rate form pops up; saving it picks the new rate on this line (saveItem).
+      if (l.itemId === COMMENT_LINE) { this.makeComment(l); return; }
       if (l.itemId === NEW_CONTACT) { l.itemId = ''; Object.assign(this.inv, { popupLine: l, editId: null, item: { ...blankItem(), accountId: l.accountId } }); return; }
       // Ask the server for today's prices first, so a rate changed in Settings (or another tab) is never filled in stale.
       const picked = l.itemId;
@@ -2336,6 +2339,15 @@ createApp({
       if (it.kind === 'expense') { l.quantity = this.shareText(); l.qtyTyped = false; }
       if (!l.serviceDate) { l.serviceDate = this.ar.doc.date; this.sortLines(); }
     },
+    /**
+     * Turn an invoice line into a comment: free text such as "Weather: return trip needed". It keeps its date (so it
+     * sorts with that day's work) and its text, and drops the price, tax and account, so it can't change any total.
+     */
+    makeComment(l) {
+      Object.assign(l, { comment: true, itemId: '', quantity: '1', unitPrice: '', amountTyped: '', amountOpen: false, taxable: false, qtyTyped: false });
+    },
+    /** Back from a comment to a priced line (the text stays as its description). */
+    uncomment(l) { const fresh = this.newLine(); Object.assign(l, { comment: false, accountId: fresh.accountId }); },
     /** Expenses split evenly across jobs: "1" for one job, "1/3" for three. Never fewer than 1 job. */
     shareText() { const n = Math.max(1, Math.floor(Number(this.ar.doc.splitJobs) || 1)); return n === 1 ? '1' : `1/${n}`; },
     setSplitJobs() {
@@ -2422,7 +2434,7 @@ createApp({
         editPaidCents: doc.paidCents || 0, editFirstPay: posted.map((p) => p.date).sort()[0] ?? '',
         date: doc.date, dueDate: doc.plan ? '' : doc.dueDate ?? '', planCount: doc.plan ? String(doc.plan.count) : '', planFirstDue: doc.plan?.firstDue ?? '', noLateCharges: !!doc.noLateCharges, memo: doc.memo ?? '', project: doc.project ?? '', jobId: doc.jobId ?? '',
         attention: doc.attention ?? '', careOf: doc.careOf ?? '', sendTo: doc.sendTo ?? '', clientRef: doc.clientRef ?? '',
-        lines: doc.lines.map((l) => ({ ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
+        lines: doc.lines.map((l) => (l.comment ? { ...blankLine(), comment: true, serviceDate: l.serviceDate ?? '', description: l.description ?? '' } : { ...blankLine(), itemId: l.itemId ?? '', serviceDate: l.serviceDate ?? '', accountId: l.accountId,
           description: l.description ?? '', quantity: l.quantity ?? '1', unitPrice: dollars(l.unitPriceCents), taxable: !!l.taxable, qtyTyped: true,
           amountTyped: l.amountCents !== lineCents(l.quantity ?? '1', dollars(l.unitPriceCents)) ? dollars(l.amountCents) : '',
           jobId: l.jobId ?? '', billable: !!l.billable, timeEntryId: l.timeEntryId ?? '', billedLineId: l.billedLineId ?? '', tripCostId: l.tripCostId ?? '',
@@ -2436,7 +2448,9 @@ createApp({
       const d = this.ar.doc;
       this.sortLines();
       // A line counts once something is typed or picked on it (a new invoice line starts with its income account filled in).
-      const lines = d.lines.filter((l) => l.unitPrice || l.description?.trim() || l.itemId || (l.accountId && this.S.kind === 'bill')).map((l) => ({ accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
+      // A comment line counts only when its text is typed, and sends just its text and date.
+      const lines = d.lines.filter((l) => (l.comment ? l.description?.trim() : l.unitPrice || l.description?.trim() || l.itemId || (l.accountId && this.S.kind === 'bill'))).map((l) => (l.comment
+        ? { comment: true, description: l.description, serviceDate: l.serviceDate || undefined } : { accountId: l.accountId, description: l.description, quantity: l.quantity || '1',
         unitPrice: l.unitPrice, lineAmount: this.lineAdjusted(l) ? l.amountTyped : undefined, taxable: l.taxable, serviceDate: l.serviceDate || undefined, itemId: l.itemId || undefined,
         jobId: l.jobId || undefined, billable: !!l.jobId && l.billable, timeEntryId: l.timeEntryId || undefined, billedLineId: l.billedLineId || undefined,
         tripCostId: l.tripCostId || undefined }));

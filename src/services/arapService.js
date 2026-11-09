@@ -275,6 +275,7 @@ const DOC_SELECT = `
  * Optional: serviceDate (the day the work was done or the cost incurred) and itemId (the saved rate it came from).
  * A bill line can name its project (jobId) and be marked billable (a cost passed on to that client). An invoice
  * line can say which time entry (timeEntryId) or billable bill line (billedLineId) it bills; each is billed once.
+ * An invoice line { comment: true, description, serviceDate? } is a comment: printed, never priced or posted.
  */
 const MAX_LINE_ADJUST_CENTS = 100;
 
@@ -294,6 +295,17 @@ async function cleanLines(c, companyId, kind, rawLines, errors) {
   const usedSources = new Set();
   return rawLines.map((l, i) => {
     const n = `line ${i + 1}`;
+    // A comment line (invoices only): free text, and an optional date so it sorts with that day's work.
+    // It has no account, price or amount, so it never changes a total, the tax, a payment or the ledger.
+    if (l?.comment === true) {
+      if (kind !== 'invoice') { errors.push(`${n}: comment lines are for invoices`); return null; }
+      const description = text(l.description, 300);
+      if (!description) { errors.push(`${n}: type the comment`); return null; }
+      const serviceDate = l.serviceDate == null || l.serviceDate === '' ? null : l.serviceDate;
+      if (serviceDate != null && !isIsoDate(serviceDate)) { errors.push(`${n}: the date must be a real date (YYYY-MM-DD)`); return null; }
+      return { comment: true, accountId: null, description, quantity: '0', unitPriceCents: 0, amountCents: 0, taxable: false, serviceDate,
+        itemId: null, jobId: null, billable: false, timeEntryId: null, billedLineId: null, tripCostId: null };
+    }
     const a = byId.get(l?.accountId);
     if (!a || !a.is_active) errors.push(`${n}: choose an ${kind === 'invoice' ? 'income' : 'expense'} account`);
     else if (a.cash_flow === 'cash' || ['accounts_receivable', 'accounts_payable', 'retained_earnings', 'sales_tax_payable'].includes(a.system_key)) {
@@ -479,10 +491,10 @@ export async function createDocument(pool, companyId, { kind, contactId, number,
     for (const l of clean) {
       await c.query(
         `INSERT INTO document_lines (company_id, document_id, account_id, description, quantity, unit_price_cents, amount_cents, taxable, service_date, item_id,
-                                     job_id, billable, time_entry_id, billed_line_id, trip_cost_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+                                     job_id, billable, time_entry_id, billed_line_id, trip_cost_id, is_comment)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
         [companyId, docId, l.accountId, l.description, l.quantity, l.unitPriceCents, l.amountCents, l.taxable, l.serviceDate, l.itemId,
-          l.jobId, l.billable, l.timeEntryId, l.billedLineId, l.tripCostId]);
+          l.jobId, l.billable, l.timeEntryId, l.billedLineId, l.tripCostId, l.comment === true]);
     }
     await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: kind, entityId: docId, actor,
       payload: { ...(replacesId ? { replacesId } : {}), number: num, ...(typedNumber ? { typedNumber } : {}), contactId: contact.id, date, dueDate: due, ...(planIn ? { plan: planIn } : {}), ...(noLateCharges === true ? { noLateCharges: true } : {}), ...(lateChargeMonth ? { lateChargeMonth } : {}), subtotalCents: subtotal, taxRate: rate, taxCents: tax, totalCents: total, lines: clean, entryId: je.id } });
@@ -499,7 +511,7 @@ export async function getDocument(db, companyId, docId, { today = null } = {}) {
     `SELECT l.*, a.code, a.name AS account_name, i.name AS item_name, i.kind AS item_kind, j.name AS job_name, j.code AS job_code,
             (SELECT d2.number FROM document_lines l2 JOIN documents d2 ON d2.id = l2.document_id
               WHERE l2.billed_line_id = l.id AND d2.status = 'posted' LIMIT 1) AS billed_on
-       FROM document_lines l JOIN accounts a ON a.id = l.account_id LEFT JOIN invoice_items i ON i.id = l.item_id LEFT JOIN jobs j ON j.id = l.job_id
+       FROM document_lines l LEFT JOIN accounts a ON a.id = l.account_id LEFT JOIN invoice_items i ON i.id = l.item_id LEFT JOIN jobs j ON j.id = l.job_id
       WHERE l.document_id = $1 ORDER BY l.id`, [d.id]);
   const { rows: [job] } = d.job_id ? await db.query('SELECT name, code, address FROM jobs WHERE id = $1', [d.job_id]) : { rows: [] };
   const { rows: pays } = await db.query(
@@ -510,7 +522,7 @@ export async function getDocument(db, companyId, docId, { today = null } = {}) {
     ...docOut(d, today),
     contact: ct,
     job: job ?? null,
-    lines: lines.map((l) => ({ id: String(l.id), accountId: l.account_id, accountCode: l.code, accountName: l.account_name, description: l.description,
+    lines: lines.map((l) => ({ id: String(l.id), comment: l.is_comment, accountId: l.account_id, accountCode: l.code, accountName: l.account_name, description: l.description,
       quantity: l.quantity, unitPriceCents: l.unit_price_cents, amountCents: l.amount_cents, taxable: l.taxable,
       serviceDate: l.service_date, itemId: l.item_id, itemName: l.item_name ?? null, itemKind: l.item_kind ?? null,
       jobId: l.job_id ?? null, jobName: l.job_name ?? null, jobCode: l.job_code ?? null, billable: l.billable,
