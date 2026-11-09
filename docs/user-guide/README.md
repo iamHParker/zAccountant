@@ -47,6 +47,7 @@ Find the task, follow the link.
 - [add or edit a customer, divisions, adjusters](tier-1-books.md#customers)
 - [write an invoice (and send it)](tier-1-books.md#writing-an-invoice)
 - [bill a project's time and passed-on costs](tier-1-books.md#writing-an-invoice)
+- [add a note to an invoice (weather, a skipped unit) that doesn't change the total](tier-1-books.md#writing-an-invoice)
 - [set up a payment plan](tier-1-books.md#payment-plans-no-interest)
 - [charge interest and a late fee](tier-1-books.md#late-charges-interest-and-a-late-statement-fee)
 - [bring in an old invoice from its PDF](tier-1-books.md#old-invoices-from-before-zaccountant)

@@ -7,6 +7,7 @@ that aren't obvious from the code. Read the entry for a feature before changing 
   (`invoice_items`, kind service = hours × rate, expense = cost passed on), line `service_date`/`item_id`, invoice
   `project` block, letterhead (address, note with tax ID + TX firm number, closing line), logo in `company_logos`,
   pinned `default_sales_tax_rate`. Layout follows Homer's Excel invoice: Hours, Date, Task, Rate, T, Subtotal.
+  Comment lines (migration 043, `is_comment`): text + date only, no account or amount, never posted; bills refuse them.
   Expense split across jobs: quantity `1/N` from the invoice's "Jobs sharing these expenses" box; typed quantities win.
 - Projects = `jobs` (+ site address; not plan-gated). Bill lines: project + "bill to client"; invoice "Pull in unbilled
   time and costs" links each line to its time entry / bill line, billed once (trigger, migration 023,
