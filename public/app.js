@@ -463,8 +463,8 @@ createApp({
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.statusMenu = false; });
     // Back to this browser tab (rates may have been changed in another tab): refresh the saved rates, quietly.
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible' || this.tab !== 'sales' || !this.companyId || !this.auth.user) return;
-      api('GET', `/companies/${this.companyId}/invoice-items`).then((r) => { if (Array.isArray(r)) this.items = r; }).catch(() => {});
+      if (document.visibilityState !== 'visible' || this.tab !== 'sales' || !this.auth.user) return;
+      this.refreshItems();
     });
     startRecorder();
     onSignInNeeded = (next) => this.goAuth(next ?? 'signin');
@@ -2294,6 +2294,12 @@ createApp({
       l.unitPrice = (it.rateCents / 100).toFixed(2); l.amountTyped = '';
     },
     // ---------------------------------------------------------------- Invoice setup: saved rates, sales tax, letterhead, logo
+    /** Re-read the saved rates without any message (a failed read keeps the list we have). Settings' list includes hidden rates. */
+    async refreshItems() {
+      if (!this.companyId) return;
+      const all = this.tab === 'settings';
+      try { const r = await api('GET', `/companies/${this.companyId}/invoice-items${all ? '?all=1' : ''}`); if (Array.isArray(r)) this.items = r; } catch { /* keep the list */ }
+    },
     async loadItems(all = false) { this.items = (await this.run(() => api('GET', `/companies/${this.companyId}/invoice-items${all ? '?all=1' : ''}`))) ?? []; },
     /**
      * A new invoice line starts on the income account used last on this computer (or Service Revenue) and the date of
@@ -2316,13 +2322,17 @@ createApp({
       return l;
     },
     /** A saved rate was picked on an invoice line: fill in its price, tax and income account (all still changeable). */
-    pickItem(l) {
+    async pickItem(l) {
       // "+ Add new rate…": the rate form pops up; saving it picks the new rate on this line (saveItem).
       if (l.itemId === NEW_CONTACT) { l.itemId = ''; Object.assign(this.inv, { popupLine: l, editId: null, item: { ...blankItem(), accountId: l.accountId } }); return; }
+      // Ask the server for today's prices first, so a rate changed in Settings (or another tab) is never filled in stale.
+      const picked = l.itemId;
+      await this.refreshItems();
+      if (l.itemId !== picked) return; // changed again while waiting
       const it = this.items.find((x) => x.id === l.itemId);
       if (!it) return;
       l.accountId = it.accountId; l.taxable = it.taxable;
-      if (it.rateCents != null) l.unitPrice = (it.rateCents / 100).toFixed(2);
+      if (it.rateCents != null) { l.unitPrice = (it.rateCents / 100).toFixed(2); l.amountTyped = ''; }
       if (it.kind === 'expense') { l.quantity = this.shareText(); l.qtyTyped = false; }
       if (!l.serviceDate) { l.serviceDate = this.ar.doc.date; this.sortLines(); }
     },
