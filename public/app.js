@@ -448,7 +448,7 @@ createApp({
       if (t === 'bank') this.loadBank();
       if (t === 'trips') this.loadTrips();
       if (t === 'bills' && ['plans', 'late'].includes(this.ar.panel)) this.ar.panel = 'docs'; // payment plans and late charges are for invoices
-      if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [], planStatement: null }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); }
+      if (t === 'sales' || t === 'bills') { Object.assign(this.ar, { view: 'open', detail: null, aging: null, docs: [], payments: [], contacts: [], planStatement: null }); this.ar.showDoc = this.ar.showPay = this.ar.showContact = false; this.loadAr(); if (t === 'sales') this.loadItems(); }
       if (t === 'accounts') this.loadImports();
       if (t === 'time') this.loadTime(true);
     },
@@ -461,6 +461,11 @@ createApp({
     applyZoom(this.zoom);
     document.addEventListener('fullscreenchange', () => { this.fullscreen = !!document.fullscreenElement; });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.statusMenu = false; });
+    // Back to this browser tab (rates may have been changed in another tab): refresh the saved rates, quietly.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || this.tab !== 'sales' || !this.companyId || !this.auth.user) return;
+      api('GET', `/companies/${this.companyId}/invoice-items`).then((r) => { if (Array.isArray(r)) this.items = r; }).catch(() => {});
+    });
     startRecorder();
     onSignInNeeded = (next) => this.goAuth(next ?? 'signin');
     api('GET', '/public/features').then((f) => { this.siteFeatures = f; }).catch(() => {}); // e.g. receipt reading on or off
@@ -2271,6 +2276,22 @@ createApp({
       this.ar.doc = blankDoc(invoice ? this.company?.default_sales_tax_rate ?? '' : '');
       this.ar.showDoc = true; this.ar.showPay = false; this.ar.detail = null; this.ar.pull = null;
       if (invoice) { this.loadItems(); this.ar.doc.lines = [this.newLine()]; }
+    },
+    /**
+     * A line whose price is not the saved rate's price today (the rate was changed in Settings after this line was
+     * filled in, or after this invoice was saved). Returns the saved rate so the form can offer "Use $X". Only
+     * hourly rates: costs passed on carry the bill's own amount. A saved invoice keeps its old price unless asked.
+     */
+    staleRate(l) {
+      const it = this.itemOf(l);
+      if (!it || it.kind !== 'service' || it.rateCents == null || String(l.unitPrice ?? '').trim() === '') return null;
+      const cents = Math.round(Number(l.unitPrice) * 100);
+      return Number.isFinite(cents) && cents !== it.rateCents ? it : null;
+    },
+    useCurrentRate(l) {
+      const it = this.staleRate(l);
+      if (!it) return;
+      l.unitPrice = (it.rateCents / 100).toFixed(2); l.amountTyped = '';
     },
     // ---------------------------------------------------------------- Invoice setup: saved rates, sales tax, letterhead, logo
     async loadItems(all = false) { this.items = (await this.run(() => api('GET', `/companies/${this.companyId}/invoice-items${all ? '?all=1' : ''}`))) ?? []; },

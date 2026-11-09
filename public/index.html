@@ -913,6 +913,10 @@
                 <td><select v-model="l.accountId"><option value="">Choose…</option><option v-for="a in docLineAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></td>
                 <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
               </tr>
+              <tr v-if="staleRate(l)" class="line-note">
+                <td colspan="9" class="small muted">The saved rate for {{ staleRate(l).name }} is now {{ money(staleRate(l).rateCents) }}; this line has ${{ l.unitPrice }}.
+                  <button type="button" class="link" @click="useCurrentRate(l)">Use {{ money(staleRate(l).rateCents) }}</button></td>
+              </tr>
               <tr v-if="itemOf(l) && itemOf(l).rateCents == null && itemOf(l).kind === 'service'" class="line-note">
                 <td colspan="9" class="small muted">No rate saved for {{ itemOf(l).name }} yet: type it in Rate / price.
                   <button type="button" class="link" v-if="can('admin') && l.unitPrice" @click="saveLinePrice(l)">Keep {{ l.unitPrice }} as the {{ itemOf(l).name }} rate</button></td>
