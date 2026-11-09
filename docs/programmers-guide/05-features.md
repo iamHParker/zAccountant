@@ -122,6 +122,13 @@ payment that made the entry, which QuickBooks Online needs on A/R and A/P lines.
     2 cents differently on the invoice he sent). `cleanLines` allows it within `MAX_LINE_ADJUST_CENTS` ($1.00) of
     quantity × price; `amount_cents` stores it. No flag column: a line is "typed" when amount ≠ quantity × price.
     UI: right-click / double-click the Amount cell (`openLineAmount`, `lineAmt`, `lineAdjusted` in `public/app.js`).
+  - Comment lines (Homer 2026-11-09, migration 043): an invoice line `{ comment: true, description, serviceDate? }`
+    is free text. `cleanLines` stores it with `is_comment = true`, no account, quantity `'0'`, price and amount 0,
+    not taxable, no item/project/source; anything else sent with it is dropped. Its amount is 0, so the journal
+    (which skips $0 lines), subtotal, tax and every report never see it. The CHECK `document_lines_comment_shape`
+    holds the same rule in the database, so `account_id` may be NULL only on a comment. `getDocument` LEFT JOINs
+    accounts and returns `comment`. UI: the `COMMENT_LINE` choice in the Rate or item list (`makeComment`,
+    `uncomment`); the printed invoice shows the text across the columns in italics. Bills refuse comment lines.
   - Picking a rate fills the line; the line keeps its own copy of the numbers, so changing a rate later never
     changes old invoices.
   - Lines have `service_date` and `item_id`. Invoices have `project` (name and site address).

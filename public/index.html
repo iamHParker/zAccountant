@@ -894,8 +894,16 @@
             <thead><tr><th>Rate or item</th><th>Date</th><th>Task / description</th><th class="num">Hours / qty</th><th class="num">Rate / price</th><th title="Taxable">Tax</th><th class="num">Amount</th><th>Income account</th><th></th></tr></thead>
             <tbody>
               <template v-for="(l, i) in ar.doc.lines" :key="l.row">
-              <tr>
+              <tr v-if="l.comment" class="comment-line">
+                <td><span class="tag">Comment</span> <button type="button" class="link small" @click="uncomment(l)" title="Turn this back into a line with a rate and amount">undo</button></td>
+                <td class="w150"><input type="date" v-model="l.serviceDate" @blur="sortLines"></td>
+                <td colspan="6"><input v-model="l.description" maxlength="300" placeholder="e.g. Weather: return trip needed. Tenant no-show, unit 204 skipped."
+                  title="Printed on the invoice. A comment has no hours, rate or amount, so it never changes the total."></td>
+                <td><button type="button" class="link" v-if="ar.doc.lines.length > 1" @click="ar.doc.lines.splice(i, 1)">remove</button></td>
+              </tr>
+              <tr v-else>
                 <td><select v-model="l.itemId" @focus="refreshItems()" @change="pickItem(l)"><option value="">None</option>
+                  <option :value="COMMENT_LINE">Comment (text only, no amount)</option>
                   <option v-if="can('admin')" :value="NEW_CONTACT">+ Add new rate…</option>
                   <optgroup label="By the hour"><option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
                   <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
@@ -1074,9 +1082,12 @@
         <table class="data invoice-lines">
           <thead><tr><th class="num">Hours / qty</th><th>Date</th><th>Description</th><th class="num">Rate</th><th title="Taxable">Tax</th><th class="num">Amount</th></tr></thead>
           <tbody>
-            <tr v-for="l in ar.detail.lines" class="item"><td class="num">{{ qtyShow(l.quantity, l.unitPriceCents) }}</td><td>{{ l.serviceDate ? usDate(l.serviceDate) : '' }}</td>
+            <template v-for="l in ar.detail.lines" :key="l.id">
+            <tr v-if="l.comment" class="item comment-line"><td></td><td>{{ l.serviceDate ? usDate(l.serviceDate) : '' }}</td><td colspan="4" class="comment-text">{{ l.description }}</td></tr>
+            <tr v-else class="item"><td class="num">{{ qtyShow(l.quantity, l.unitPriceCents) }}</td><td>{{ l.serviceDate ? usDate(l.serviceDate) : '' }}</td>
               <td>{{ l.description || l.itemName || l.accountName }}<span v-if="l.itemName && l.description" class="muted small"> · {{ l.itemName }}</span></td>
               <td class="num">{{ money(l.unitPriceCents) }}</td><td>{{ l.taxable ? 'T' : '' }}</td><td class="num">{{ money(l.amountCents) }}</td></tr>
+            </template>
             <tr v-if="ar.detail.taxCents"><td colspan="5" class="num">Subtotal</td><td class="num">{{ money(ar.detail.subtotalCents) }}</td></tr>
             <tr v-if="ar.detail.taxCents"><td colspan="5" class="num">Sales tax {{ ar.detail.taxRate }}% on taxable lines</td><td class="num">{{ money(ar.detail.taxCents) }}</td></tr>
             <tr class="total"><td colspan="5" class="num">Total</td><td class="num">{{ money(ar.detail.totalCents) }}</td></tr>

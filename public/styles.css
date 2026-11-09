@@ -416,6 +416,9 @@ button.th-sort:hover { text-decoration: underline; }
 .th-sort .sort-arrow.on { opacity: 1; color: var(--brand); }
 td.added { white-space: nowrap; }
 table.lines tr.line-note td { border-top: 0; padding-top: 0; }
+/* Comment lines on an invoice (free text, no amount): the text spans the columns; italic on the printed invoice. */
+table.lines tr.comment-line input { width: 100%; }
+table.invoice-lines td.comment-text { font-style: italic; white-space: pre-line; }
 .old-invoice-drop { margin: 4px 0 12px; }
 .pdf-notes ul { margin: 4px 0 0 18px; padding: 0; }
 /* Trips: the trip pull-down and the trip's grid of entries (Homer, 2026-10-30) */

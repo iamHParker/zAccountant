@@ -147,6 +147,11 @@ phone. Press **+ Add person** to add one.
      right-click the amount (or double-click it) and type the amount you sent. It can differ from hours × rate by at
      most $1.00; for a bigger change, fix the hours or rate. A typed amount is marked "typed"; **undo** goes back
      to hours × rate.
+   - **Comment lines:** for a note the client should read, such as "Weather: return trip needed" or "Tenant
+     no-show, unit 204 skipped", choose **Comment (text only, no amount)** in the Rate or item list. The line becomes
+     one wide box for your text, with a date so it sits next to that day's work. It prints on the invoice and the
+     PDF in italics, with no hours, rate or amount, and it never changes the total, the sales tax, payments or any
+     report. **undo** turns it back into a priced line. (An invoice still needs at least one priced line.)
    - **Jobs sharing these expenses** (top of the lines): when one trip served several jobs, set the number of
      jobs (1 by default, never less). Each cost passed on (lodging, rental car, airfare) gets quantity 1/3 for
      3 jobs, so $350 of lodging bills $116.67. Hourly rates aren't split. Write one invoice per job with the same
