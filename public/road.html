@@ -153,7 +153,7 @@
             <label>What it was <input v-model="buyForm.description" maxlength="300" :placeholder="buyForm.category === 'equipment' ? 'Laser level' : 'Batteries, markers'"></label>
             <label v-if="buyForm.category === 'equipment'">Serial or model number (optional) <input v-model.trim="buyForm.serialNumber" maxlength="60" autocapitalize="characters" autocomplete="off"></label>
             <label>For a project (optional)
-              <select v-model="buyForm.jobId"><option value="">None</option><option v-for="p in summary?.projects ?? []" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+              <select v-model="buyForm.jobId"><option value="">None</option><option v-for="p in projectsByNumber" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
             <div class="photo-row" @dragover.prevent @drop.prevent="dropPhotos"><span class="label-like">Receipt photos (optional, but keep one for a big purchase)</span>
               <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
               <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
@@ -307,10 +307,10 @@
             <template v-if="!(blockForm.type === 'travel' && blockForm.tripKey)">
               <label>Project{{ blockForm.type === 'office' ? ' (optional)' : '' }}
                 <select v-model="blockForm.jobId"><option value="">{{ blockForm.type === 'office' ? 'General office' : 'Choose…' }}</option>
-                  <option v-for="p in summary?.projects ?? []" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+                  <option v-for="p in projectsByNumber" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
               <label v-if="blockForm.type === 'travel' && blockForm.jobId">Split with (travel on to the next job)
                 <select v-model="blockForm.splitJobId"><option value="">Not split</option>
-                  <option v-for="p in (summary?.projects ?? []).filter(x => x.id !== blockForm.jobId)" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+                  <option v-for="p in projectsByNumber.filter(x => x.id !== blockForm.jobId)" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
               <template v-if="blockForm.splitJobId">
                 <label>First project's share (%) <input type="number" v-model.number="blockForm.splitPercent" min="1" max="99" step="1" inputmode="numeric"></label>
                 <div class="chips"><button type="button" v-for="p in [50, 60, 70, 75]" :class="{ active: blockForm.splitPercent === p }" @click="blockForm.splitPercent = p">{{ p }}/{{ 100 - p }}</button></div>

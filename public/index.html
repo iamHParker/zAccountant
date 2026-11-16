@@ -2285,7 +2285,7 @@
         <p class="hint">Enter a start and end time, or just the hours (7.5 or 7:30). A shift that ends after midnight belongs to the day it started.</p>
         <div class="grid4">
           <label>Day <input type="date" v-model="time.form.date" :max="todayIso()" @change="timeDayPicked" required></label>
-          <label>Job <select v-model="time.form.jobId"><option value="">(no job)</option><option v-for="j in time.jobs" :value="j.id">{{ j.code ? j.code + ' · ' : '' }}{{ j.name }}</option></select></label>
+          <label>Job <select v-model="time.form.jobId"><option value="">(no job)</option><option v-for="j in timeJobs()" :value="j.id">{{ j.code ? j.code + ' · ' : '' }}{{ j.name }}</option></select></label>
           <label>Start <input type="time" v-model="time.form.start"></label>
           <label>End <input type="time" v-model="time.form.end"></label>
           <label>or Hours <input v-model.trim="time.form.hours" inputmode="decimal" placeholder="7.5" class="num"></label>

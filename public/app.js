@@ -1088,6 +1088,12 @@ createApp({
     },
     async loadLiab() { this.liab.data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/payroll-liabilities?from=${this.liab.from}&to=${this.liab.to}`)); },
     // ---------------------------------------------------------------- Time
+    /** Open jobs for the time pick lists by job number, highest first (26-148 above 26-147); jobs with no number after, A to Z (Homer, 2026-11-15). */
+    timeJobs() {
+      const num = (j) => (j.code || (/^\d/.test(j.name) ? j.name : '')).trim();
+      const cmp = (x, y) => x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' });
+      return [...this.time.jobs].sort((a, b) => { const x = num(a), y = num(b); return (!x - !y) || cmp(y, x) || cmp(a.name, b.name); });
+    },
     canManageTime() { return this.can('time_approve') || this.can('time_all'); },
     async loadTime(first = false) {
       const t = this.time;
