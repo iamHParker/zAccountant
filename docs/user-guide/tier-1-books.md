@@ -471,7 +471,18 @@ Click **Added**, **Number**, **Project** or **Customer** at the top of the list 
 shows it can be sorted; click again to reverse the ▲/▼); *Project* sorts by the name without its number, so 2601 Smith
 Residence sorts under S. The choice is remembered on that computer. **+ New project** adds one; a customer that isn't on the list yet can be made right there with
 **+ Add new customer…** in its Customer list. While writing an invoice, **+ Add new project…** in the invoice's Project
-list does the same without leaving the invoice (it fills in the project block and number). To add many at once from your project folders:
+list does the same without leaving the invoice (it fills in the project block and number).
+
+**Deleting a project made by mistake.** Press **delete** on its row. A red box above the list says what still uses it
+and asks before anything is deleted:
+- *Nothing uses it*: press **Delete** and it is gone (the audit trail keeps a note of what was deleted).
+- *A trip share, time entries, purchases or road items use it*: choose the project they belong on in **Move them to**
+  and press **Move them, then delete**. If a trip should really be split between two projects, open the trip instead,
+  add the right projects with their shares, give the mistaken one 0%, and then delete it.
+- *An invoice or bill names it* (shown in red): those are never moved for you. Edit that invoice or bill to pick the
+  right project, then press delete again. Or just **close** the project: it drops off every pick list.
+
+To add many at once from your project folders:
 
 1. In File Explorer, open the folder that holds your project folders and select them (Ctrl+A for all).
 2. Hold **Shift**, right-click one of them, and choose **Copy as path**.

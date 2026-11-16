@@ -372,7 +372,7 @@ createApp({
       ],
       ar: { panel: 'docs', view: 'open', docs: [], docSort: { invoice: docSort('invoice'), bill: docSort('bill') }, contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
         pdfOver: false, pdfBusy: false, roadChecks: [], roadBuys: [], buys: [], buyView: 'recent', buyAcct: {}, buyCard: {}, buyBusy: false, plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
-        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
+        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null, del: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
       road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
@@ -1617,6 +1617,25 @@ createApp({
     async toggleProject(j) {
       if (await this.run(() => api('PATCH', `${this.arBase()}/jobs/${j.id}`, { name: j.name, code: j.code, customerId: j.customerId, isActive: !j.isActive }),
         j.isActive ? 'Project closed.' : 'Project reopened.')) this.loadAr();
+    },
+    // Delete a project made by mistake (Homer, 2026-11-16). First ask the server what still uses it; the panel above the
+    // list shows that and asks before anything is deleted. Time, trip shares and purchases can be moved to another
+    // project first; an invoice or bill that names it has to be edited by hand (a saved record is never changed here).
+    async askDeleteProject(j) {
+      const r = await this.run(() => api('GET', `${this.arBase()}/jobs/${j.id}/uses`));
+      if (r) this.ar.proj.del = { ...r, toJobId: '' };
+    },
+    async deleteProject() {
+      const d = this.ar.proj.del;
+      if (!d) return;
+      if (d.uses.length) {
+        if (!d.toJobId) { this.flash('Choose the project to move them to.', 'bad'); return; }
+        if (!(await this.run(() => api('POST', `${this.arBase()}/jobs/${d.project.id}/move`, { toJobId: d.toJobId })))) return;
+      }
+      if (await this.run(() => api('DELETE', `${this.arBase()}/jobs/${d.project.id}`), `Project ${d.project.name} deleted.`)) {
+        this.ar.proj.del = null;
+        await this.loadAr();
+      } else await this.askDeleteProject(d.project); // something changed meanwhile: show what uses it now
     },
     // Folder names pasted from File Explorer ("Copy as path") become projects: 2601 Smith Residence → number 2601.
     async pasteProjects(preview) {

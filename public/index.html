@@ -1183,6 +1183,28 @@
           <label>Site address (optional) <textarea v-model="ar.proj.form.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
           <div><button class="primary">{{ ar.proj.editId ? 'Save project' : 'Add project' }}</button> <button type="button" @click="ar.proj.show = false; ar.proj.editId = null">Cancel</button></div>
         </form>
+        <!-- Delete a project (Homer, 2026-11-16): what still uses it, a way to move those, and a last check before deleting. -->
+        <div class="delete-box" v-if="ar.proj.del" role="alertdialog" aria-label="Delete project">
+          <h3>Delete project {{ ar.proj.del.project.name }}?</h3>
+          <template v-if="ar.proj.del.canDelete">
+            <p>Nothing uses it: no time, trips, invoices, bills or purchases. Deleting removes it for good (the audit trail keeps a note).</p>
+            <button class="danger" @click="deleteProject">Delete {{ ar.proj.del.project.code || ar.proj.del.project.name }}</button> <button @click="ar.proj.del = null">Cancel</button>
+          </template>
+          <template v-else>
+            <p>It is still used by:</p>
+            <ul><li v-for="u in ar.proj.del.uses" :class="{ bad: !u.movable }">{{ u.text }}</li></ul>
+            <template v-if="ar.proj.del.canMove">
+              <label>Move them to <select v-model="ar.proj.del.toJobId" class="auto"><option value="">Choose a project…</option>
+                <option v-for="p in sortedJobs().filter(x => x.isActive && x.id !== ar.proj.del.project.id)" :value="p.id">{{ jobLabel(p) }}</option></select></label>
+              <p class="muted small">A trip that should be split between two projects: open the trip instead, add the right projects with their shares, and give this one 0%. Then delete it here.</p>
+              <button class="danger" :disabled="!ar.proj.del.toJobId" @click="deleteProject">Move them, then delete</button> <button @click="ar.proj.del = null">Cancel</button>
+            </template>
+            <template v-else>
+              <p class="muted small">Fix the lines marked in red first (edit that invoice or bill and pick the right project), then press delete again. Or just close the project: it drops off every pick list.</p>
+              <button @click="ar.proj.del = null">OK</button>
+            </template>
+          </template>
+        </div>
         <p class="hint" v-if="!ar.jobs.length">No projects yet. Add one above, or paste your project folder names below.</p>
         <table class="data" v-else>
           <thead><tr>
@@ -1194,7 +1216,8 @@
               <td class="added small">{{ projectAdded(j) }}</td><td>{{ j.code }}</td><td>{{ j.name }}<span v-if="!j.isActive" class="muted small"> · closed</span></td><td>{{ j.customerName }}</td><td class="pre-line small">{{ j.address }}</td>
               <td class="actions"><template v-if="can('invoices') || can('admin')">
                 <button class="link" @click="editProject(j)">edit</button>
-                <button class="link" @click="toggleProject(j)">{{ j.isActive ? 'close' : 'reopen' }}</button></template></td>
+                <button class="link" @click="toggleProject(j)">{{ j.isActive ? 'close' : 'reopen' }}</button>
+                <button class="link danger-link" @click="askDeleteProject(j)">delete</button></template></td>
             </tr>
           </tbody>
         </table>

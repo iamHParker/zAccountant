@@ -172,3 +172,95 @@ export async function listUnbilled(db, companyId, { jobId = null, customerId = n
     }),
   };
 }
+
+// ---------------------------------------------------------------- Deleting a project (Homer, 2026-11-16)
+// "need to be able to delete errant job number": a project made by mistake (a phantom "26") can be deleted, but only
+// when nothing in the books points at it. Invoices and bills are saved records, so they are never moved: edit that
+// invoice or bill to the right project first. Time, trip shares, purchases and items waiting from the road can be
+// moved to another project in one step (moveProjectUses), and then the project deleted.
+
+/** What still points at a project: [{ kind, count, text, movable }] (empty = it can be deleted). */
+export async function projectUses(db, companyId, jobId) {
+  if (!isId(jobId)) throw new LedgerError('Project not found');
+  const { rows: [job] } = await db.query('SELECT id, name, code FROM jobs WHERE company_id = $1 AND id = $2', [companyId, jobId]);
+  if (!job) throw new LedgerError('Project not found');
+  const uses = [];
+  const { rows: docs } = await db.query(
+    `SELECT DISTINCT d.kind, d.number, d.status FROM documents d LEFT JOIN document_lines l ON l.document_id = d.id
+      WHERE d.company_id = $1 AND (d.job_id = $2 OR l.job_id = $2) ORDER BY d.kind, d.number LIMIT 50`, [companyId, jobId]);
+  for (const kind of ['invoice', 'bill']) {
+    const list = docs.filter((d) => d.kind === kind);
+    if (list.length) {
+      uses.push({ kind: `${kind}s`, count: list.length, movable: false,
+        text: `${list.length} ${kind}${list.length === 1 ? '' : 's'} (${list.slice(0, 6).map((d) => d.number + (d.status === 'void' ? ' void' : '')).join(', ')}${list.length > 6 ? '…' : ''}): edit ${list.length === 1 ? 'it' : 'each'} to name the right project` });
+    }
+  }
+  const { rows: [time] } = await db.query(
+    `SELECT count(*)::int AS n, count(*) FILTER (WHERE EXISTS (SELECT 1 FROM document_lines l JOIN documents d ON d.id = l.document_id
+        WHERE l.time_entry_id = t.id AND d.status = 'posted'))::int AS billed
+       FROM time_entries t WHERE t.company_id = $1 AND t.job_id = $2`, [companyId, jobId]);
+  if (time.n) uses.push({ kind: 'time', count: time.n, movable: time.billed === 0, text: `${time.n} time ${time.n === 1 ? 'entry' : 'entries'}${time.billed ? ` (${time.billed} already on an invoice)` : ''}` });
+  const { rows: trips } = await db.query(
+    `SELECT t.name, (tj.share_bp + coalesce(tj.air_bp, 0) + coalesce(tj.hotel_bp, 0) + coalesce(tj.car_bp, 0) + coalesce(tj.rest_bp, 0)) = 0 AS zero
+       FROM trip_jobs tj JOIN trips t ON t.id = tj.trip_id WHERE tj.company_id = $1 AND tj.job_id = $2 ORDER BY t.start_date`, [companyId, jobId]);
+  const shared = trips.filter((t) => !t.zero);
+  if (shared.length) uses.push({ kind: 'trips', count: shared.length, movable: true, text: `a share of ${shared.length} trip${shared.length === 1 ? '' : 's'} (${shared.map((t) => t.name).join(', ')})` });
+  const { rows: [buys] } = await db.query('SELECT count(*)::int AS n FROM purchases WHERE company_id = $1 AND job_id = $2', [companyId, jobId]);
+  if (buys.n) uses.push({ kind: 'purchases', count: buys.n, movable: true, text: `${buys.n} purchase${buys.n === 1 ? '' : 's'} (equipment or supplies)` });
+  const { rows: [road] } = await db.query(
+    "SELECT count(*)::int AS n FROM road_items WHERE company_id = $1 AND status = 'pending' AND strpos(data::text, $2) > 0", [companyId, jobId]);
+  if (road.n) uses.push({ kind: 'road', count: road.n, movable: true, text: `${road.n} item${road.n === 1 ? '' : 's'} waiting in From the road` });
+  return { project: job, uses, canDelete: uses.length === 0, canMove: uses.length > 0 && uses.every((u) => u.movable) };
+}
+
+/**
+ * Delete a project nothing points at. A 0% line on a trip carries nothing and goes with it (setting the share to 0
+ * at the trip is how a project is taken off one). Refused, with the list, when anything else uses it.
+ */
+export async function deleteProject(pool, companyId, jobId, { actor = null } = {}) {
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    const { project, uses } = await projectUses(c, companyId, jobId);
+    if (uses.length) throw new LedgerError(`${project.name} is still used, so it can't be deleted`, uses.map((u) => u.text));
+    await c.query('DELETE FROM trip_jobs WHERE company_id = $1 AND job_id = $2', [companyId, jobId]);
+    await c.query('DELETE FROM jobs WHERE company_id = $1 AND id = $2', [companyId, jobId]);
+    await appendAudit(c, companyId, { action: 'delete', entity: 'job', entityId: jobId, actor, payload: { name: project.name, code: project.code } });
+    return { deleted: true, name: project.name };
+  });
+}
+
+/**
+ * Move what uses a project onto another one (toJobId): its time entries, its trip shares, its purchases, and items
+ * waiting from the road. Refused when an invoice or bill names it, when its time is already billed, or when the other
+ * project is already on the same trip (set one of them to 0% at the trip first).
+ */
+export async function moveProjectUses(pool, companyId, jobId, toJobId, { actor = null } = {}) {
+  if (!isId(toJobId) || toJobId === jobId) throw new LedgerError('Choose the project to move them to');
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    const { project, uses } = await projectUses(c, companyId, jobId);
+    const stuck = uses.filter((u) => !u.movable);
+    if (stuck.length) throw new LedgerError(`Some of what uses ${project.name} can't be moved`, stuck.map((u) => u.text));
+    const { rows: [to] } = await c.query('SELECT id, name FROM jobs WHERE company_id = $1 AND id = $2 AND is_active', [companyId, toJobId]);
+    if (!to) throw new LedgerError('Choose an open project to move them to');
+    const { rows: clash } = await c.query(
+      `SELECT t.name FROM trip_jobs a JOIN trip_jobs b ON b.trip_id = a.trip_id AND b.job_id = $3 JOIN trips t ON t.id = a.trip_id
+        WHERE a.company_id = $1 AND a.job_id = $2 AND (a.share_bp + coalesce(a.air_bp, 0) + coalesce(a.hotel_bp, 0) + coalesce(a.car_bp, 0) + coalesce(a.rest_bp, 0)) > 0`,
+      [companyId, jobId, toJobId]);
+    if (clash.length) throw new LedgerError(`${to.name} is already on ${clash.map((t) => t.name).join(', ')}`,
+      ['Open the trip and set the shares there, giving this project 0%; then delete it']);
+    const time = await c.query('UPDATE time_entries SET job_id = $3, updated_at = now() WHERE company_id = $1 AND job_id = $2', [companyId, jobId, toJobId]);
+    // A trip share moves as a new line for the other project with the same shares (the old line's 0% copies just go).
+    await c.query(`INSERT INTO trip_jobs (company_id, trip_id, job_id, share_bp, air_bp, hotel_bp, car_bp, rest_bp)
+      SELECT company_id, trip_id, $3, share_bp, air_bp, hotel_bp, car_bp, rest_bp FROM trip_jobs a
+       WHERE a.company_id = $1 AND a.job_id = $2 AND NOT EXISTS (SELECT 1 FROM trip_jobs b WHERE b.trip_id = a.trip_id AND b.job_id = $3)`,
+    [companyId, jobId, toJobId]);
+    const trips = await c.query('DELETE FROM trip_jobs WHERE company_id = $1 AND job_id = $2', [companyId, jobId]);
+    const buys = await c.query('UPDATE purchases SET job_id = $3 WHERE company_id = $1 AND job_id = $2', [companyId, jobId, toJobId]);
+    const road = await c.query(`UPDATE road_items SET data = replace(data::text, $2, $3)::jsonb
+      WHERE company_id = $1 AND status = 'pending' AND strpos(data::text, $2) > 0`, [companyId, jobId, toJobId]);
+    const moved = { time: time.rowCount, trips: trips.rowCount, purchases: buys.rowCount, road: road.rowCount };
+    await appendAudit(c, companyId, { action: 'move', entity: 'job', entityId: jobId, actor, payload: { to: toJobId, ...moved } });
+    return { moved, to: to.name };
+  });
+}
