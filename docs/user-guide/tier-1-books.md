@@ -379,11 +379,14 @@ may have no project (general office). Travel for a trip can go on the trip inste
 and the **Day total**. At your desk, **Trips → From the road** lists them under *Time on projects*; **Accept** makes
 each block a time entry on its project (a split block makes two), ready for the timesheet and payroll.
 
-**Projects from the field.** Tap **Projects**. The newest projects are listed; type in **Find a project** to search
+**Projects from the field.** Tap **Projects**. Projects are listed by number, highest first (26-148 above
+26-147), so the numbers already taken are easy to see; type in **Find a project** to search
 by number, name, customer or street (*2601*, *smith*, *buda* all work, and it works with no signal, from the phone's
 saved copy of the list). Tap a project to see its number, customer and site address, **📍 Map** to open the site in
 Maps, or **+ Time on it** to start a site block on it. **+ New project** has the same boxes as the desk's
-**Add project**: **Number** (leave it empty and it is taken from the front of the name: *2610 Garcia Barn* → 2610),
+**Add project**: **Number** (leave it empty and it is taken from the front of the name: *2610 Garcia Barn* → 2610; the form shows
+the **Next free number** after your highest one, *26-148* → *26-149*, with **use it** to fill it in, starts a new
+year's series in January, *26-148* → *27-001*, and warns at once in red if the number is already used),
 **Name**, **Customer** (one from your list, **+ New customer…** to type a new one, or None) and **Site address**.
 **Add project** puts it straight onto your project list (a project isn't money, so it doesn't wait in *From the road*);
 it then says *On the list*, and every project box on the phone and at the desk offers it. A name already on the list

@@ -25,7 +25,7 @@ that aren't obvious from the code. Read the entry for a feature before changing 
 - Road time blocks (migration 042): Time screen = the day in blocks (travel / site / office, start-end, project). Travel can
   be split with a second project by `splitPercent` (default 50; Homer asked for it 2026-11-07; `splitBlock`). Desk → time entries.
 - Road projects (Homer 2026-11-16, no migration): Projects button → lookup (number/name/customer/street, offline from the
-  summary) and `POST /api/road/projects` → `addRoadProject` → desk's `createJob`; goes straight on the list (not an inbox
+  summary, job-number order highest first; form suggests `nextNumber`, warns via `numberClash`) and `POST /api/road/projects` → `addRoadProject` → desk's `createJob`; goes straight on the list (not an inbox
   item); needs `PROJECT_PERMISSIONS` (new customer: `CUSTOMER_PERMISSIONS`); same name = `alreadyThere`. ✏️ Edit project
   (`PUT …/projects/:id` → `updateJob`) and ✏️ Edit customer (`PATCH …/customers/:id` → `updateContact`), online only.
   A line of numbers only ("26-147, 26-148") = those projects (`typedProjects`/`numberList`), never one new project.
