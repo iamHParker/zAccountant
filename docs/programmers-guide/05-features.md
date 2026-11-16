@@ -207,6 +207,11 @@ then the desk's own `createJob` (same checks, row and audit, actor = the key per
 the phone keeps a project in IndexedDB as kind `project`, `sync()` sends projects first and marks them `accepted`
 (*On the list*), then fetches the summary again. Lookup (`projectList`) searches number, name, customer and site
 address on the phone's saved copy, so it works with no signal; 📍 Map opens Apple Maps on the site address.
+Typed projects (Homer 2026-11-16, a phantom project "26" named "26-147, 26-148"): `parseProjectFolder` now ends a
+number at a comma, semicolon or bracket too, and `typedProjects` (src/core/projects.js) splits a line of numbers only
+(`numberList`: `,` `;` `&` `/` `+` "and") into its numbers for a trip's `newProjects`, both when the item is cleaned and
+again at Accept (for items stored the old way). `addRoadProject` refuses a list, and a bare number that is already a
+project's code answers that project (`alreadyThere`).
 Editing (same day): `PUT /api/road/projects/:jobId` → `editRoadProject` → the desk's `updateJob` (open projects only,
 stays open; no code = read from the name); `PATCH /api/road/customers/:contactId { name, phone, email, address }` →
 `editRoadCustomer` → `updateContact` (needs `canAddCustomers`). Both are sent at once (`sendNow`, needs signal), then the

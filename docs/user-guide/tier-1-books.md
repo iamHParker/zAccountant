@@ -391,6 +391,9 @@ just opens that project. With no signal it waits on the phone under *Waiting to 
 returns. Adding projects needs a role that may add them at the desk (Owner, Accountant, Bookkeeper, or a
 custom role with invoices, timesheet approval or admin); a new customer needs invoices or admin. Closed projects
 aren't listed; reopen one at your desk.
+**Typing projects on a trip.** In a trip's *New projects* box, put one project per line. A line that is only numbers,
+like *26-147, 26-148*, counts as those projects: the ones already on your list are used, never a new project made
+from the whole line. On the Projects screen, add one project at a time.
 **Fixing a project or its customer.** On an open project, **✏️ Edit project** opens the same form, filled in: fix the
 number, name, customer or site address (*Austin, Texas* → *3204 Stirrat*) and **Save**. **✏️ Edit customer** changes
 the customer's name, phone, email and address; every project for that customer shows the change. The customer's

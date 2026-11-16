@@ -380,9 +380,9 @@
           </div>
           <div class="pick-list" v-if="projectSearch">
             <button type="button" v-for="p in projectMatches" @click="toggleJob(p.id); projectSearch = ''">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</button>
-            <p class="muted small" v-if="!projectMatches.length">No project like that. Add it as a new project number below.</p>
+            <p class="muted small" v-if="!projectMatches.length">No project like that. Add it as a new project below.</p>
           </div>
-          <label>New project numbers (one per line, like 2610 Garcia Barn)
+          <label>New projects, not on the list yet (one per line, like 2610 Garcia Barn; pick projects already on the list above)
             <textarea v-model="tripForm.newProjects" rows="2"></textarea></label>
           <label>Notes <textarea v-model="tripForm.notes" rows="2" maxlength="500"></textarea></label>
           <p class="muted small">Shares are set at the desk (they start even).</p>

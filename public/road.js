@@ -79,7 +79,7 @@ const SCREENS = {
   projects: { title: 'Projects', color: 'c-proj' },
 };
 // The project number at the front of a name, the way the server reads it (src/core/projects.js parseProjectFolder).
-const leadingNumber = (name) => /^([A-Za-z]{0,3}\d[\d.-]*[A-Za-z]?)(?=$|[\s_–—:-])/.exec(String(name ?? '').trim())?.[1].replace(/[.-]+$/, '') ?? '';
+const leadingNumber = (name) => /^([A-Za-z]{0,3}\d[\d.-]*[A-Za-z]?)(?=$|[\s_–—:,;()-])/.exec(String(name ?? '').trim())?.[1].replace(/[.-]+$/, '') ?? '';
 const NEW_CUSTOMER = '+new';
 // Time in blocks (Homer, 2026-11-06): travel, site time, office/drafting; lunch is the gap between two blocks.
 const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
@@ -434,6 +434,10 @@ createApp({
       const f = this.projectForm;
       const name = f.name.trim(); const code = f.code.trim() || leadingNumber(name);
       if (!name) { this.flash('Type the project name, like 2610 Garcia Barn.', 'bad'); return; }
+      // "26-147, 26-148" is two projects, not one (Homer, 2026-11-16).
+      if (/^[A-Za-z]{0,3}\d[\d.-]*[A-Za-z]?(\s*([,;&/+]|\band\b)\s*[A-Za-z]{0,3}\d[\d.-]*[A-Za-z]?)+$/i.test(name)) {
+        this.flash('One project at a time: that looks like a list of project numbers.', 'bad'); return;
+      }
       const list = (this.summary?.projects ?? []).filter((p) => p.id !== f.serverId);
       const same = list.find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
       if (same && f.serverId) { this.flash(`There is already a project named ${same.name}.`, 'bad'); return; }
