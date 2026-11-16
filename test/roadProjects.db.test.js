@@ -100,3 +100,81 @@ test('Road projects: look up with customer and site, add like the desk, same nam
   assert.match((await patPhone.call('POST', '/api/road/projects', { name: '2612 Pat Job', customerName: 'Brand New Co' })).body.error, /can't add customers/);
   ok(await patPhone.call('POST', '/api/road/projects', { name: '2612 Pat Job', customerName: 'DWH' }), 201);
 });
+
+test('Road projects: change a project and its customer from the phone, with the desk\'s rules', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
+  const db = await freshDatabase({ withAppRole: true });
+  const server = createApp(db.appPool, { log: () => {} }).listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
+  t.after(async () => { server.close(); await db.drop(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const client = (bearer = null) => {
+    let cookie = '';
+    const call = async (method, path, body) => {
+      const r = await fetch(base + path, { method, body: body === undefined ? undefined : JSON.stringify(body),
+        headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) } });
+      const set = r.headers.get('set-cookie');
+      if (set) cookie = set.split(';')[0].endsWith('=') ? '' : set.split(';')[0];
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    return { call };
+  };
+  const ok = (r, status = 200) => { assert.equal(r.status, status, JSON.stringify(r.body)); return r.body; };
+  async function newUser(email) {
+    const c = client();
+    await c.call('POST', '/api/auth/signup', { email, name: email.split('@')[0], password: 'a long enough passphrase' });
+    const setup = (await c.call('POST', '/api/auth/mfa/setup', {})).body;
+    ok(await c.call('POST', '/api/auth/mfa/enable', { code: totpCode(setup.secret, Date.now()) }));
+    return c;
+  }
+  const desk = await newUser('homer@example.com');
+  const co = ok(await desk.call('POST', '/api/companies', { name: 'Parker Engineering', homeState: 'TX', fiscalYearStartMonth: 1 }), 201);
+  const b = `/api/companies/${co.id}`;
+  const cr = ok(await desk.call('POST', `${b}/customers`, { name: 'CastleRock Homes', phone: '512-555-0100' }), 201);
+  const job = ok(await desk.call('POST', `${b}/jobs`, { code: '26-147', name: '26-147 CastleRock customer', customerId: cr.id, address: 'Austin,Texas' }), 201);
+  ok(await desk.call('POST', `${b}/jobs`, { code: '26-145', name: '26-145 Miguel Cubano' }), 201);
+  const phone = client(ok(await desk.call('POST', `${b}/road-keys`, { name: 'iPhone' }), 201).url.split('#key=')[1]);
+
+  // The phone sees the project's customer id and the customer's phone (to call from the site, or fix).
+  const s = ok(await phone.call('GET', '/api/road'));
+  assert.equal(s.projects.find((p) => p.id === job.id).customerId, cr.id);
+  assert.equal(s.customers.find((c) => c.id === cr.id).phone, '512-555-0100');
+
+  // Homer's case: the site address is really 3204 Stirrat. The number, name and customer stay as sent.
+  const e = ok(await phone.call('PUT', `/api/road/projects/${job.id}`, { code: '26-147', name: '26-147 CastleRock customer', customerId: cr.id,
+    address: '3204 Stirrat\nAustin, TX' }));
+  assert.equal(e.project.address, '3204 Stirrat\nAustin, TX');
+  const j = ok(await desk.call('GET', `${b}/jobs`)).find((x) => x.id === job.id);
+  assert.deepEqual([j.code, j.name, j.customerName, j.address, j.isActive], ['26-147', '26-147 CastleRock customer', 'CastleRock Homes', '3204 Stirrat\nAustin, TX', true]);
+  const { rows: audits } = await db.pool.query("SELECT actor FROM audit_log WHERE entity = 'job' AND entity_id = $1 AND action = 'update'", [job.id]);
+  assert.deepEqual(audits.map((a) => a.actor), ['homer@example.com']);
+  // Renamed with no number: the number comes from the name; the desk's duplicate-name check applies.
+  assert.equal(ok(await phone.call('PUT', `/api/road/projects/${job.id}`, { name: '26-148 CastleRock Lot 7', customerId: cr.id, address: '3204 Stirrat' })).project.code, '26-148');
+  assert.match((await phone.call('PUT', `/api/road/projects/${job.id}`, { name: '26-145 Miguel Cubano' })).body.error, /already a job named/);
+  // A closed project is changed at the desk.
+  ok(await desk.call('PATCH', `${b}/jobs/${job.id}`, { name: '26-148 CastleRock Lot 7', code: '26-148', isActive: false }));
+  assert.match((await phone.call('PUT', `/api/road/projects/${job.id}`, { name: 'x' })).body.error, /closed projects/);
+
+  // The customer: phone, email and address; a bad email or empty name is refused like at the desk.
+  const c = ok(await phone.call('PATCH', `/api/road/customers/${cr.id}`, { name: 'CastleRock Homes', phone: '512-555-0199', email: 'office@castlerock.example', address: '1 Main St, Austin, TX 78701' }));
+  assert.deepEqual([c.customer.phone, c.customer.email], ['512-555-0199', 'office@castlerock.example']);
+  const deskCust = ok(await desk.call('GET', `${b}/customers`)).find((x) => x.id === cr.id);
+  assert.equal(deskCust.address, '1 Main St, Austin, TX 78701');
+  assert.equal((await phone.call('PATCH', `/api/road/customers/${cr.id}`, { email: 'not an email' })).status, 400);
+  assert.equal((await phone.call('PATCH', `/api/road/customers/${cr.id}`, { name: '' })).status, 400);
+  // Clearing a box clears it.
+  assert.equal(ok(await phone.call('PATCH', `/api/road/customers/${cr.id}`, { phone: '' })).customer.phone, null);
+
+  // Roles: Field can't change either; Crew lead (time_all) can change projects but not customers, and sees no customer details.
+  const field = ok(await desk.call('POST', `${b}/roles`, { name: 'Field', permissions: ['bills', 'time_own'] }), 201);
+  const lead = ok(await desk.call('POST', `${b}/roles`, { name: 'Crew lead', permissions: ['bills', 'time_all'] }), 201);
+  const pat = await newUser('pat@example.com');
+  ok(await desk.call('POST', `${b}/members`, { email: 'pat@example.com', role: field.id }), 201);
+  const patPhone = client(ok(await pat.call('POST', `${b}/road-keys`, { name: "Pat's phone" }), 201).url.split('#key=')[1]);
+  const other = ok(await desk.call('GET', `${b}/jobs`)).find((x) => x.code === '26-145');
+  assert.match((await patPhone.call('PUT', `/api/road/projects/${other.id}`, { name: '26-145 Miguel Cubano', address: 'x' })).body.error, /can't change projects/);
+  ok(await desk.call('POST', `${b}/members`, { email: 'pat@example.com', role: lead.id }), 201);
+  const ls = ok(await patPhone.call('GET', '/api/road'));
+  assert.equal(ls.customers[0].phone, undefined);
+  ok(await patPhone.call('PUT', `/api/road/projects/${other.id}`, { name: '26-145 Miguel Cubano', address: '5733 Bill Hass, Schertz, TX 78514' }));
+  assert.match((await patPhone.call('PATCH', `/api/road/customers/${cr.id}`, { phone: '1' })).body.error, /can't change customers/);
+});

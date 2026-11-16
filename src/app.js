@@ -274,6 +274,8 @@ export function createApp(pool, { log } = {}) {
   roadApi.get('/', roadRoute(({ db, key, access }) => roadSvc.roadSummary(db, key, access)));
   // Projects from the field (Homer, 2026-11-16): the same rules as the desk's Add project, and the same permission.
   roadApi.post('/projects', roadRoute(({ db, req, key, access }) => roadSvc.addRoadProject(db, key, access, req.body ?? {}), 201));
+  roadApi.put('/projects/:jobId', roadRoute(({ db, req, key, access }) => roadSvc.editRoadProject(db, key, access, req.params.jobId, req.body ?? {})));
+  roadApi.patch('/customers/:contactId', roadRoute(({ db, req, key, access }) => roadSvc.editRoadCustomer(db, key, access, req.params.contactId, req.body ?? {})));
   roadApi.post('/items', roadRoute(({ db, req, key }) => roadSvc.receiveItem(db, key, req.body ?? {}), 201));
   roadApi.put('/items/:clientId', roadRoute(({ db, req, key }) => roadSvc.editItem(db, key, req.params.clientId, req.body ?? {})));
   roadApi.post('/items/:clientId/photos', roadRoute(({ db, req, key }) => roadSvc.receivePhoto(db, key, req.params.clientId, req.body ?? {}), 201));

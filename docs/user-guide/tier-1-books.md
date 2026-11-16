@@ -391,6 +391,11 @@ just opens that project. With no signal it waits on the phone under *Waiting to 
 returns. Adding projects needs a role that may add them at the desk (Owner, Accountant, Bookkeeper, or a
 custom role with invoices, timesheet approval or admin); a new customer needs invoices or admin. Closed projects
 aren't listed; reopen one at your desk.
+**Fixing a project or its customer.** On an open project, **✏️ Edit project** opens the same form, filled in: fix the
+number, name, customer or site address (*Austin, Texas* → *3204 Stirrat*) and **Save**. **✏️ Edit customer** changes
+the customer's name, phone, email and address; every project for that customer shows the change. The customer's
+phone and email show on the project as links: tap to call or write. These changes are made at once, so they need
+signal. Editing a project needs the same role as adding one; editing a customer needs invoices or admin as well.
 
 **Equipment and supplies bought on the road.** Batteries and markers for a job, survey stakes, a new laser level:
 tap **Supplies** (used up) or **Equipment** (lasts), then **+ Supplies bought** or **+ Equipment bought**. Type the

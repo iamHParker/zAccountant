@@ -104,7 +104,7 @@ createApp({
       tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, buyForm: null, blockForm: null, blockDay: today(), blockTypes: BLOCK_TYPES, blockIcon: BLOCK_ICON, kinds: KINDS, reading: false,
       bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
       // Projects (Homer, 2026-11-16): look one up, or add one from the field.
-      projectForm: null, projectQuery: '', openProjectKey: '', newCustomer: NEW_CUSTOMER,
+      projectForm: null, customerForm: null, projectQuery: '', openProjectKey: '', newCustomer: NEW_CUSTOMER,
       screen: 'home', screens: SCREENS,
       // Amounts start hidden (blurred) and the phone remembers the choice: someone beside you sees no deposit totals.
       hide: getLocal('zacc.roadHide') !== 'show',
@@ -283,7 +283,7 @@ createApp({
     },
     goTime() { this.go('time'); },
     openTrip(key) { this.tripKey = key; this.go('trip'); },
-    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; this.blockForm = null; this.projectForm = null; this.openProjectKey = ''; },
+    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; this.blockForm = null; this.projectForm = null; this.customerForm = null; this.openProjectKey = ''; },
     toggleHide() { this.hide = !this.hide; setLocal('zacc.roadHide', this.hide ? null : 'show'); },
     newTrip() { this.tripForm = { name: '', startDate: today(), endDate: '', jobIds: [], newProjects: '', notes: '' }; this.projectSearch = ''; },
     /** A trip planned ahead (Homer, 2026-11-06): the New trip form starting tomorrow; its bookings go on it once saved. */
@@ -424,7 +424,7 @@ createApp({
       this.projectForm = { code: /^\S*\d\S*$/.test(words) ? words : '', name: words && !/^\S*\d\S*$/.test(words) ? words : '', customerId: '', customerName: '', address: '' };
       window.scrollTo({ top: 0 });
     },
-    showProject(key) { this.projectForm = null; this.openProjectKey = this.openProjectKey === key ? '' : key; },
+    showProject(key) { this.projectForm = null; this.customerForm = null; this.openProjectKey = this.openProjectKey === key ? '' : key; },
     /** The site address as one line for a map search ("285 Bridgestone Way, Buda, TX"). */
     mapLink(address) { return `https://maps.apple.com/?q=${encodeURIComponent(String(address ?? '').replace(/\s*\n\s*/g, ', '))}`; },
     firstLine(address) { return String(address ?? '').split('\n')[0]; },
@@ -434,21 +434,67 @@ createApp({
       const f = this.projectForm;
       const name = f.name.trim(); const code = f.code.trim() || leadingNumber(name);
       if (!name) { this.flash('Type the project name, like 2610 Garcia Barn.', 'bad'); return; }
-      const list = this.summary?.projects ?? [];
+      const list = (this.summary?.projects ?? []).filter((p) => p.id !== f.serverId);
       const same = list.find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
+      if (same && f.serverId) { this.flash(`There is already a project named ${same.name}.`, 'bad'); return; }
       if (same) { this.projectForm = null; this.openProjectKey = `s:${same.id}`; this.flash(`${name} is already on the list.`); return; }
       const clash = code && list.find((p) => p.code && p.code.toLowerCase() === code.toLowerCase());
-      if (clash && !confirm(`Number ${code} is already used by ${clash.name}. Add this project anyway?`)) return;
+      if (clash && !confirm(`Number ${code} is already used by ${clash.name}. ${f.serverId ? 'Save' : 'Add this project'} anyway?`)) return;
       const newCust = f.customerId === NEW_CUSTOMER;
       if (newCust && !f.customerName.trim()) { this.flash('Type the new customer\'s name, or choose None.', 'bad'); return; }
       const data = { code: f.code.trim() || null, name, address: f.address.trim() || null,
         customerId: newCust ? null : f.customerId || null, customerName: newCust ? f.customerName.trim() : null };
+      // A project already on zAccountant's list is changed there and then (it needs signal), like Add project at the desk.
+      if (f.serverId) {
+        if (!(await this.sendNow('PUT', `/projects/${f.serverId}`, data))) return;
+        this.projectForm = null; this.openProjectKey = `s:${f.serverId}`;
+        this.flash('Project saved.');
+        return;
+      }
       const item = await this.saveItem('project', f, data);
       if (!item) return;
       this.projectForm = null; this.projectQuery = '';
       this.openProjectKey = `c:${item.clientId}`;
       this.flash(this.online ? 'Adding the project…' : 'No signal: the project is kept on this phone and added when there is signal.');
     },
+    /** "✏️ Edit project": the same form, filled in from the project on zAccountant's list. */
+    editProject(p) {
+      this.closeForms();
+      this.projectForm = { serverId: p.id, code: p.code ?? '', name: p.name, customerId: p.customerId ?? '', customerName: '', address: p.address ?? '' };
+      window.scrollTo({ top: 0 });
+    },
+    customerOf(p) { return p?.customerId ? this.summary?.customers?.find((c) => c.id === p.customerId) ?? null : null; },
+    /** "✏️ Edit customer": the customer's name, phone, email and address (the desk's Customers → edit, the main boxes). */
+    editCustomer(p) {
+      const c = this.customerOf(p);
+      if (!c) return;
+      const back = p.id;
+      this.closeForms();
+      this.customerForm = { id: c.id, back, name: c.name, phone: c.phone ?? '', email: c.email ?? '', address: c.address ?? '' };
+      window.scrollTo({ top: 0 });
+    },
+    async saveCustomer() {
+      const f = this.customerForm;
+      if (!f.name.trim()) { this.flash('The customer needs a name.', 'bad'); return; }
+      if (!(await this.sendNow('PATCH', `/customers/${f.id}`, { name: f.name.trim(), phone: f.phone.trim(), email: f.email.trim(), address: f.address.trim() }))) return;
+      this.customerForm = null; this.openProjectKey = `s:${f.back}`;
+      this.flash('Customer saved.');
+    },
+    /** Send a change now (it needs signal), then fetch the lists again so every screen shows it. False if it didn't go. */
+    async sendNow(method, path, body) {
+      if (!this.online) { this.flash('Changing a project or customer needs signal. Try again when you have some.', 'bad'); return false; }
+      this.busy = true;
+      try {
+        await this.call(method, path, body);
+        await this.refresh();
+        return true;
+      } catch (e) {
+        if (e instanceof KeyProblem) this.keyProblem = e.message;
+        else this.flash(e.name === 'TimeoutError' || e instanceof TypeError ? 'No answer from zAccountant. Check the signal and try again.' : e.message, 'bad');
+        return false;
+      } finally { this.busy = false; }
+    },
+    telLink(phone) { return `tel:${String(phone ?? '').replace(/[^\d+]/g, '')}`; },
     // ---- Time in blocks: a day is travel out, site time (lunch is the gap), travel on or home, office or drafting.
     blockMinutes(d) { return d.start && d.end ? clockTime(d.start, d.end, '')?.minutes ?? 0 : durationMinutes(d.hours) ?? 0; },
     blockHours(d) { return hhmm(this.blockMinutes(d)); },

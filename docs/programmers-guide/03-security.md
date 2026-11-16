@@ -78,7 +78,9 @@ person's `bills` permission now, so removing the person or changing their role s
 One thing goes in straight away: a **project** (`POST /api/road/projects`, Homer 2026-11-16), and only when the
 person also holds one of `PROJECT_PERMISSIONS` (the desk's Add project rule); a new customer with it also needs one of
 `CUSTOMER_PERMISSIONS`. A refusal there is a 400, never 403, because the phone reads 403 as "this key no longer works".
-Only someone who may add projects gets the customer list in `GET /api/road`.
+Only someone who may add projects gets the customer list in `GET /api/road`, with phone, email and address only
+for someone who may also add customers. The same rules let the key change an open project (`PUT /api/road/projects/:id`)
+and a customer's name, phone, email and address (`PATCH /api/road/customers/:id`).
 Keys last 90 days, at most 5 per person per company, revocable. The key travels in the link's `#` part, which browsers
 never send to a server, and the page removes it from the address bar.
 

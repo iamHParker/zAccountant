@@ -207,6 +207,11 @@ then the desk's own `createJob` (same checks, row and audit, actor = the key per
 the phone keeps a project in IndexedDB as kind `project`, `sync()` sends projects first and marks them `accepted`
 (*On the list*), then fetches the summary again. Lookup (`projectList`) searches number, name, customer and site
 address on the phone's saved copy, so it works with no signal; 📍 Map opens Apple Maps on the site address.
+Editing (same day): `PUT /api/road/projects/:jobId` → `editRoadProject` → the desk's `updateJob` (open projects only,
+stays open; no code = read from the name); `PATCH /api/road/customers/:contactId { name, phone, email, address }` →
+`editRoadCustomer` → `updateContact` (needs `canAddCustomers`). Both are sent at once (`sendNow`, needs signal), then the
+summary is fetched again. Summary projects carry `customerId`; customers carry `email, phone, address` only for
+`canAddCustomers`.
 Screens (Homer, 2026-11-06): the page opens on six coloured buttons (`screen = 'home'`; `SCREENS` in `road.js`:
 check, trip, plan, time, equipment, supplies; icon colours `.road-icon.c-*` in `styles.css`, the Lighthouse tool-rail look). `go(screen)`
 pushes a history entry so the phone's Back returns home (`popstate`). Privacy: `hide` (localStorage `zacc.roadHide`,
