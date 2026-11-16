@@ -186,21 +186,28 @@
            same boxes as the desk's Projects → Add project. With signal it goes straight onto the list; with none it waits here. -->
       <template v-if="screen === 'projects'">
         <!-- The project just added on this phone, shown on top until another one is opened. -->
-        <section class="card" v-if="!projectForm && openProject?.item">
+        <section class="card" v-if="!projectForm && !customerForm && openProject?.item">
           <div class="row wrap"><h2>{{ openProject.code && !openProject.name.startsWith(openProject.code) ? openProject.code + ' · ' : '' }}{{ openProject.name }}</h2>
             <span class="pill" :class="statusClass(openProject.item)">{{ openProject.item.alreadyThere ? 'Already on the list' : statusText(openProject.item) }}</span></div>
           <div class="small" v-if="openProject.code"><span class="muted">Number</span> <strong>{{ openProject.code }}</strong></div>
           <div class="small" v-if="openProject.customerName"><span class="muted">Customer</span> {{ openProject.customerName }}</div>
+          <div class="small cust-links" v-if="customerOf(openProject)?.phone || customerOf(openProject)?.email">
+            <a v-if="customerOf(openProject).phone" :href="telLink(customerOf(openProject).phone)">📞 {{ customerOf(openProject).phone }}</a>
+            <a v-if="customerOf(openProject).email" class="cust-email" :href="'mailto:' + customerOf(openProject).email">✉️ {{ customerOf(openProject).email }}</a></div>
           <div class="small pre-line" v-if="openProject.address"><span class="muted">Site</span> {{ openProject.address }}</div>
           <p class="bad small" v-if="openProject.item.error">{{ openProject.item.error }}</p>
           <div class="row wrap road-actions">
             <a class="btn" v-if="openProject.address" :href="mapLink(openProject.address)" target="_blank" rel="noopener">📍 Map</a>
             <button v-if="openProject.id" @click="timeOnProject(openProject)">+ Time on it</button>
           </div>
+          <div class="row wrap road-actions edit-row" v-if="canAddProjects && openProject.id">
+            <button @click="editProject(openProject)">✏️ Edit project</button>
+            <button v-if="summary?.canAddCustomers && customerOf(openProject)" @click="editCustomer(openProject)">✏️ Edit customer</button>
+          </div>
           <p class="muted small" v-if="!openProject.id">Time can go on it once it is added (it needs signal).</p>
         </section>
         <section class="card" v-if="projectForm">
-          <h2>{{ projectForm.editId ? 'Change this project' : 'New project' }}</h2>
+          <h2>{{ projectForm.editId || projectForm.serverId ? 'Change this project' : 'New project' }}</h2>
           <form @submit.prevent="saveProject">
             <div class="grid-num">
               <label>Number <input v-model.trim="projectForm.code" maxlength="30" placeholder="2610" autocapitalize="characters" autocomplete="off"></label>
@@ -213,8 +220,23 @@
                 <option v-for="c in summary?.customers ?? []" :value="c.id">{{ c.name }}</option></select></label>
             <label v-if="projectForm.customerId === newCustomer">New customer's name <input v-model="projectForm.customerName" maxlength="120" placeholder="Garcia Ranch LLC" autocomplete="off"></label>
             <label>Site address (optional) <textarea v-model="projectForm.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
-            <p class="muted small" v-if="!online">No signal: it is kept on this phone and added when there is signal.</p>
-            <button class="primary">{{ projectForm.editId ? 'Save' : 'Add project' }}</button> <button type="button" @click="projectForm = null">Cancel</button>
+            <p class="muted small" v-if="!online && !projectForm.serverId">No signal: it is kept on this phone and added when there is signal.</p>
+            <p class="muted small" v-if="!online && projectForm.serverId">No signal: a change to a saved project is sent at once, so it needs signal.</p>
+            <button class="primary" :disabled="busy">{{ projectForm.editId || projectForm.serverId ? 'Save' : 'Add project' }}</button> <button type="button" @click="projectForm = null">Cancel</button>
+          </form>
+        </section>
+        <!-- The project's customer (Homer, 2026-11-16): name, phone, email and mailing address, as on the desk's customer card. -->
+        <section class="card" v-else-if="customerForm">
+          <h2>Change this customer</h2>
+          <form @submit.prevent="saveCustomer">
+            <label>Name <input v-model="customerForm.name" maxlength="120" required autocomplete="off"></label>
+            <div class="grid2">
+              <label>Phone <input type="tel" v-model.trim="customerForm.phone" maxlength="40" autocomplete="off"></label>
+              <label>Email <input type="email" v-model.trim="customerForm.email" maxlength="200" autocomplete="off" autocapitalize="off"></label>
+            </div>
+            <label>Address <input v-model="customerForm.address" maxlength="500" placeholder="Street, City, State ZIP" autocomplete="off"></label>
+            <p class="muted small">The project's site address is on the project (✏️ Edit project). Every project for this customer shows the change.</p>
+            <button class="primary" :disabled="busy">Save</button> <button type="button" @click="customerForm = null">Cancel</button>
           </form>
         </section>
         <section class="card" v-else>
@@ -243,10 +265,17 @@
               <div class="proj-detail" v-if="openProjectKey === 's:' + p.id">
                 <div class="small" v-if="p.code"><span class="muted">Number</span> <strong>{{ p.code }}</strong></div>
                 <div class="small" v-if="p.customerName"><span class="muted">Customer</span> {{ p.customerName }}</div>
+                <div class="small cust-links" v-if="customerOf(p)?.phone || customerOf(p)?.email">
+                  <a v-if="customerOf(p).phone" :href="telLink(customerOf(p).phone)">📞 {{ customerOf(p).phone }}</a>
+                  <a v-if="customerOf(p).email" class="cust-email" :href="'mailto:' + customerOf(p).email">✉️ {{ customerOf(p).email }}</a></div>
                 <div class="small pre-line" v-if="p.address"><span class="muted">Site</span> {{ p.address }}</div>
                 <div class="row wrap road-actions">
                   <a class="btn" v-if="p.address" :href="mapLink(p.address)" target="_blank" rel="noopener">📍 Map</a>
                   <button @click="timeOnProject(p)">+ Time on it</button>
+                </div>
+                <div class="row wrap road-actions edit-row" v-if="canAddProjects && p.id">
+                  <button @click="editProject(p)">✏️ Edit project</button>
+                  <button v-if="summary?.canAddCustomers && customerOf(p)" @click="editCustomer(p)">✏️ Edit customer</button>
                 </div>
               </div>
             </template>

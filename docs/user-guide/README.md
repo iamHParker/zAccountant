@@ -63,6 +63,7 @@ Find the task, follow the link.
 - [jot down costs, receipts and checks on my phone (Road page)](tier-1-books.md#your-phone-on-the-road)
 - [record equipment or supplies I bought on the road, and see my equipment list](tier-1-books.md#your-phone-on-the-road)
 - [look up a project, or add a new one, on my phone in the field (Road page → Projects)](tier-1-books.md#your-phone-on-the-road)
+- [fix a project's site address or its customer's phone from my phone (Road page → Projects → ✏️ Edit)](tier-1-books.md#your-phone-on-the-road)
 - [record my day in blocks (travel, site, office) on my phone, and split travel between two jobs (50/50, 70/30…)](tier-1-books.md#your-phone-on-the-road)
 - [import mileage from MileIQ](tier-1-books.md#mileage-from-mileiq)
 

@@ -67,7 +67,7 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   const summary = ok(await phone.call('GET', '/api/road'));
   assert.equal(summary.company, 'Parker Engineering');
   assert.deepEqual(summary.projects.map((p) => p.code), ['2601', '2602']);
-  assert.deepEqual(Object.keys(summary.projects[0]).sort(), ['address', 'code', 'createdAt', 'customerName', 'id', 'name']);
+  assert.deepEqual(Object.keys(summary.projects[0]).sort(), ['address', 'code', 'createdAt', 'customerId', 'customerName', 'id', 'name']);
   // …and nothing else: the key is no session, and a bad key is refused.
   assert.equal((await phone.call('GET', `${b}/accounts`)).status, 401);
   assert.equal((await phone.call('GET', '/api/companies')).status, 401);

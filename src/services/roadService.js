@@ -17,8 +17,8 @@ import { parseProjectFolder } from '../core/projects.js';
 import { randomToken } from '../security/crypto.js';
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
-import { createTimeEntry, createJob } from './timesheetService.js';
-import { createContact } from './arapService.js';
+import { createTimeEntry, createJob, updateJob } from './timesheetService.js';
+import { createContact, updateContact } from './arapService.js';
 import { PROJECT_PERMISSIONS, CUSTOMER_PERMISSIONS } from '../core/permissions.js';
 import { receiptReadingOn } from './receiptReader.js';
 import { addPurchase, PURCHASE_CATEGORIES } from './purchaseService.js';
@@ -126,13 +126,15 @@ export async function roadSummary(db, key, access = null) {
        FROM trips t WHERE t.company_id = $1 AND t.is_active ORDER BY t.start_date DESC LIMIT 50`, [key.companyId, key.id]);
   // The project's customer and site address too, for looking a project up in the field (Homer, 2026-11-16).
   const { rows: projects } = await db.query(
-    `SELECT j.id, j.code, j.name, c.name AS "customerName", j.address, j.created_at AS "createdAt"
+    `SELECT j.id, j.code, j.name, j.customer_id AS "customerId", c.name AS "customerName", j.address, j.created_at AS "createdAt"
        FROM jobs j LEFT JOIN contacts c ON c.id = j.customer_id
       WHERE j.company_id = $1 AND j.is_active ORDER BY j.code NULLS LAST, j.name LIMIT 3000`, [key.companyId]);
   const rights = projectRights(access);
-  // The customer list, to pick from when adding a project: only for someone who may add projects.
+  // The customer list, to pick from when adding a project: only for someone who may add projects. Each customer's
+  // email, phone and address (to call from the site, or to fix) only for someone who may also add and change customers.
   const { rows: customers } = rights.canAddProjects ? await db.query(
-    "SELECT id, name FROM contacts WHERE company_id = $1 AND kind = 'customer' ORDER BY lower(name) LIMIT 3000", [key.companyId]) : { rows: [] };
+    `SELECT id, name${rights.canAddCustomers ? ', email, phone, address' : ''} FROM contacts
+      WHERE company_id = $1 AND kind = 'customer' AND is_active ORDER BY lower(name) LIMIT 3000`, [key.companyId]) : { rows: [] };
   const all = await listBookings(db, key.companyId, trips.map((t) => t.id));
   const { rows: sent } = all.length ? await db.query(
     "SELECT client_id, trip_booking_id FROM road_items WHERE key_id = $1 AND kind = 'booking' AND trip_booking_id = ANY($2::uuid[])", [key.id, all.map((b) => b.id)]) : { rows: [] };
@@ -158,26 +160,68 @@ export async function addRoadProject(db, key, access, input = {}) {
   if (!name) throw new LedgerError('Type the project name, like 2610 Garcia Barn');
   if (name.length > 80) throw new LedgerError('The project name can be up to 80 characters');
   const code = text(input.code, 60) ?? parseProjectFolder(name)?.code ?? null;
-  const { rows: [who] } = await db.query('SELECT email FROM users WHERE id = $1', [key.userId]);
-  const actor = who?.email ?? null;
+  const actor = await actorFor(db, key);
   return withTransaction(db, async (c) => {
     await lockCompany(c, key.companyId);
     const { rows: [have] } = await c.query(
       `SELECT j.id, j.code, j.name, c.name AS "customerName", j.address, j.is_active AS "isActive", j.created_at AS "createdAt"
          FROM jobs j LEFT JOIN contacts c ON c.id = j.customer_id WHERE j.company_id = $1 AND lower(trim(j.name)) = lower($2)`, [key.companyId, name]);
     if (have) return { project: have, alreadyThere: true };
-    let customerId = isId(input.customerId) ? input.customerId : null;
-    const customerName = customerId ? null : text(input.customerName, 120);
-    if (customerName) {
-      const { rows: [known] } = await c.query(
-        "SELECT id FROM contacts WHERE company_id = $1 AND kind = 'customer' AND lower(trim(name)) = lower($2)", [key.companyId, customerName]);
-      if (known) customerId = known.id;
-      else if (!rights.canAddCustomers) throw new LedgerError('Your role can\'t add customers. Pick one from the list, or leave it empty.');
-      else customerId = (await createContact(c, key.companyId, { kind: 'customer', name: customerName, actor })).id;
-    }
+    const customerId = await projectCustomer(c, key, rights, input, actor);
     const project = await createJob(c, key.companyId, { name, code, customerId, address: typeof input.address === 'string' ? input.address : null }, { actor });
     return { project, alreadyThere: false };
   });
+}
+
+/** The customer for a project form: one from the list (customerId), or a typed name matched to the list or added. */
+async function projectCustomer(c, key, rights, input, actor) {
+  if (isId(input.customerId)) return input.customerId;
+  const customerName = text(input.customerName, 120);
+  if (!customerName) return null;
+  const { rows: [known] } = await c.query(
+    "SELECT id FROM contacts WHERE company_id = $1 AND kind = 'customer' AND lower(trim(name)) = lower($2)", [key.companyId, customerName]);
+  if (known) return known.id;
+  if (!rights.canAddCustomers) throw new LedgerError('Your role can\'t add customers. Pick one from the list, or leave it empty.');
+  return (await createContact(c, key.companyId, { kind: 'customer', name: customerName, actor })).id;
+}
+const actorFor = async (db, key) => (await db.query('SELECT email FROM users WHERE id = $1', [key.userId])).rows[0]?.email ?? null;
+
+/**
+ * Change a project from the Road page (Homer, 2026-11-16: "3204 Stirrat is the project address"): its number, name,
+ * customer and site address, through the desk's own updateJob (same checks and audit). Open projects only (the phone
+ * lists only those); it stays open. Same permission as adding one.
+ */
+export async function editRoadProject(db, key, access, jobId, input = {}) {
+  const rights = projectRights(access);
+  if (!rights.canAddProjects) throw new LedgerError('Your role can\'t change projects. Ask the company owner, or change it at your desk.');
+  if (!isId(jobId)) throw new LedgerError('Project not found');
+  const actor = await actorFor(db, key);
+  return withTransaction(db, async (c) => {
+    const { rows: [job] } = await c.query('SELECT id FROM jobs WHERE company_id = $1 AND id = $2 AND is_active', [key.companyId, jobId]);
+    if (!job) throw new LedgerError('Project not found (closed projects are changed at your desk)');
+    const name = text(input.name, 200);
+    const customerId = await projectCustomer(c, key, rights, input, actor);
+    const code = text(input.code, 60) ?? (name ? parseProjectFolder(name)?.code ?? null : null);
+    const project = await updateJob(c, key.companyId, jobId, { name, code, customerId, isActive: true,
+      address: typeof input.address === 'string' ? input.address : null }, { actor });
+    return { project };
+  });
+}
+
+/**
+ * Change a customer's details from the Road page: name, email, phone and address, through the desk's updateContact.
+ * Needs the right to add customers (as well as projects).
+ */
+export async function editRoadCustomer(db, key, access, contactId, input = {}) {
+  const rights = projectRights(access);
+  if (!rights.canAddCustomers) throw new LedgerError('Your role can\'t change customers. Ask the company owner, or change it at your desk.');
+  if (!isId(contactId)) throw new LedgerError('Customer not found');
+  const { rows: [cust] } = await db.query("SELECT id FROM contacts WHERE company_id = $1 AND id = $2 AND kind = 'customer'", [key.companyId, contactId]);
+  if (!cust) throw new LedgerError('Customer not found');
+  const out = {};
+  for (const k of ['name', 'email', 'phone', 'address']) if (input[k] !== undefined) out[k] = input[k] == null ? '' : String(input[k]);
+  const r = await updateContact(db, key.companyId, contactId, { ...out, actor: await actorFor(db, key) });
+  return { customer: { id: r.id, name: r.name, email: r.email, phone: r.phone, address: r.address } };
 }
 
 /** A booking named by a cost ("Paid: record the cost"): { id } of a saved booking, or { clientId } of one sent from this phone. */
