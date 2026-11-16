@@ -454,15 +454,20 @@ export async function itemStatuses(db, key, clientIds) {
 
 // ---------------------------------------------------------------- Review at the desk
 
-/** Items waiting for review (or all recent ones), with the trip each belongs to and its photos. */
+/**
+ * Items waiting for review, with the trip each belongs to and its photos. status 'dismissed' gives the ones dismissed
+ * in the last 120 days, newest first (so one dismissed by mistake can be restored); 'all' gives every recent one.
+ */
 export async function listRoadItems(db, companyId, { status = 'pending' } = {}) {
+  const which = ['all', 'dismissed'].includes(status) ? status : 'pending';
   const { rows } = await db.query(
     `SELECT i.id, i.kind, i.client_id AS "clientId", i.key_id AS "keyId", i.data, i.status, i.trip_id AS "tripId", i.trip_cost_id AS "tripCostId",
-            i.payment_id AS "paymentId", i.received_at AS "receivedAt", u.name AS "userName", k.name AS "keyName",
+            i.payment_id AS "paymentId", i.received_at AS "receivedAt", i.reviewed_at AS "reviewedAt", u.name AS "userName", k.name AS "keyName",
             coalesce((SELECT json_agg(p.id ORDER BY p.created_at) FROM road_photos p WHERE p.item_id = i.id), '[]') AS photos
        FROM road_items i JOIN users u ON u.id = i.user_id JOIN road_keys k ON k.id = i.key_id
       WHERE i.company_id = $1 AND ($2::text = 'all' OR i.status = $2)
-      ORDER BY i.received_at, i.id LIMIT 500`, [companyId, status === 'all' ? 'all' : 'pending']);
+        AND ($2::text <> 'dismissed' OR i.reviewed_at > now() - interval '120 days')
+      ORDER BY CASE WHEN $2::text = 'dismissed' THEN i.reviewed_at END DESC, i.received_at, i.id LIMIT 500`, [companyId, which]);
   // Name each item's trip: a saved trip by id, or the trip item it came with (and the trip that item became).
   const tripIds = [...new Set(rows.flatMap((r) => [r.data.trip?.id, r.tripId]).filter(isId))];
   const { rows: trips } = tripIds.length ? await db.query('SELECT id, name FROM trips WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, tripIds]) : { rows: [] };
@@ -476,19 +481,41 @@ export async function listRoadItems(db, companyId, { status = 'pending' } = {}) 
   const { rows: tripNames } = tripItems.some((t) => t.tripId) ? await db.query(
     'SELECT id, name FROM trips WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, tripItems.map((t) => t.tripId).filter(Boolean)]) : { rows: [] };
   for (const t of tripNames) tripName.set(t.id, t.name);
-  // A check names invoice numbers as typed ("26-124, 26-130"): the unpaid invoices with those numbers.
+  // A check names invoice numbers as typed ("26-124, 26-130"): the invoices with those numbers. Homer's invoice numbers
+  // are his project numbers, so a typed job number also finds its unpaid invoices when no invoice has exactly that
+  // number: the lettered ones (2601 → 2601A, 2601B) and any invoice for the project with that number (Homer, 2026-11-16).
   const typed = (r) => (r.data.invoices ?? '').split(/[\s,;&]+|\band\b/i).map((s) => s.replace(/^#/, '').trim().toLowerCase()).filter(Boolean);
-  const wanted = [...new Set(rows.filter((r) => r.kind === 'check').flatMap(typed))];
+  const checks = rows.filter((r) => r.kind === 'check');
+  const wanted = [...new Set(checks.flatMap(typed))];
   const { rows: invs } = wanted.length ? await db.query(
-    `SELECT d.id, d.number, d.contact_id AS "contactId", ct.name AS "contactName", d.total_cents - COALESCE((SELECT sum(a.amount_cents)
-            FROM payment_applications a JOIN payments p ON p.id = a.payment_id WHERE a.document_id = d.id AND p.status = 'posted'), 0)::bigint AS "balanceCents"
-       FROM documents d JOIN contacts ct ON ct.id = d.contact_id
-      WHERE d.company_id = $1 AND d.kind = 'invoice' AND d.status <> 'void' AND d.replaced_by_id IS NULL AND lower(d.number) = ANY($2::text[])`,
+    `SELECT * FROM (
+       SELECT d.id, d.number, d.contact_id AS "contactId", ct.name AS "contactName", lower(j.code) AS "jobCode",
+              d.total_cents - COALESCE((SELECT sum(a.amount_cents) FROM payment_applications a JOIN payments p ON p.id = a.payment_id
+                                         WHERE a.document_id = d.id AND p.status = 'posted'), 0)::bigint AS "balanceCents"
+         FROM documents d JOIN contacts ct ON ct.id = d.contact_id LEFT JOIN jobs j ON j.company_id = d.company_id AND j.id = d.job_id
+        WHERE d.company_id = $1 AND d.kind = 'invoice' AND d.status <> 'void' AND d.replaced_by_id IS NULL
+          AND (lower(d.number) = ANY($2::text[]) OR regexp_replace(lower(d.number), '[a-z]+$', '') = ANY($2::text[]) OR lower(j.code) = ANY($2::text[]))) x
+      ORDER BY number`,
     [companyId, wanted]) : { rows: [] };
+  const invoicesFor = (r) => {
+    const found = new Set();
+    for (const n of typed(r)) {
+      const exact = invs.filter((i) => i.number.toLowerCase() === n);
+      const hits = exact.length ? exact
+        : invs.filter((i) => Number(i.balanceCents) > 0 && (i.number.toLowerCase().replace(/[a-z]+$/, '') === n || i.jobCode === n));
+      for (const i of hits) found.add(i);
+    }
+    return [...found].map(({ jobCode, ...i }) => ({ ...i, balanceCents: Number(i.balanceCents) }));
+  };
+  // No invoice found: a customer whose name is exactly the name on the check, to start the payment with.
+  const names = [...new Set(checks.map((r) => r.data.from?.trim().toLowerCase()).filter(Boolean))];
+  const { rows: custs } = names.length ? await db.query(
+    "SELECT id, name, lower(trim(name)) AS key FROM contacts WHERE company_id = $1 AND kind = 'customer' AND lower(trim(name)) = ANY($2::text[])",
+    [companyId, names]) : { rows: [] };
   return rows.map(({ keyId, ...r }) => {
     if (r.kind === 'check') {
-      const nums = typed(r);
-      return { ...r, trip: null, hours: null, invoices: invs.filter((i) => nums.includes(i.number.toLowerCase())).map((i) => ({ ...i, balanceCents: Number(i.balanceCents) })) };
+      const c = custs.find((x) => x.key === r.data.from?.trim().toLowerCase());
+      return { ...r, trip: null, hours: null, invoices: invoicesFor(r), customer: c ? { id: c.id, name: c.name } : null };
     }
     let trip = null;
     if (r.kind === 'trip') trip = { name: r.data.name, tripId: r.tripId, fromRoad: true };
@@ -729,6 +756,24 @@ export async function acceptRoadCheck(db, companyId, itemId, { paymentId } = {},
     await c.query("UPDATE road_items SET status = 'accepted', reviewed_by = $2, reviewed_at = now(), payment_id = $3 WHERE id = $1", [item.id, actor, p.id]);
     await appendAudit(c, companyId, { action: 'accept', entity: 'road_item', entityId: item.id, actor, payload: { kind: 'check', payment_id: p.id, photos } });
     return { accepted: true, paymentId: p.id, photos };
+  });
+}
+
+/**
+ * Undo a Dismiss (Homer, 2026-11-16: a check dismissed by mistake). The item goes back in the inbox, waiting, exactly as
+ * it came from the phone, so it can be accepted the usual way. Nothing was in the books for it, so nothing is reversed;
+ * the audit trail keeps both the dismiss and the restore. An accepted item can't be restored: void what it posted instead.
+ */
+export async function restoreRoadItem(db, companyId, itemId, { actor = null } = {}) {
+  if (!isId(itemId)) throw new LedgerError('Item not found');
+  return withTransaction(db, async (c) => {
+    await lockCompany(c, companyId);
+    const { rows: [item] } = await c.query('SELECT id, kind, status FROM road_items WHERE company_id = $1 AND id = $2 FOR UPDATE', [companyId, itemId]);
+    if (!item) throw new LedgerError('Item not found');
+    if (item.status !== 'dismissed') throw new LedgerError(item.status === 'pending' ? 'That item is already waiting in the inbox' : 'That item is already in the books; it can\'t be restored');
+    await c.query("UPDATE road_items SET status = 'pending', reviewed_by = NULL, reviewed_at = NULL WHERE id = $1", [item.id]);
+    await appendAudit(c, companyId, { action: 'restore', entity: 'road_item', entityId: item.id, actor, payload: { kind: item.kind } });
+    return { restored: true, id: item.id, kind: item.kind, status: 'pending' };
   });
 }
 

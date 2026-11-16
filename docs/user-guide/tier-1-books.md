@@ -435,7 +435,14 @@ number, the invoice number(s) it pays (like 26-124, 26-130), a note (where you d
 and the remittance. At your desk, **Sales → Checks from the road** shows it with the invoices it found. Press
 **Record payment**: Receive payment opens with the customer, date, check number and amount filled in and spread over
 those invoices. Choose the deposit account and save; the phone's photos are saved with the payment, and the phone
-shows "In the books".
+shows "In the books". Typing just the project number (2601) also finds that project's unpaid invoices (2601A, 2601B).
+If the name on the check isn't your customer's name (an owner, a parent company or an insurer paid), that's fine: the
+payment goes on the customer and invoice you choose, and the name on the check is kept in the memo.
+
+**Dismissed something by mistake?** Under each road list (Sales for checks, Bills for equipment and supplies, Trips for
+the rest) a folded card, **Dismissed … from the road**, lists what was dismissed in the last 120 days. Press
+**Restore**: the item goes back in the list waiting, exactly as the phone sent it, and you accept it the usual way.
+Nothing dismissed was ever in the books, so restoring changes no numbers until you accept it.
 
 **Fixing something already sent.** Each item on the phone has a **change** link until it is accepted at the desk:
 it opens the same form, filled in (a wrong date, the hours, the amount). **Save** sends the change, and the desk sees

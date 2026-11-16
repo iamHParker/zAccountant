@@ -708,6 +708,17 @@
           </div>
         </div>
       </div>
+      <!-- Dismissed by mistake? Restore puts it back in the inbox above, waiting, so it can be accepted the usual way. -->
+      <details class="card road-keys" v-if="tab === 'sales' && !ar.showPay && !ar.showDoc && can('invoices') && dismissedOf(['check']).length">
+        <summary><strong>Dismissed checks from the road ({{ dismissedOf(['check']).length }})</strong> <span class="muted small">· last 120 days</span></summary>
+        <p class="hint">Nothing dismissed went into the books. <strong>Restore</strong> puts it back in the list of items waiting, exactly as the phone sent it.</p>
+        <div class="road-item" v-for="i in dismissedOf(['check'])" :key="i.id">
+          <div class="row wrap">
+            <span>{{ roadItemText(i) }}</span>
+            <span><span class="muted small">dismissed {{ usDate(i.reviewedAt) }}</span> <button class="small" :disabled="road.busy" @click="restoreRoad(i)">Restore</button></span>
+          </div>
+        </div>
+      </details>
       <!-- Equipment and supplies bought on the road (the phone's Road page): accept each into the books here. -->
       <div class="card road-inbox" v-if="tab === 'bills' && !ar.showPay && !ar.showDoc && (ar.roadBuys.length || ar.buys.length)">
         <h2>Bought on the road</h2>
@@ -758,6 +769,17 @@
           </table>
         </div>
       </div>
+      <!-- Dismissed by mistake? Restore puts it back in the inbox above, waiting, so it can be accepted the usual way. -->
+      <details class="card road-keys" v-if="tab === 'bills' && !ar.showPay && !ar.showDoc && can('bills') && dismissedOf(['purchase']).length">
+        <summary><strong>Dismissed purchases from the road ({{ dismissedOf(['purchase']).length }})</strong> <span class="muted small">· last 120 days</span></summary>
+        <p class="hint">Nothing dismissed went into the books. <strong>Restore</strong> puts it back in the list of items waiting, exactly as the phone sent it.</p>
+        <div class="road-item" v-for="i in dismissedOf(['purchase'])" :key="i.id">
+          <div class="row wrap">
+            <span>{{ roadItemText(i) }}</span>
+            <span><span class="muted small">dismissed {{ usDate(i.reviewedAt) }}</span> <button class="small" :disabled="road.busy" @click="restoreRoad(i)">Restore</button></span>
+          </div>
+        </div>
+      </details>
       <!-- Old invoices (written before zAccountant, still unpaid): drop the PDF, check the filled-in form, save, then apply payments. -->
       <label v-if="tab === 'sales' && can('invoices') && !ar.showDoc" class="logo-drop old-invoice-drop" :class="{ over: ar.pdfOver, busy: ar.pdfBusy }"
         @dragover.prevent="ar.pdfOver = true" @dragleave="ar.pdfOver = false" @drop.prevent="dropOldInvoice">
@@ -994,6 +1016,8 @@
             <label>Method <select v-model="ar.pay.method"><option value="check">Check</option><option value="ach">ACH / bank transfer</option><option value="card">Card</option><option value="cash">Cash</option><option value="wire">Wire</option><option value="other">Other</option></select></label>
           </div>
           <label>Check or reference number (optional) <input v-model="ar.pay.reference" maxlength="60"></label>
+          <p class="hint" v-if="ar.pay.roadItem && ar.pay.nameOnCheck && ar.pay.nameOnCheck.trim().toLowerCase() !== (ar.contacts.find(c => c.id === ar.pay.contactId)?.name ?? '').trim().toLowerCase()">
+            The name on the check is <strong>{{ ar.pay.nameOnCheck }}</strong>. That's fine when someone else pays for your {{ S.who }} (an owner, a parent company, an insurer): the payment still goes on the {{ S.who }} and invoice you choose here, and the name is kept in the memo.</p>
           <p class="hint" v-if="ar.pay.contactId && !ar.pay.open.length">Nothing open for this {{ S.who }}.</p>
           <table class="data" v-if="ar.pay.open.length">
             <thead><tr><th>{{ S.Doc }}</th><th>Date</th><th>Due</th><th class="num">Balance</th><th class="num w150">Payment</th></tr></thead>
@@ -1516,6 +1540,17 @@
         </button>
       </template>
 
+      <!-- Dismissed by mistake? Restore puts it back in the inbox above, waiting, so it can be accepted the usual way. -->
+      <details class="card road-keys" v-if="!trip.cur && !trip.form && can('bills') && dismissedOf(ROAD_TRIP_KINDS).length">
+        <summary><strong>Dismissed from the road ({{ dismissedOf(ROAD_TRIP_KINDS).length }})</strong> <span class="muted small">· last 120 days</span></summary>
+        <p class="hint">Nothing dismissed went into the books. <strong>Restore</strong> puts it back in the list of items waiting, exactly as the phone sent it.</p>
+        <div class="road-item" v-for="i in dismissedOf(ROAD_TRIP_KINDS)" :key="i.id">
+          <div class="row wrap">
+            <span>{{ roadItemText(i) }}</span>
+            <span><span class="muted small">dismissed {{ usDate(i.reviewedAt) }}</span> <button class="small" :disabled="road.busy" @click="restoreRoad(i)">Restore</button></span>
+          </div>
+        </div>
+      </details>
       <details class="card road-keys" v-if="!trip.cur && !trip.form && can('bills')" :open="Boolean(road.made)">
         <summary><strong>Your phone on the road</strong> <span class="muted small">· jot down costs, receipts and travel time without signing in</span></summary>
         <p class="hint">The Road page on your phone can only add trips, costs with receipt photos, travel time and new project numbers,

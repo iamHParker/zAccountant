@@ -159,7 +159,7 @@ const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), 
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, isHomeowner: false, noLateCharges: false, groupName: '', people: [] });
 const blankPerson = () => ({ name: '', email: '', phone: '' });
-const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', open: [], amounts: {}, photos: [], keptPhotos: 0, photoBusy: false, key: newKey() });
+const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', nameOnCheck: '', open: [], amounts: {}, photos: [], keptPhotos: 0, photoBusy: false, key: newKey() });
 // Check photos: shrunk in the browser to 2000 pixels on the longer side (enough to read a check), JPEG.
 const PHOTO_SIDE = 2000;
 
@@ -226,6 +226,8 @@ const TAB_FEATURE = { payroll: 'payroll', time: 'timesheets' };
 // `feature`: the plan must include it. `go` runs on a press. The server keeps only the ids; an unknown id is skipped.
 // A trip's share table: each project's percent of each kind of cost; Travel time is the trip share (migration 038).
 // Bookings on a trip planned ahead (Homer, 2026-11-06): the flight, hotel and rental car. Not money until paid.
+/** The road items reviewed on Trips (checks are reviewed on Sales, purchases on Bills). */
+const ROAD_TRIP_KINDS = ['trip', 'cost', 'time', 'block', 'booking'];
 const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
 // Time blocks from the Road page (migration 042).
 const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
@@ -303,7 +305,7 @@ createApp({
   render,
   data() {
     return {
-      SHARE_COLS, BOOKING_KINDS, BOOKING_DATES, companies: [], companyId: null, company: null, tab: 'home', message: null,
+      SHARE_COLS, BOOKING_KINDS, ROAD_TRIP_KINDS, BOOKING_DATES, companies: [], companyId: null, company: null, tab: 'home', message: null,
       auth: { screen: 'loading', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
       passkeys: { list: [], name: '', code: '', busy: false, supported: canPasskey() },
       members: [], newMember: { email: '', role: 'bookkeeper', departmentId: '' },
@@ -375,7 +377,7 @@ createApp({
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
-      road: { items: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
+      road: { items: [], dismissed: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         imports: [], recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
@@ -1469,6 +1471,7 @@ createApp({
       if (ar.panel === 'aging') ar.aging = await this.run(() => api('GET', `${base}/reports/${S.agingPath}?asOf=${ar.agingAsOf}`));
       if (S.kind === 'invoice') ar.roadChecks = ((await this.run(() => api('GET', `${base}/road-items`))) ?? []).filter((i) => i.kind === 'check');
       if (S.kind === 'bill') await this.loadBuys();
+      await this.loadDismissed();
     },
     // ---- Equipment and supplies bought on the road (Road page → Equipment / Supplies; migration 041), on Bills.
     async loadBuys() {
@@ -1509,9 +1512,10 @@ createApp({
     roadCheckPhotoUrl(i, id) { return `/api${this.arBase()}/road-items/${i.id}/photos/${id}`; },
     /** Opens Receive payment filled in from the check: the customer and invoices it names, the amount spread over them. */
     async recordRoadCheck(i) {
-      await this.startPay(i.invoices[0]?.contactId ?? '');
+      // The customer comes from the invoices it names; failing that, a customer with exactly the name on the check.
+      await this.startPay(i.invoices[0]?.contactId ?? i.customer?.id ?? '');
       const p = this.ar.pay;
-      Object.assign(p, { date: i.data.date, reference: i.data.checkNumber ?? '', memo: [i.data.from && `From ${i.data.from}`, i.data.notes].filter(Boolean).join(' · ').slice(0, 500),
+      Object.assign(p, { nameOnCheck: i.data.from ?? '', date: i.data.date, reference: i.data.checkNumber ?? '', memo: [i.data.from && `From ${i.data.from}`, i.data.notes].filter(Boolean).join(' · ').slice(0, 500),
         roadItem: i, keptPhotos: i.photos.length });
       let left = i.data.amountCents;
       for (const inv of i.invoices.filter((x) => x.contactId === p.contactId)) {
@@ -1520,6 +1524,29 @@ createApp({
         const c = Math.min(left, d.balanceCents); p.amounts[d.id] = (c / 100).toFixed(2); left -= c;
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    // ---- Road items dismissed by mistake (Homer, 2026-11-16): listed under each inbox, with Restore.
+    async loadDismissed() {
+      if (!this.can('bills') && !this.can('invoices')) { this.road.dismissed = []; return; }
+      this.road.dismissed = (await this.run(() => api('GET', `${this.tripBase()}/road-items?status=dismissed`))) ?? [];
+    },
+    dismissedOf(kinds) { return this.road.dismissed.filter((i) => kinds.includes(i.kind)); },
+    /** One line saying what a road item was, for the Dismissed list. */
+    roadItemText(i) {
+      const d = i.data; const amt = d.amountCents != null ? ` · ${this.money(d.amountCents)}` : '';
+      const when = d.date ? `${this.usDate(d.date)} ` : '';
+      if (i.kind === 'check') return `${when}Check${d.checkNumber ? ' #' + d.checkNumber : ''}${d.from ? ' from ' + d.from : ''}${d.invoices ? ' · invoices ' + d.invoices : ''}${amt}`;
+      if (i.kind === 'trip') return `Trip: ${d.name ?? ''}`;
+      if (i.kind === 'booking') return `${BOOKING_KINDS[d.kind] ?? 'Booking'}${d.vendor ? ' · ' + d.vendor : ''}${amt}`;
+      if (i.kind === 'time' || i.kind === 'block') return `${when}Travel time${i.hours != null ? ' · ' + i.hours + ' h' : ''}${d.notes ? ' · ' + d.notes : ''}`;
+      return `${when}${d.description ?? d.vendor ?? i.kind}${d.vendor && d.description ? ' · ' + d.vendor : ''}${amt}`;
+    },
+    async restoreRoad(i) {
+      this.road.busy = true;
+      try {
+        if (!await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/restore`), 'Restored: it is back in the list waiting to go into the books.')) return;
+        if (i.kind === 'check' || i.kind === 'purchase') await this.loadAr(); else await this.loadRoad();
+      } finally { this.road.busy = false; }
     },
     async dismissRoadCheck(i) {
       if (!confirm('Dismiss this check from the road? It will not go into the books.')) return;
@@ -1656,6 +1683,7 @@ createApp({
     async loadRoad() {
       const r = this.road;
       r.items = ((await this.run(() => api('GET', `${this.tripBase()}/road-items`))) ?? []).filter((i) => i.kind !== 'check' && i.kind !== 'purchase'); // checks: Sales; purchases: Bills
+      await this.loadDismissed();
       if (this.can('bills')) r.keys = (await this.run(() => api('GET', `${this.tripBase()}/road-keys`))) ?? [];
       const last = lastRoadAccounts();
       if (!r.expenseId) r.expenseId = last.expenseId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
