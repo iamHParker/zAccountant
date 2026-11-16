@@ -18,6 +18,7 @@ that aren't obvious from the code. Read the entry for a feature before changing 
   fresh authenticator code. Settings card + sign-in button.
 - Road page `/road` (migration 026, `src/services/roadService.js`, `public/road.*`): phone key (Bearer, hash only,
   90 days) → inbox `road_items`; Trips → From the road accepts into the books. Offline via IndexedDB + service worker.
+  Dismiss is undoable (Homer 2026-11-16): `?status=dismissed` + `POST …/restore` → back to pending; folded card per inbox.
 - Road purchases (migration 041, `src/services/purchaseService.js`): Road page Equipment / Supplies buttons → road item
   `purchase` (no trip; equipment has a serial number) → Bills → "Bought on the road" accepts it to 1500 Equipment / 6200
   Office Supplies (or another account) and posts its own entry; Void reverses. Equipment list = posted equipment purchases.

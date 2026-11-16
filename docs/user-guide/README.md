@@ -62,6 +62,7 @@ Find the task, follow the link.
 - [delete a project made by mistake (and move what uses it to the right project)](tier-1-books.md#projects)
 - [track a trip's costs, mileage and travel time, shared by projects](tier-1-books.md#trips)
 - [jot down costs, receipts and checks on my phone (Road page)](tier-1-books.md#your-phone-on-the-road)
+- [bring back a check or cost from the road that I dismissed by mistake](tier-1-books.md#your-phone-on-the-road)
 - [record equipment or supplies I bought on the road, and see my equipment list](tier-1-books.md#your-phone-on-the-road)
 - [look up a project, or add a new one, on my phone in the field (Road page → Projects)](tier-1-books.md#your-phone-on-the-road)
 - [fix a project's site address or its customer's phone from my phone (Road page → Projects → ✏️ Edit)](tier-1-books.md#your-phone-on-the-road)

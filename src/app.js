@@ -655,6 +655,7 @@ export function createApp(pool, { log } = {}) {
     ({ [FILE]: await purchaseSvc.getPurchasePhoto(db, companyId, req.params.purchaseId, req.params.photoId) })));
   api.post(`${PU}/:purchaseId/void`, route('bills', ({ db, req, companyId, actor }) => purchaseSvc.voidPurchase(db, companyId, req.params.purchaseId, { actor })));
   api.post(`${RI}/:itemId/dismiss`, route(['bills', 'invoices'], ({ db, req, companyId, actor }) => roadSvc.dismissRoadItem(db, companyId, req.params.itemId, { actor })));
+  api.post(`${RI}/:itemId/restore`, route(['bills', 'invoices'], ({ db, req, companyId, actor }) => roadSvc.restoreRoadItem(db, companyId, req.params.itemId, { actor })));
   api.get(TR, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.listTrips(db, companyId, { includeClosed: req.query.closed !== '0' })));
   api.post(TR, route('bills', ({ db, req, companyId, actor }) => trips.createTrip(db, companyId, req.body ?? {}, { actor }), 201));
   api.get(`${TR}/:tripId`, route(['view_books', 'bills'], ({ db, req, companyId }) => trips.getTrip(db, companyId, req.params.tripId)));

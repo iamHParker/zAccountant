@@ -178,6 +178,39 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
   assert.equal((await desk.call('POST', `${b}/road-items/${chk.id}/accept-check`, { paymentId: pay.id })).status, 400);
 
+  // Dismissed by mistake (Homer, 2026-11-16): a check for project 2601, paid by someone whose name isn't the customer's.
+  // Restore puts it back in the inbox; the job number finds the project's lettered invoice; it's recorded as usual.
+  const smith = ok(await desk.call('POST', `${b}/customers`, { name: 'Smith Residence' }), 201);
+  const inv2 = ok(await desk.call('POST', `${b}/invoices`, { contactId: smith.id, number: '2601A', jobId: J['2601'], date: '2026-10-03',
+    lines: [{ accountId: A['4100'], description: 'Footing design', amount: '1250.00' }] }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'check-smith-001', kind: 'check',
+    data: { date: '2026-11-14', amount: '1250.00', from: 'Jane Q. Smith Trust', checkNumber: '1007', invoices: '2601' } }), 201);
+  const [chk2] = ok(await desk.call('GET', `${b}/road-items`));
+  ok(await desk.call('POST', `${b}/road-items/${chk2.id}/dismiss`, {}));
+  assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
+  assert.equal(ok(await phone.call('POST', '/api/road/status', { clientIds: ['check-smith-001'] }))[0].status, 'dismissed');
+  const gone = ok(await desk.call('GET', `${b}/road-items?status=dismissed`));
+  assert.equal(gone[0].id, chk2.id); // newest dismissal first
+  assert.ok(gone[0].reviewedAt);
+  ok(await desk.call('POST', `${b}/road-items/${chk2.id}/restore`, {}));
+  assert.equal((await desk.call('POST', `${b}/road-items/${chk2.id}/restore`, {})).status, 400); // already waiting
+  assert.equal(ok(await phone.call('POST', '/api/road/status', { clientIds: ['check-smith-001'] }))[0].status, 'pending');
+  assert.ok(!ok(await desk.call('GET', `${b}/road-items?status=dismissed`)).some((x) => x.id === chk2.id));
+  const [back] = ok(await desk.call('GET', `${b}/road-items`));
+  assert.equal(back.id, chk2.id);
+  assert.deepEqual(back.invoices.map((x) => [x.number, x.contactId, x.balanceCents]), [['2601A', smith.id, 125000]]); // "2601" typed
+  assert.equal(back.customer, null); // no customer named "Jane Q. Smith Trust": the invoice says who
+  const pay2 = ok(await desk.call('POST', `${b}/payments-received`, { contactId: smith.id, date: '2026-11-14', accountId: A['1000'], method: 'check',
+    reference: '1007', memo: 'From Jane Q. Smith Trust', applications: [{ documentId: inv2.id, amount: '1250.00' }] }), 201);
+  ok(await desk.call('POST', `${b}/road-items/${chk2.id}/accept-check`, { paymentId: pay2.id }));
+  assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
+  assert.equal((await desk.call('POST', `${b}/road-items/${chk2.id}/restore`, {})).status, 400); // in the books: void the payment instead
+  // A check naming no invoice starts with the customer whose name is on it.
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'check-doe-0002', kind: 'check', data: { date: '2026-11-15', amount: '50.00', from: ' doe law ' } }), 201);
+  const [chk3] = ok(await desk.call('GET', `${b}/road-items`));
+  assert.deepEqual(chk3.customer, { id: cust.id, name: 'Doe Law' });
+  ok(await desk.call('POST', `${b}/road-items/${chk3.id}/dismiss`, {}));
+
   // At the desk, from the trip's grid (Homer, 2026-10-30): change an item before it goes in, then Accept all.
   const ref2 = { id: tr.tripId };
   ok(await phone.call('POST', '/api/road/items', { clientId: 'cost-hotel-01', kind: 'cost', data: { trip: ref2, date: '2026-10-05', kind: 'lodging', vendor: 'Hotel', amount: '239.10' } }), 201);

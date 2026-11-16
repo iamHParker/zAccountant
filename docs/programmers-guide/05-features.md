@@ -185,6 +185,15 @@ job with that name or number exists; even shares via `evenShares`), a cost (`add
 invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
 The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
 { paymentId }` (`invoices`) links it (`road_items.payment_id`) and copies its photos to `payment_photos`.
+Matching (Homer, 2026-11-16): a typed number with no invoice of exactly that number also finds the unpaid lettered
+invoices (2601 → 2601A, 2601B) and unpaid invoices whose project (`documents.job_id` → `jobs.code`) has that number.
+With no invoice found, `customer` is the customer whose name is exactly the check's "from", if any; otherwise the
+desk picks the customer (the payer's name need not be the customer's; it stays in the memo).
+**Dismissed by mistake:** `GET …/road-items?status=dismissed` lists the last 120 days of dismissals (newest first, with
+`reviewedAt`), and `POST …/road-items/:id/restore` (`restoreRoadItem`, `bills` or `invoices`) sets a dismissed item back
+to `pending` (clearing `reviewed_by`/`reviewed_at`) and audits `restore`. Nothing was posted for a dismissed item, so
+nothing is reversed; an accepted item can't be restored. The phone keeps asking about its dismissed items too, so a
+restored one shows *Sent* again. Each inbox (Sales, Bills, Trips) has a folded "Dismissed … from the road" card.
 Purchases (migration 041, `src/services/purchaseService.js`): a road item of kind `purchase` (`date, category
 equipment|supplies, amount, vendor, description, serialNumber` (equipment only), `jobId`) has no trip. Bills →
 "Bought on the road" (`loadBuys` in `app.js`) accepts it with `accept { accountId, paidFromAccountId }`; no

@@ -692,8 +692,8 @@ createApp({
             throw e; // no signal after all: try again later
           }
         }
-        // Which have been accepted at the desk?
-        const sent = this.items.filter((i) => i.sentItem && i.status === 'pending').map((i) => i.clientId);
+        // Which have been accepted at the desk? (A dismissed one is asked about too: the desk can restore it.)
+        const sent = this.items.filter((i) => i.sentItem && ['pending', 'dismissed'].includes(i.status)).map((i) => i.clientId);
         let changed = false;
         if (sent.length) {
           for (const s of await this.call('POST', '/status', { clientIds: sent })) {
