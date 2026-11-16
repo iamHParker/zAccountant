@@ -210,11 +210,10 @@
           <h2>{{ projectForm.editId || projectForm.serverId ? 'Change this project' : 'New project' }}</h2>
           <form @submit.prevent="saveProject">
             <div class="grid-num">
-              <label>Number <input v-model.trim="projectForm.code" maxlength="30" :placeholder="nextNumber || '2610'" autocapitalize="characters" autocomplete="off"></label>
-              <label>Name <input v-model="projectForm.name" maxlength="80" required placeholder="2610 Garcia Barn" autocomplete="off"></label>
+              <label>Number <input v-model.trim="projectForm.code" maxlength="30" placeholder="2610" autocapitalize="characters" autocomplete="off"></label>
+              <label>Name <input v-model="projectForm.name" maxlength="80" required placeholder="Garcia Barn" autocomplete="off"></label>
             </div>
             <p class="warn-line" v-if="numberClash">⚠️ {{ numberClash.code }} is already used by {{ numberClash.name }}.{{ nextNumber ? ` The next free number is ${nextNumber}.` : '' }}</p>
-            <p class="next-line" v-else-if="nextNumber && !projectForm.serverId && !projectForm.code">Next free number: <strong>{{ nextNumber }}</strong> <button type="button" class="link small" @click="projectForm.code = nextNumber">use it</button></p>
             <p class="muted small" v-if="!projectForm.code && projectForm.name">No number typed: it is taken from the front of the name{{ projectForm.name.match(/^[A-Za-z]{0,3}\d/) ? '' : ' (this name has none)' }}.</p>
             <label>Customer (optional)
               <select v-model="projectForm.customerId"><option value="">None</option>
