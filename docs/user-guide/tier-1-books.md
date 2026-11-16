@@ -362,10 +362,10 @@ while you travel, even with no signal, without signing in to your books on the p
    bookings (nothing to choose; they go on the trip, not in the books), costs and travel time. **Dismiss** anything that shouldn't go in the books. On the phone each item then says
    *In the books*; **Clear items already in the books** tidies the list.
 
-**The buttons.** The Road page opens on six coloured buttons, one for each job: **Check in** (green, a
+**The buttons.** The Road page opens on seven coloured buttons, one for each job: **Check in** (green, a
 check you received), **Trip now** (orange, costs and receipts on the trip you are on), **Future trip** (blue, plan a
 trip ahead; trips coming up are listed there), **Time** (purple, your day in blocks: travel, site and office), **Equipment** (teal) and
-**Supplies** (amber) for things you buy that aren't on a trip. Each button opens its own
+**Supplies** (amber) for things you buy that aren't on a trip, and **Projects** (raspberry) to look a project up or add one. Each button opens its own
 screen; **‹ Home** at the top, or the phone's own Back, returns to the buttons.
 
 **Time in blocks.** Tap **Time**, pick the **Day**, and add the day one block at a time: **+ 🚗 Travel**, **+ 🏗️ Site**
@@ -378,6 +378,19 @@ minute, the first ending where the second starts). Office or drafting time
 may have no project (general office). Travel for a trip can go on the trip instead. The list shows the day's blocks
 and the **Day total**. At your desk, **Trips → From the road** lists them under *Time on projects*; **Accept** makes
 each block a time entry on its project (a split block makes two), ready for the timesheet and payroll.
+
+**Projects from the field.** Tap **Projects**. The newest projects are listed; type in **Find a project** to search
+by number, name, customer or street (*2601*, *smith*, *buda* all work, and it works with no signal, from the phone's
+saved copy of the list). Tap a project to see its number, customer and site address, **📍 Map** to open the site in
+Maps, or **+ Time on it** to start a site block on it. **+ New project** has the same boxes as the desk's
+**Add project**: **Number** (leave it empty and it is taken from the front of the name: *2610 Garcia Barn* → 2610),
+**Name**, **Customer** (one from your list, **+ New customer…** to type a new one, or None) and **Site address**.
+**Add project** puts it straight onto your project list (a project isn't money, so it doesn't wait in *From the road*);
+it then says *On the list*, and every project box on the phone and at the desk offers it. A name already on the list
+just opens that project. With no signal it waits on the phone under *Waiting to be added* and goes in when signal
+returns. Adding projects needs a role that may add them at the desk (Owner, Accountant, Bookkeeper, or a
+custom role with invoices, timesheet approval or admin); a new customer needs invoices or admin. Closed projects
+aren't listed; reopen one at your desk.
 
 **Equipment and supplies bought on the road.** Batteries and markers for a job, survey stakes, a new laser level:
 tap **Supplies** (used up) or **Equipment** (lasts), then **+ Supplies bought** or **+ Equipment bought**. Type the
@@ -422,7 +435,8 @@ the corrected item. A new cost or day of travel always starts on today's date; c
 earlier day. Once an item says *In the books*, the phone can no longer change it; fix it at your desk instead:
 **Trips →** the trip **→ edit** on the cost or the day of travel time (or **Sales** for a check's payment).
 
-The road key can't see your books or change anything already saved; it can only add to the *From the road* box.
+The road key can't see your books or change anything already saved; it can only add to the *From the road* box, and
+add a new project (when your role may add projects).
 It works for 90 days. Lost the phone? **Trips → Your phone on the road → turn off**.
 
 ### Mileage from MileIQ

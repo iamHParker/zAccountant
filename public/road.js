@@ -76,7 +76,11 @@ const SCREENS = {
   time: { title: 'Time', color: 'c-time' },
   equipment: { title: 'Equipment', color: 'c-equip' },
   supplies: { title: 'Supplies', color: 'c-supply' },
+  projects: { title: 'Projects', color: 'c-proj' },
 };
+// The project number at the front of a name, the way the server reads it (src/core/projects.js parseProjectFolder).
+const leadingNumber = (name) => /^([A-Za-z]{0,3}\d[\d.-]*[A-Za-z]?)(?=$|[\s_–—:-])/.exec(String(name ?? '').trim())?.[1].replace(/[.-]+$/, '') ?? '';
+const NEW_CUSTOMER = '+new';
 // Time in blocks (Homer, 2026-11-06): travel, site time, office/drafting; lunch is the gap between two blocks.
 const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
 const BLOCK_ICON = { travel: '🚗', site: '🏗️', office: '📐' };
@@ -95,10 +99,12 @@ createApp({
     return {
       key: getLocal(KEY_STORE), pasted: '', keyProblem: '', message: null,
       summary: (() => { try { return JSON.parse(getLocal(SUMMARY_STORE) ?? 'null'); } catch { return null; } })(),
-      online: navigator.onLine, syncing: false, busy: false,
+      online: navigator.onLine, syncing: false, syncAgain: false, busy: false,
       items: [], tripKey: getLocal('zacc.roadTrip') ?? '',
       tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, buyForm: null, blockForm: null, blockDay: today(), blockTypes: BLOCK_TYPES, blockIcon: BLOCK_ICON, kinds: KINDS, reading: false,
       bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
+      // Projects (Homer, 2026-11-16): look one up, or add one from the field.
+      projectForm: null, projectQuery: '', openProjectKey: '', newCustomer: NEW_CUSTOMER,
       screen: 'home', screens: SCREENS,
       // Amounts start hidden (blurred) and the phone remembers the choice: someone beside you sees no deposit totals.
       hide: getLocal('zacc.roadHide') !== 'show',
@@ -181,6 +187,34 @@ createApp({
       return (this.summary?.projects ?? []).filter((p) => `${p.code ?? ''} ${p.name}`.toLowerCase().includes(q)).slice(0, 30);
     },
     canRead() { return Boolean(this.summary?.receiptReading); },
+    canAddProjects() { return Boolean(this.summary?.canAddProjects); },
+    /** Projects added on this phone and not yet on zAccountant's list (no signal, or a problem to fix). */
+    phoneProjects() { return this.items.filter((i) => i.kind === 'project' && i.status !== 'accepted').sort((a, b) => b.createdAt.localeCompare(a.createdAt)); },
+    /**
+     * The project list for the Projects screen: typed words match the number, name, customer or site address (every
+     * word must match somewhere, so "2601 smith" or "buda" both work). Nothing typed: the newest projects first.
+     */
+    projectList() {
+      const all = this.summary?.projects ?? [];
+      const words = this.projectQuery.toLowerCase().split(/\s+/).filter(Boolean);
+      if (!words.length) return [...all].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')).slice(0, 15);
+      const cmp = (x, y) => (x ?? '').localeCompare(y ?? '', 'en', { numeric: true, sensitivity: 'base' });
+      return all.filter((p) => { const hay = `${p.code ?? ''} ${p.name} ${p.customerName ?? ''} ${p.address ?? ''}`.toLowerCase(); return words.every((w) => hay.includes(w)); })
+        .sort((a, b) => cmp(a.code, b.code) || cmp(a.name, b.name)).slice(0, 50);
+    },
+    /** The project opened on the Projects screen: one on zAccountant's list (s:id) or one still on this phone (c:clientId). */
+    openProject() {
+      const k = this.openProjectKey;
+      if (k.startsWith('c:')) {
+        const i = this.items.find((x) => x.clientId === k.slice(2));
+        if (!i) return null;
+        const saved = i.projectId && this.summary?.projects?.find((p) => p.id === i.projectId);
+        if (saved) return { ...saved, item: i };
+        return { id: null, code: i.data.code || leadingNumber(i.data.name) || null, name: i.data.name, address: i.data.address,
+          customerName: i.data.customerName ?? this.customerName(i.data.customerId), item: i };
+      }
+      return k.startsWith('s:') ? this.summary?.projects?.find((p) => p.id === k.slice(2)) ?? null : null;
+    },
     mileageText() {
       const c = mileageCents(this.costForm?.miles, this.costForm?.mileRate);
       return c == null ? '' : `${this.costForm.miles} mi × $${this.costForm.mileRate} = ${money(c)}`;
@@ -249,7 +283,7 @@ createApp({
     },
     goTime() { this.go('time'); },
     openTrip(key) { this.tripKey = key; this.go('trip'); },
-    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; this.blockForm = null; },
+    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; this.blockForm = null; this.projectForm = null; this.openProjectKey = ''; },
     toggleHide() { this.hide = !this.hide; setLocal('zacc.roadHide', this.hide ? null : 'show'); },
     newTrip() { this.tripForm = { name: '', startDate: today(), endDate: '', jobIds: [], newProjects: '', notes: '' }; this.projectSearch = ''; },
     /** A trip planned ahead (Homer, 2026-11-06): the New trip form starting tomorrow; its bookings go on it once saved. */
@@ -280,6 +314,8 @@ createApp({
       } else if (i.kind === 'block') {
         this.blockForm = { ...base, type: d.type, date: d.date, start: d.start ?? '', end: d.end ?? '', hours: d.start ? '' : d.hours ?? '',
           jobId: d.jobId ?? '', splitJobId: d.splitJobId ?? '', splitPercent: d.splitPercent ?? 50, tripKey: d.trip ? (d.trip.clientId ? `c:${d.trip.clientId}` : `s:${d.trip.id}`) : '', notes: d.notes ?? '' };
+      } else if (i.kind === 'project') {
+        this.projectForm = { ...base, code: d.code ?? '', name: d.name, customerId: d.customerId ?? (d.customerName ? NEW_CUSTOMER : ''), customerName: d.customerName ?? '', address: d.address ?? '' };
       } else if (i.kind === 'purchase') {
         this.buyForm = { ...base, kind: 'purchase', category: d.category, date: d.date, amount: d.amount ?? '', vendor: d.vendor ?? '',
           description: d.description ?? '', serialNumber: d.serialNumber ?? '', jobId: d.jobId ?? '', photos: [...(i.photos ?? [])] };
@@ -376,6 +412,42 @@ createApp({
         description: f.description.trim() || SCREENS[f.category].title, jobId: f.jobId || null };
       if (f.category === 'equipment') data.serialNumber = f.serialNumber.trim() || null;
       if (await this.saveItem('purchase', f, data, f.photos)) { this.buyForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
+    },
+    // ---- Projects (Homer, 2026-11-16): look a project up in the field (number, customer, site address, a map), or add
+    // one the way the desk's Projects → Add project does. A new project goes straight onto zAccountant's list when there
+    // is signal (it isn't money, so it doesn't wait in the From the road box); with no signal it waits on the phone.
+    customerName(id) { return id ? this.summary?.customers?.find((c) => c.id === id)?.name ?? null : null; },
+    newProject() {
+      this.closeForms();
+      const words = this.projectQuery.trim();
+      // Typed a number or name that isn't on the list: start the new project with it.
+      this.projectForm = { code: /^\S*\d\S*$/.test(words) ? words : '', name: words && !/^\S*\d\S*$/.test(words) ? words : '', customerId: '', customerName: '', address: '' };
+      window.scrollTo({ top: 0 });
+    },
+    showProject(key) { this.projectForm = null; this.openProjectKey = this.openProjectKey === key ? '' : key; },
+    /** The site address as one line for a map search ("285 Bridgestone Way, Buda, TX"). */
+    mapLink(address) { return `https://maps.apple.com/?q=${encodeURIComponent(String(address ?? '').replace(/\s*\n\s*/g, ', '))}`; },
+    firstLine(address) { return String(address ?? '').split('\n')[0]; },
+    /** "+ Time on this project": the Time screen, a new site block on this project. */
+    timeOnProject(p) { this.go('time'); this.newBlock('site'); this.blockForm.jobId = p.id; },
+    async saveProject() {
+      const f = this.projectForm;
+      const name = f.name.trim(); const code = f.code.trim() || leadingNumber(name);
+      if (!name) { this.flash('Type the project name, like 2610 Garcia Barn.', 'bad'); return; }
+      const list = this.summary?.projects ?? [];
+      const same = list.find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
+      if (same) { this.projectForm = null; this.openProjectKey = `s:${same.id}`; this.flash(`${name} is already on the list.`); return; }
+      const clash = code && list.find((p) => p.code && p.code.toLowerCase() === code.toLowerCase());
+      if (clash && !confirm(`Number ${code} is already used by ${clash.name}. Add this project anyway?`)) return;
+      const newCust = f.customerId === NEW_CUSTOMER;
+      if (newCust && !f.customerName.trim()) { this.flash('Type the new customer\'s name, or choose None.', 'bad'); return; }
+      const data = { code: f.code.trim() || null, name, address: f.address.trim() || null,
+        customerId: newCust ? null : f.customerId || null, customerName: newCust ? f.customerName.trim() : null };
+      const item = await this.saveItem('project', f, data);
+      if (!item) return;
+      this.projectForm = null; this.projectQuery = '';
+      this.openProjectKey = `c:${item.clientId}`;
+      this.flash(this.online ? 'Adding the project…' : 'No signal: the project is kept on this phone and added when there is signal.');
     },
     // ---- Time in blocks: a day is travel out, site time (lunch is the gap), travel on or home, office or drafting.
     blockMinutes(d) { return d.start && d.end ? clockTime(d.start, d.end, '')?.minutes ?? 0 : durationMinutes(d.hours) ?? 0; },
@@ -495,6 +567,7 @@ createApp({
         const where = d.trip ? 'trip' : d.jobId ? this.projectName(d.jobId) + (d.splitJobId ? ' + ' + this.projectName(d.splitJobId) + ` (split ${d.splitPercent ?? 50}/${100 - (d.splitPercent ?? 50)})` : '') : 'no project';
         return `${BLOCK_ICON[d.type]} ${d.start ? clock12(d.start) + '–' + clock12(d.end) + ' ' : ''}${this.blockHours(d)} h · ${where}${d.notes ? ' · ' + d.notes : ''}`;
       }
+      if (i.kind === 'project') return `${i.data.code && !i.data.name.startsWith(i.data.code) ? i.data.code + ' · ' : ''}${i.data.name}`;
       if (i.kind === 'purchase') return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.serialNumber ? ' · serial ' + i.data.serialNumber : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'check') return `Check${i.data.checkNumber ? ' #' + i.data.checkNumber : ''}${i.data.from ? ' from ' + i.data.from : ''}${i.data.invoices ? ' · inv ' + i.data.invoices : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'time') return `Travel time ${i.data.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
@@ -511,22 +584,36 @@ createApp({
       return !i.sentItem || (i.edited && i.status === 'pending') || (this.canChange(i) && (i.photos ?? []).some((p) => !(i.sentPhotos ?? []).includes(p.clientId)));
     },
     statusText(i) {
-      if (i.status === 'accepted') return i.kind === 'booking' ? 'On the trip' : 'In the books';
+      if (i.status === 'accepted') return i.kind === 'booking' ? 'On the trip' : i.kind === 'project' ? 'On the list' : 'In the books';
       if (i.status === 'dismissed') return 'Dismissed at desk';
       if (i.error) return 'Needs a fix';
       if (this.notSent(i)) return 'On phone';
       return 'Sent';
     },
     statusClass(i) { return { ok: i.status === 'accepted' || (this.statusText(i) === 'Sent'), warn: this.statusText(i) === 'On phone', bad: Boolean(i.error) }; },
-    /** Send what hasn't been sent: trips first (their costs name them), then bookings (a cost may name one), then the rest in order. */
+    /**
+     * Send what hasn't been sent: new projects first (they go straight onto the list), then trips (their costs name
+     * them), then bookings (a cost may name one), then the rest in order.
+     */
     async sync() {
-      if (this.syncing || !this.key || !this.online) return;
+      if (this.syncing) { this.syncAgain = true; return; } // something was saved while sending: one more round after
+      if (!this.key || !this.online) return;
       this.syncing = true;
+      let newProjects = false;
       try {
-        const rank = (i) => ({ trip: 0, booking: 1 }[i.kind] ?? 2);
+        const rank = (i) => ({ project: -1, trip: 0, booking: 1 }[i.kind] ?? 2);
         const order = [...this.items].sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt));
         for (const i of order) {
           try {
+            if (i.kind === 'project') {
+              if (i.status === 'accepted') continue;
+              const r = await this.call('POST', '/projects', { ...i.data });
+              Object.assign(i, { sentItem: true, status: 'accepted', edited: false, error: '', projectId: r.project.id, alreadyThere: r.alreadyThere });
+              await putItem(i);
+              this.flash(r.alreadyThere ? `${r.project.name} was already on the list.` : `Project ${r.project.name} added.`);
+              newProjects = true;
+              continue;
+            }
             if (!i.sentItem) {
               await this.call('POST', '/items', { clientId: i.clientId, kind: i.kind, data: i.data });
               i.sentItem = true; i.status = 'pending'; i.error = ''; i.edited = false;
@@ -558,11 +645,16 @@ createApp({
             if (i && i.status !== s.status) { i.status = s.status; await putItem(i); changed = true; }
           }
         }
-        // Something was accepted at the desk: fetch the trips and bookings again (a planned trip's bookings show from there).
-        if (changed) await this.refresh();
+        // Something was accepted at the desk, or a project added: fetch the lists again (a planned trip's bookings and a
+        // new project show from there).
+        if (changed || newProjects) await this.refresh();
       } catch (e) {
         if (e instanceof KeyProblem) this.keyProblem = e.message;
-      } finally { this.syncing = false; }
+        if (newProjects) await this.refresh();
+      } finally {
+        this.syncing = false;
+        if (this.syncAgain) { this.syncAgain = false; this.sync(); }
+      }
     },
   },
 }).mount('#road');
