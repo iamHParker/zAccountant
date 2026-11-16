@@ -197,16 +197,41 @@ createApp({
     /** Projects added on this phone and not yet on zAccountant's list (no signal, or a problem to fix). */
     phoneProjects() { return this.items.filter((i) => i.kind === 'project' && i.status !== 'accepted').sort((a, b) => b.createdAt.localeCompare(a.createdAt)); },
     /**
-     * The project list for the Projects screen: typed words match the number, name, customer or site address (every
-     * word must match somewhere, so "2601 smith" or "buda" both work). Nothing typed: the newest projects first.
+     * The project list for the Projects screen, by job number, highest first (26-148 above 26-147), so the numbers
+     * already taken are easy to see (Homer, 2026-11-16). Typed words match the number, name, customer or site address
+     * (every word must match somewhere, so "2601 smith" or "buda" both work).
      */
     projectList() {
-      const all = this.summary?.projects ?? [];
       const words = this.projectQuery.toLowerCase().split(/\s+/).filter(Boolean);
-      if (!words.length) return [...all].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '')).slice(0, 15);
-      const cmp = (x, y) => (x ?? '').localeCompare(y ?? '', 'en', { numeric: true, sensitivity: 'base' });
-      return all.filter((p) => { const hay = `${p.code ?? ''} ${p.name} ${p.customerName ?? ''} ${p.address ?? ''}`.toLowerCase(); return words.every((w) => hay.includes(w)); })
-        .sort((a, b) => cmp(a.code, b.code) || cmp(a.name, b.name)).slice(0, 50);
+      if (!words.length) return this.projectsByNumber.slice(0, 100);
+      return this.projectsByNumber.filter((p) => { const hay = `${p.code ?? ''} ${p.name} ${p.customerName ?? ''} ${p.address ?? ''}`.toLowerCase(); return words.every((w) => hay.includes(w)); })
+        .slice(0, 50);
+    },
+    /** Every project number in use: zAccountant's list plus projects still waiting on this phone. */
+    takenNumbers() {
+      const saved = (this.summary?.projects ?? []).map((p) => ({ id: p.id, code: p.code || leadingNumber(p.name), name: p.name }));
+      const phone = this.phoneProjects.filter((i) => !i.projectId).map((i) => ({ id: null, code: i.data.code || leadingNumber(i.data.name), name: i.data.name }));
+      return [...saved, ...phone].filter((x) => x.code);
+    },
+    /** The next free number after the highest one in use: 26-148 → 26-149, 2610 → 2611; 26-148 in 2027 → 27-001. */
+    nextNumber() {
+      const cmp = (x, y) => x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' });
+      const codes = this.takenNumbers.map((x) => x.code).filter((c) => /\d$/.test(c)).sort((a, b) => cmp(b, a));
+      if (!codes.length) return '';
+      const [, head, digits] = /^(.*?)(\d+)$/.exec(codes[0]);
+      const yy = String(new Date().getFullYear()).slice(-2);
+      const year = /^(\d{2})([-.])$/.exec(head);
+      const next = year && year[1] < yy ? `${yy}${year[2]}${'1'.padStart(digits.length, '0')}`
+        : head + String(Number(digits) + 1).padStart(digits.length, '0');
+      const taken = new Set(this.takenNumbers.map((x) => x.code.toLowerCase()));
+      return taken.has(next.toLowerCase()) ? '' : next;
+    },
+    /** The project already using the number on the project form (typed, or taken from the front of the name), if any. */
+    numberClash() {
+      const f = this.projectForm;
+      if (!f) return null;
+      const code = (f.code.trim() || leadingNumber(f.name)).toLowerCase();
+      return code ? this.takenNumbers.find((x) => x.code.toLowerCase() === code && (!f.serverId || x.id !== f.serverId)) ?? null : null;
     },
     /** The project opened on the Projects screen: one on zAccountant's list (s:id) or one still on this phone (c:clientId). */
     openProject() {
@@ -448,7 +473,7 @@ createApp({
       const same = list.find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
       if (same && f.serverId) { this.flash(`There is already a project named ${same.name}.`, 'bad'); return; }
       if (same) { this.projectForm = null; this.openProjectKey = `s:${same.id}`; this.flash(`${name} is already on the list.`); return; }
-      const clash = code && list.find((p) => p.code && p.code.toLowerCase() === code.toLowerCase());
+      const clash = this.numberClash;
       if (clash && !confirm(`Number ${code} is already used by ${clash.name}. ${f.serverId ? 'Save' : 'Add this project'} anyway?`)) return;
       const newCust = f.customerId === NEW_CUSTOMER;
       if (newCust && !f.customerName.trim()) { this.flash('Type the new customer\'s name, or choose None.', 'bad'); return; }
