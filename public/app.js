@@ -10,7 +10,9 @@ import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
 import { clockTime, clock12, hhmm, nextDay } from '/clock.js';
 import { payeeKey, payeeRuleText } from '/payee.js';
 
-const today = () => new Date().toISOString().slice(0, 10);
+// Today's date on this computer's own calendar (Central time for Homer), as YYYY-MM-DD. toISOString() alone gives the
+// date in London (UTC), which is already tomorrow after 6 PM Central (Homer, 2026-11-15). Same rule as road.js.
+const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10); };
 const yearStart = () => today().slice(0, 4) + '-01-01';
 
 /** Format integer cents for people. Kept in sync with src/core/money.js formatMoney. */
@@ -1087,11 +1089,12 @@ createApp({
     async loadLiab() { this.liab.data = await this.run(() => api('GET', `/companies/${this.companyId}/reports/payroll-liabilities?from=${this.liab.from}&to=${this.liab.to}`)); },
     // ---------------------------------------------------------------- Time
     canManageTime() { return this.can('time_approve') || this.can('time_all'); },
-    weekDays() { return [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(this.time.week, i)); },
     async loadTime(first = false) {
       const t = this.time;
       const base = `/companies/${this.companyId}`;
       if (first) {
+        // Opening the tab starts on this week and today, not the week the page happened to load in.
+        if (!t.editing) { t.week = weekStartOf(today()); t.form = { ...t.form, date: today() }; }
         t.jobs = (await this.run(() => api('GET', `${base}/jobs`))) ?? [];
         if (this.canManageTime()) await this.loadMembers();
         if (this.can('invoices') || this.can('view_books')) t.customers = (await this.run(() => api('GET', `${base}/customers`))) ?? [];
@@ -1101,7 +1104,23 @@ createApp({
       t.summary = await this.run(() => api('GET', `${base}/reports/time-summary?from=${t.week}&to=${addDays(t.week, 6)}`));
       if (this.canManageTime()) { t.pending = (await this.run(() => api('GET', `${base}/time-entries?status=submitted`))) ?? []; t.picked = {}; }
     },
-    moveWeek(n) { this.time.week = addDays(this.time.week, 7 * n); this.time.form = blankTime(this.time.week); this.loadTime(); },
+    // ◀ ▶ step the list a week; the Day box follows to the same weekday, never past today.
+    moveWeek(n) {
+      const t = this.time;
+      t.week = addDays(t.week, 7 * n);
+      const day = addDays(t.form.date || t.week, 7 * n);
+      t.form = blankTime(day > today() ? today() : day);
+      t.editing = null;
+      this.loadTime();
+    },
+    // Any past day can be picked in the Day box (Homer, 2026-11-15: not just this week); the list below jumps to its week.
+    timeDayPicked() {
+      const t = this.time;
+      if (!t.form.date) return;
+      if (t.form.date > today()) { t.form.date = today(); this.flash('Time can’t be added for a day that hasn’t come yet.', 'bad'); }
+      const week = weekStartOf(t.form.date);
+      if (week !== t.week) { t.week = week; this.loadTime(); }
+    },
     timeBody(f) {
       return { date: f.date, jobId: f.jobId || null, start: f.start || undefined, end: f.end || undefined, hours: f.hours || undefined, notes: f.notes, billable: f.billable };
     },
