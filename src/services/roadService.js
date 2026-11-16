@@ -5,6 +5,8 @@
 // open trips and projects (to pick from) and drops items into an inbox. It can't see the books, can't post anything,
 // and can't change anything already saved. A lost phone costs nothing but a revoke. Accepting an item at the desk
 // is what puts it in the books, through the same Trips code as a cost typed at the desk.
+// The one thing it adds straight away is a project (Homer, 2026-11-16), and only for a person whose role may add
+// projects at the desk: a project is a name on a list, not money, and it's needed at once to put time on it.
 import { createHash } from 'node:crypto';
 import qrcode from 'qrcode-generator';
 import { withTransaction } from '../db/pool.js';
@@ -15,7 +17,9 @@ import { parseProjectFolder } from '../core/projects.js';
 import { randomToken } from '../security/crypto.js';
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
-import { createTimeEntry } from './timesheetService.js';
+import { createTimeEntry, createJob } from './timesheetService.js';
+import { createContact } from './arapService.js';
+import { PROJECT_PERMISSIONS, CUSTOMER_PERMISSIONS } from '../core/permissions.js';
 import { receiptReadingOn } from './receiptReader.js';
 import { addPurchase, PURCHASE_CATEGORIES } from './purchaseService.js';
 import { createTrip, addTripCost, addBooking, listBookings, cleanBooking, COST_KINDS, BOOKING_KINDS, mileageAmount, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_COST } from './tripService.js';
@@ -104,7 +108,14 @@ export async function findRoadKey(pool, token) {
  * bookings on those open trips (Homer, 2026-11-06: the trip's plan, its flight, hotel and rental car with their
  * confirmation numbers, is what the traveller needs on the road). No amounts paid, no accounts, nothing else.
  */
-export async function roadSummary(db, key) {
+/** What the person behind a road key may do with projects: the desk's rules (src/core/permissions.js). */
+function projectRights(access) {
+  const has = (list) => list.some((p) => access?.permissions.has(p));
+  const canAddProjects = has(PROJECT_PERMISSIONS);
+  return { canAddProjects, canAddCustomers: canAddProjects && has(CUSTOMER_PERMISSIONS) };
+}
+
+export async function roadSummary(db, key, access = null) {
   const { rows: [who] } = await db.query(
     `SELECT c.name AS company, u.name AS "user", to_char(now() AT TIME ZONE 'America/Chicago', 'YYYY-MM-DD') AS today
        FROM companies c, users u WHERE c.id = $1 AND u.id = $2`, [key.companyId, key.userId]);
@@ -113,14 +124,60 @@ export async function roadSummary(db, key) {
     `SELECT t.id, t.name, to_char(t.start_date, 'YYYY-MM-DD') AS "startDate", to_char(t.end_date, 'YYYY-MM-DD') AS "endDate",
             (SELECT i.client_id FROM road_items i WHERE i.key_id = $2 AND i.kind = 'trip' AND i.trip_id = t.id LIMIT 1) AS "fromClientId"
        FROM trips t WHERE t.company_id = $1 AND t.is_active ORDER BY t.start_date DESC LIMIT 50`, [key.companyId, key.id]);
+  // The project's customer and site address too, for looking a project up in the field (Homer, 2026-11-16).
   const { rows: projects } = await db.query(
-    'SELECT id, code, name FROM jobs WHERE company_id = $1 AND is_active ORDER BY code NULLS LAST, name LIMIT 3000', [key.companyId]);
+    `SELECT j.id, j.code, j.name, c.name AS "customerName", j.address, j.created_at AS "createdAt"
+       FROM jobs j LEFT JOIN contacts c ON c.id = j.customer_id
+      WHERE j.company_id = $1 AND j.is_active ORDER BY j.code NULLS LAST, j.name LIMIT 3000`, [key.companyId]);
+  const rights = projectRights(access);
+  // The customer list, to pick from when adding a project: only for someone who may add projects.
+  const { rows: customers } = rights.canAddProjects ? await db.query(
+    "SELECT id, name FROM contacts WHERE company_id = $1 AND kind = 'customer' ORDER BY lower(name) LIMIT 3000", [key.companyId]) : { rows: [] };
   const all = await listBookings(db, key.companyId, trips.map((t) => t.id));
   const { rows: sent } = all.length ? await db.query(
     "SELECT client_id, trip_booking_id FROM road_items WHERE key_id = $1 AND kind = 'booking' AND trip_booking_id = ANY($2::uuid[])", [key.id, all.map((b) => b.id)]) : { rows: [] };
   const fromItem = new Map(sent.map((r) => [r.trip_booking_id, r.client_id]));
   const bookings = all.map(({ paidCents, tripCostId, ...b }) => ({ ...b, paid: Boolean(tripCostId), fromClientId: fromItem.get(b.id) ?? null }));
-  return { ...who, keyName: key.name, expiresOn: key.expiresOn, trips, projects, bookings, costKinds: COST_KINDS, bookingKinds: BOOKING_KINDS, receiptReading: receiptReadingOn() };
+  return { ...who, keyName: key.name, expiresOn: key.expiresOn, trips, projects, customers, ...rights, bookings, costKinds: COST_KINDS, bookingKinds: BOOKING_KINDS, receiptReading: receiptReadingOn() };
+}
+
+/**
+ * A new project from the Road page (Homer, 2026-11-16): the desk's Add project (createJob: the same checks, the same
+ * row, the same audit entry), plus two things for a phone:
+ * - No number typed: it is read from the front of the name, the way pasted folder names are ("2610 Garcia Barn" → 2610).
+ * - A project by that name already there is answered with that project (alreadyThere), not an error. The phone may send
+ *   the same project twice (signal lost before the answer came back), and in the field "it's already on the list" is
+ *   the useful answer anyway.
+ * The customer is one from the list (customerId), or a name typed (customerName): matched to the list, or added as a
+ *   new customer when the person may add customers.
+ */
+export async function addRoadProject(db, key, access, input = {}) {
+  const rights = projectRights(access);
+  if (!rights.canAddProjects) throw new LedgerError('Your role can\'t add projects. Ask the company owner, or add it at your desk.');
+  const name = text(input.name, 200);
+  if (!name) throw new LedgerError('Type the project name, like 2610 Garcia Barn');
+  if (name.length > 80) throw new LedgerError('The project name can be up to 80 characters');
+  const code = text(input.code, 60) ?? parseProjectFolder(name)?.code ?? null;
+  const { rows: [who] } = await db.query('SELECT email FROM users WHERE id = $1', [key.userId]);
+  const actor = who?.email ?? null;
+  return withTransaction(db, async (c) => {
+    await lockCompany(c, key.companyId);
+    const { rows: [have] } = await c.query(
+      `SELECT j.id, j.code, j.name, c.name AS "customerName", j.address, j.is_active AS "isActive", j.created_at AS "createdAt"
+         FROM jobs j LEFT JOIN contacts c ON c.id = j.customer_id WHERE j.company_id = $1 AND lower(trim(j.name)) = lower($2)`, [key.companyId, name]);
+    if (have) return { project: have, alreadyThere: true };
+    let customerId = isId(input.customerId) ? input.customerId : null;
+    const customerName = customerId ? null : text(input.customerName, 120);
+    if (customerName) {
+      const { rows: [known] } = await c.query(
+        "SELECT id FROM contacts WHERE company_id = $1 AND kind = 'customer' AND lower(trim(name)) = lower($2)", [key.companyId, customerName]);
+      if (known) customerId = known.id;
+      else if (!rights.canAddCustomers) throw new LedgerError('Your role can\'t add customers. Pick one from the list, or leave it empty.');
+      else customerId = (await createContact(c, key.companyId, { kind: 'customer', name: customerName, actor })).id;
+    }
+    const project = await createJob(c, key.companyId, { name, code, customerId, address: typeof input.address === 'string' ? input.address : null }, { actor });
+    return { project, alreadyThere: false };
+  });
 }
 
 /** A booking named by a cost ("Paid: record the cost"): { id } of a saved booking, or { clientId } of one sent from this phone. */

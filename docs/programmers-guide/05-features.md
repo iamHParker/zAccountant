@@ -198,6 +198,15 @@ project except for office. Accept makes one time entry (notes `"Travel: …"`), 
 `splitBlock(minutes, start, percent)` (first = minutes × percent / 100 rounded half up, the rest to the second; the first ending where the second starts; notes say `(split 70/30)` unless 50) plus an audit
 `split` record listing both ids; a block on a trip goes the travel-time way. Phone: the Time screen (`dayBlocks`,
 `newBlock(type)` starts at the day's last end on the same project, `saveBlock(next)`).
+Projects (Homer 2026-11-16; no migration): the Road page's seventh button. `GET /api/road` now gives each open project's
+`customerName`, `address` and `createdAt`, plus `canAddProjects`, `canAddCustomers` and (only when allowed) `customers`.
+`POST /api/road/projects { code?, name, customerId? | customerName?, address? }` → `addRoadProject`: no code = the
+number at the front of the name (`parseProjectFolder`); a name already on the list answers `{ project, alreadyThere:
+true }` (so a resend never makes two); a typed customer name is matched to the list, else added with `createContact`;
+then the desk's own `createJob` (same checks, row and audit, actor = the key person's email). It is not a road item:
+the phone keeps a project in IndexedDB as kind `project`, `sync()` sends projects first and marks them `accepted`
+(*On the list*), then fetches the summary again. Lookup (`projectList`) searches number, name, customer and site
+address on the phone's saved copy, so it works with no signal; 📍 Map opens Apple Maps on the site address.
 Screens (Homer, 2026-11-06): the page opens on six coloured buttons (`screen = 'home'`; `SCREENS` in `road.js`:
 check, trip, plan, time, equipment, supplies; icon colours `.road-icon.c-*` in `styles.css`, the Lighthouse tool-rail look). `go(screen)`
 pushes a history entry so the phone's Back returns home (`popstate`). Privacy: `hide` (localStorage `zacc.roadHide`,

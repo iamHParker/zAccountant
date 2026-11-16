@@ -18,6 +18,10 @@ export const PERMISSIONS = Object.freeze({
   time_all: "See and approve everyone's timesheets",
 });
 export const PERMISSION_KEYS = Object.freeze(Object.keys(PERMISSIONS));
+/** Any one of these may add and change projects (jobs), at the desk or from the Road page. */
+export const PROJECT_PERMISSIONS = Object.freeze(['time_approve', 'time_all', 'admin', 'invoices']);
+/** Any one of these may add a customer while adding a project (Road page, pasted folder names). */
+export const CUSTOMER_PERMISSIONS = Object.freeze(['invoices', 'admin']);
 
 export const PRESET_ROLES = Object.freeze({
   owner: { label: 'Owner', permissions: PERMISSION_KEYS },

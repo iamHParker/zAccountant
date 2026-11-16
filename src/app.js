@@ -30,6 +30,7 @@ import * as bookFiles from './services/bookFileService.js';
 import * as mileIq from './services/mileIqService.js';
 import * as homeLayout from './services/homeLayoutService.js';
 import { AuthError } from './services/authService.js';
+import { PROJECT_PERMISSIONS, CUSTOMER_PERMISSIONS } from './core/permissions.js';
 import { toCsv, csvFileName, statementRows, agingRows, payrollRegisterRows, taxSummaryRows, nec1099Rows, w2Rows } from './core/csv.js';
 import * as tax from './services/taxService.js';
 import { verifyChain } from './services/audit.js';
@@ -266,11 +267,13 @@ export function createApp(pool, { log } = {}) {
     const body = await afterScope(await withScope(pool, { userId: key.userId, companyId: key.companyId }, async (db) => {
       const access = await auth.getAccess(db, key.userId, key.companyId);
       if (!access?.permissions.has('bills')) throw new AuthError('This road key no longer works: your role in the company has changed.', 403);
-      return handler({ db, req, key });
+      return handler({ db, req, key, access });
     }));
     res.status(status).json(body);
   };
-  roadApi.get('/', roadRoute(({ db, key }) => roadSvc.roadSummary(db, key)));
+  roadApi.get('/', roadRoute(({ db, key, access }) => roadSvc.roadSummary(db, key, access)));
+  // Projects from the field (Homer, 2026-11-16): the same rules as the desk's Add project, and the same permission.
+  roadApi.post('/projects', roadRoute(({ db, req, key, access }) => roadSvc.addRoadProject(db, key, access, req.body ?? {}), 201));
   roadApi.post('/items', roadRoute(({ db, req, key }) => roadSvc.receiveItem(db, key, req.body ?? {}), 201));
   roadApi.put('/items/:clientId', roadRoute(({ db, req, key }) => roadSvc.editItem(db, key, req.params.clientId, req.body ?? {})));
   roadApi.post('/items/:clientId/photos', roadRoute(({ db, req, key }) => roadSvc.receivePhoto(db, key, req.params.clientId, req.body ?? {}), 201));
@@ -824,13 +827,13 @@ export function createApp(pool, { log } = {}) {
   // (own time, your department's time with "approve time", or everyone's with "all time").
   const TIME = ['time_own', 'time_approve', 'time_all'];
   // Jobs are also the projects invoices and bills name, so whoever writes invoices can add them.
-  const JOB_ADMIN = ['time_approve', 'time_all', 'admin', 'invoices'];
+  const JOB_ADMIN = PROJECT_PERMISSIONS;
   api.get('/companies/:companyId/jobs', route('member', ({ db, req, companyId }) => time.listJobs(db, companyId, { includeInactive: req.query.inactive === '1' })));
   api.post('/companies/:companyId/jobs', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.createJob(db, companyId, req.body ?? {}, { actor }), 201));
   api.post('/companies/:companyId/jobs/import', route(JOB_ADMIN, ({ db, req, companyId, can, actor }) =>
     projects.importProjects(db, companyId, { text: req.body?.text, customerId: req.body?.customerId || null,
       // Adding customers from the names needs the right to add customers (invoices), not just to manage jobs.
-      makeCustomers: req.body?.makeCustomers === true && (can('invoices') || can('admin')), preview: req.body?.preview === true }, { actor })));
+      makeCustomers: req.body?.makeCustomers === true && CUSTOMER_PERMISSIONS.some(can), preview: req.body?.preview === true }, { actor })));
   api.patch('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.updateJob(db, companyId, req.params.jobId, req.body ?? {}, { actor })));
   const TE = '/companies/:companyId/time-entries';
   api.get(TE, route(TIME, ({ db, req, companyId, viewer }) => time.listTimeEntries(db, companyId, viewer, {

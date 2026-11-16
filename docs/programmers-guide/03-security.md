@@ -75,6 +75,10 @@ vendor, confirmation, dates, quoted price, whether paid; no accounts or entries)
 ask which items were accepted. Each request runs in `withScope` as the key's person and company and needs that
 person's `bills` permission now, so removing the person or changing their role shuts the key. Items land in
 `road_items` (pending); only **Accept** at the desk (permission `bills`) posts them, through the normal Trips code.
+One thing goes in straight away: a **project** (`POST /api/road/projects`, Homer 2026-11-16), and only when the
+person also holds one of `PROJECT_PERMISSIONS` (the desk's Add project rule); a new customer with it also needs one of
+`CUSTOMER_PERMISSIONS`. A refusal there is a 400, never 403, because the phone reads 403 as "this key no longer works".
+Only someone who may add projects gets the customer list in `GET /api/road`.
 Keys last 90 days, at most 5 per person per company, revocable. The key travels in the link's `#` part, which browsers
 never send to a server, and the page removes it from the address bar.
 
