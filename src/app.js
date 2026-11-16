@@ -836,6 +836,10 @@ export function createApp(pool, { log } = {}) {
     projects.importProjects(db, companyId, { text: req.body?.text, customerId: req.body?.customerId || null,
       // Adding customers from the names needs the right to add customers (invoices), not just to manage jobs.
       makeCustomers: req.body?.makeCustomers === true && CUSTOMER_PERMISSIONS.some(can), preview: req.body?.preview === true }, { actor })));
+  // Delete a project made by mistake (Homer, 2026-11-16): what uses it, move those to another project, delete it.
+  api.get('/companies/:companyId/jobs/:jobId/uses', route(JOB_ADMIN, ({ db, req, companyId }) => projects.projectUses(db, companyId, req.params.jobId)));
+  api.post('/companies/:companyId/jobs/:jobId/move', route(JOB_ADMIN, ({ db, req, companyId, actor }) => projects.moveProjectUses(db, companyId, req.params.jobId, req.body?.toJobId, { actor })));
+  api.delete('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => projects.deleteProject(db, companyId, req.params.jobId, { actor })));
   api.patch('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.updateJob(db, companyId, req.params.jobId, req.body ?? {}, { actor })));
   const TE = '/companies/:companyId/time-entries';
   api.get(TE, route(TIME, ({ db, req, companyId, viewer }) => time.listTimeEntries(db, companyId, viewer, {

@@ -207,6 +207,13 @@ then the desk's own `createJob` (same checks, row and audit, actor = the key per
 the phone keeps a project in IndexedDB as kind `project`, `sync()` sends projects first and marks them `accepted`
 (*On the list*), then fetches the summary again. Lookup (`projectList`) searches number, name, customer and site
 address on the phone's saved copy, so it works with no signal; 📍 Map opens Apple Maps on the site address.
+Deleting a project (Homer 2026-11-16, no migration; `GRANT DELETE ON jobs`, `UPDATE (job_id) ON purchases`):
+`GET …/jobs/:id/uses` (`projectUses`) lists invoices/bills (documents or lines naming it, any status; never movable),
+time entries (movable unless one is billed), trip shares above 0%, purchases, and pending road items whose data holds
+its id. `POST …/jobs/:id/move { toJobId }` (`moveProjectUses`) moves time, trip lines (a new line for the other project
+with the same shares; refused if it is already on that trip), purchases and road items, with an audit `move` record.
+`DELETE …/jobs/:id` (`deleteProject`) refuses with the list while anything uses it; 0% trip lines go with it; audit
+`delete` keeps the name and number. Desk: Sales → Projects → delete (`askDeleteProject`, the `.delete-box` panel).
 Typed projects (Homer 2026-11-16, a phantom project "26" named "26-147, 26-148"): `parseProjectFolder` now ends a
 number at a comma, semicolon or bracket too, and `typedProjects` (src/core/projects.js) splits a line of numbers only
 (`numberList`: `,` `;` `&` `/` `+` "and") into its numbers for a trip's `newProjects`, both when the item is cleaned and

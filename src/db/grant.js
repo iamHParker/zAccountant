@@ -47,6 +47,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (user_id, first_name, last_name, work_state, pay_frequency, pay_type, pay_rate_cents, w4, state_elections,
       ssn_enc, ssn_last4, address, active, hire_date, termination_date) ON employees TO ${role};
     GRANT UPDATE (name, code, customer_id, address, is_active) ON jobs TO ${role};
+    GRANT DELETE ON jobs TO ${role}; -- only a project nothing points at (projectService.deleteProject; the foreign keys check too)
     GRANT UPDATE (job_id, trip_id, work_date, minutes, start_time, end_time, notes, billable, status, review_note, reviewed_by, reviewed_at, paid_run_id, paid_paycheck_id, updated_at) ON time_entries TO ${role};
     GRANT DELETE ON time_entries TO ${role};
     GRANT UPDATE (name, start_date, end_date, notes, is_active) ON trips TO ${role};
@@ -55,7 +56,7 @@ export async function grantRuntimeRole(pool, role) {
     GRANT UPDATE (share_bp, air_bp, hotel_bp, car_bp, rest_bp) ON trip_jobs TO ${role};
     GRANT DELETE ON trip_jobs, trip_cost_photos TO ${role};
     GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at, replaced_by_id) ON trip_costs TO ${role};
-    GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at) ON purchases TO ${role};
+    GRANT UPDATE (status, void_date, void_entry_id, voided_by, voided_at, job_id) ON purchases TO ${role};
     GRANT UPDATE (category, updated_at, updated_by) ON account_tax_categories TO ${role};
     GRANT DELETE ON account_tax_categories TO ${role};
     GRANT UPDATE (status, claude_text, developer_note, updated_at, updated_by) ON feedback_reports TO ${role};
