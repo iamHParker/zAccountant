@@ -111,6 +111,12 @@ createApp({
     };
   },
   computed: {
+    /** Open jobs for the time pick lists by job number, highest first (26-148 above 26-147); jobs with no number after, A to Z (Homer, 2026-11-15). */
+    projectsByNumber() {
+      const num = (j) => (j.code || (/^\d/.test(j.name) ? j.name : '')).trim();
+      const cmp = (x, y) => x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' });
+      return [...(this.summary?.projects ?? [])].sort((a, b) => { const x = num(a), y = num(b); return (!x - !y) || cmp(y, x) || cmp(a.name, b.name); });
+    },
     waiting() { return this.items.filter((i) => this.notSent(i)).length; },
     checkItems() { return this.items.filter((i) => i.kind === 'check').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20); },
     /** Equipment or supplies on this phone for the screen showing (newest first). */

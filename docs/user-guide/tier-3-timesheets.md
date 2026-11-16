@@ -17,6 +17,8 @@ billed, the entry shows "billed on invoice 2601" and can't be changed or deleted
 
 1. **Add time**: pick the day and the job. The **Day** box takes any day up to today (today by your own clock,
    not the server's), however far back; the list below jumps to that day's week. ◀ ▶ step a week at a time.
+   The **Job** list (here and on the Road page's time) is by job number, highest first, so this year's newest
+   jobs are on top; jobs with no number come after, A to Z.
    Enter a start and end time, or just the hours (7.5 or 7:30), and any
    notes. Untick *billable* for time you won't charge a client for.
 2. A shift that runs past midnight belongs to the day it started.
