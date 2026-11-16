@@ -452,7 +452,8 @@ createApp({
       this.closeForms();
       const words = this.projectQuery.trim();
       // Typed a number or name that isn't on the list: start the new project with it.
-      this.projectForm = { code: /^\S*\d\S*$/.test(words) ? words : '', name: words && !/^\S*\d\S*$/.test(words) ? words : '', customerId: '', customerName: '', address: '' };
+      // Nothing typed: the box starts with the next free number, filled in (Homer, 2026-11-16: "make it solid").
+      this.projectForm = { code: /^\S*\d\S*$/.test(words) ? words : this.nextNumber, name: words && !/^\S*\d\S*$/.test(words) ? words : '', customerId: '', customerName: '', address: '' };
       window.scrollTo({ top: 0 });
     },
     showProject(key) { this.projectForm = null; this.customerForm = null; this.openProjectKey = this.openProjectKey === key ? '' : key; },
