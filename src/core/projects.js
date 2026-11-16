@@ -24,9 +24,44 @@ export function folderName(line) {
 export function parseProjectFolder(line) {
   const name = folderName(line);
   if (!name) return null;
-  const m = /^([A-Za-z]{0,3}\d[\d.-]*[A-Za-z]?)(?=$|[\s_–—:-])/.exec(name);
+  // A comma, semicolon or bracket also ends the number ("26-147, Smith" → 26-147; before 2026-11-16 the comma didn't,
+  // and "26-147, 26-148" was read as number 26).
+  const m = /^([A-Za-z]{0,3}\d[\d.-]*[A-Za-z]?)(?=$|[\s_–—:,;()-])/.exec(name);
   const code = m ? m[1].replace(/[.-]+$/, '') : null;
   return { name: name.slice(0, 80), code: code && code.length <= 30 ? code : null };
+}
+
+const NUMBER = '[A-Za-z]{0,3}\\d[\\d.-]*[A-Za-z]?';
+const NUMBER_LIST = new RegExp(`^${NUMBER}(?:\\s*(?:[,;&/+]|\\band\\b)\\s*${NUMBER})+$`, 'i');
+
+/**
+ * A line that is only project numbers ("26-147, 26-148", "2601 & 2602", "26-147 and 26-148") → the numbers, else null.
+ * Homer, 2026-11-16: a trip typed with "26-147, 26-148" in New project numbers became one project numbered 26.
+ */
+export function numberList(line) {
+  const s = String(line ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim(); // eslint-disable-line no-control-regex
+  if (!NUMBER_LIST.test(s)) return null;
+  return s.split(/\s*(?:[,;&/+]|\band\b)\s*/i).map((x) => x.replace(/[.-]+$/, '')).filter(Boolean);
+}
+
+/**
+ * Project numbers or names typed on the phone (a trip's "New project numbers") → { name, code } each, one per project:
+ * a line of numbers only is split into its numbers; any other line is one project, read like a folder name.
+ * Repeats are dropped. A number alone has the number as its name too, so it matches that project if it is on the list.
+ */
+export function typedProjects(lines) {
+  const seen = new Set();
+  const out = [];
+  for (const line of lines ?? []) {
+    const list = numberList(line);
+    const found = list ? list.map((n) => ({ name: n.slice(0, 80), code: n.length <= 30 ? n : null })) : [parseProjectFolder(line)].filter(Boolean);
+    for (const p of found) {
+      if (seen.has(p.name.toLowerCase())) continue;
+      seen.add(p.name.toLowerCase());
+      out.push(p);
+    }
+  }
+  return out;
 }
 
 /** Pasted text → unique projects (by name, ignoring case), in the order pasted; blank lines skipped. */

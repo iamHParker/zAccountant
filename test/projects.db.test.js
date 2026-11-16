@@ -5,13 +5,23 @@ import * as ledger from '../src/services/ledgerService.js';
 import * as arap from '../src/services/arapService.js';
 import * as time from '../src/services/timesheetService.js';
 import * as projects from '../src/services/projectService.js';
-import { parseProjectFolder, parseProjectList, splitProjectName } from '../src/core/projects.js';
+import { parseProjectFolder, parseProjectList, splitProjectName, numberList, typedProjects } from '../src/core/projects.js';
 
 // Homer names his project folders by number and name; "Copy as path" in File Explorer pastes them in quotes.
 test('projects from folder names', () => {
   assert.deepEqual(parseProjectFolder('"C:\\Jobs\\2026\\2601 Smith Residence"'), { name: '2601 Smith Residence', code: '2601' });
   assert.deepEqual(parseProjectFolder('2602 - DWH Jones roof\\'), { name: '2602 - DWH Jones roof', code: '2602' });
   assert.deepEqual(parseProjectFolder('/Users/h/Projects/26-014_Bridge'), { name: '26-014_Bridge', code: '26-014' });
+  // A comma ends the number (Homer, 2026-11-16: "26-147, 26-148" was read as number 26).
+  assert.equal(parseProjectFolder('26-147, 26-148').code, '26-147');
+  assert.equal(parseProjectFolder('26-147,Smith').code, '26-147');
+  // A line of numbers only is a list of projects; a name with words is one project.
+  assert.deepEqual(numberList('26-147, 26-148'), ['26-147', '26-148']);
+  assert.deepEqual(numberList('2601 & 2602 and 2603'), ['2601', '2602', '2603']);
+  assert.equal(numberList('2610 Garcia Barn'), null);
+  assert.equal(numberList('26-147'), null);
+  assert.deepEqual(typedProjects(['26-147, 26-148', '26-148', '2610 Garcia Barn']),
+    [{ name: '26-147', code: '26-147' }, { name: '26-148', code: '26-148' }, { name: '2610 Garcia Barn', code: '2610' }]);
   assert.deepEqual(parseProjectFolder('P2603 Warehouse'), { name: 'P2603 Warehouse', code: 'P2603' });
   assert.deepEqual(parseProjectFolder('Templates'), { name: 'Templates', code: null });
   assert.equal(parseProjectFolder('   '), null);

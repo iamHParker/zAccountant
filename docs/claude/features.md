@@ -27,6 +27,7 @@ that aren't obvious from the code. Read the entry for a feature before changing 
   summary) and `POST /api/road/projects` → `addRoadProject` → desk's `createJob`; goes straight on the list (not an inbox
   item); needs `PROJECT_PERMISSIONS` (new customer: `CUSTOMER_PERMISSIONS`); same name = `alreadyThere`. ✏️ Edit project
   (`PUT …/projects/:id` → `updateJob`) and ✏️ Edit customer (`PATCH …/customers/:id` → `updateContact`), online only.
+  A line of numbers only ("26-147, 26-148") = those projects (`typedProjects`/`numberList`), never one new project.
 - Receipt reading (`src/services/receiptReader.js`, `public/receipt.js`): photo → Claude → vendor/total/date fill empty
   cost boxes, saves nothing. Off until Homer sets `ANTHROPIC_API_KEY` (runbook step 12). Never log the picture.
 - Book file `.zacc` (`src/services/bookFileService.js`): zip of every company table + manifest SHA-256s; QuickBooks

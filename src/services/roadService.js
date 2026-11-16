@@ -13,7 +13,7 @@ import { withTransaction } from '../db/pool.js';
 import { LedgerError, isIsoDate } from '../core/ledger.js';
 import { toCents } from '../core/money.js';
 import { parseDuration, parseClock, shiftMinutes, minutesToHours } from '../core/timesheets.js';
-import { parseProjectFolder } from '../core/projects.js';
+import { parseProjectFolder, typedProjects, numberList } from '../core/projects.js';
 import { randomToken } from '../security/crypto.js';
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
@@ -159,6 +159,7 @@ export async function addRoadProject(db, key, access, input = {}) {
   const name = text(input.name, 200);
   if (!name) throw new LedgerError('Type the project name, like 2610 Garcia Barn');
   if (name.length > 80) throw new LedgerError('The project name can be up to 80 characters');
+  if (numberList(name)) throw new LedgerError('Add one project at a time: that looks like a list of project numbers.');
   const code = text(input.code, 60) ?? parseProjectFolder(name)?.code ?? null;
   const actor = await actorFor(db, key);
   return withTransaction(db, async (c) => {
@@ -167,6 +168,14 @@ export async function addRoadProject(db, key, access, input = {}) {
       `SELECT j.id, j.code, j.name, c.name AS "customerName", j.address, j.is_active AS "isActive", j.created_at AS "createdAt"
          FROM jobs j LEFT JOIN contacts c ON c.id = j.customer_id WHERE j.company_id = $1 AND lower(trim(j.name)) = lower($2)`, [key.companyId, name]);
     if (have) return { project: have, alreadyThere: true };
+    // Just a number that is already a project's number ("26-147"): that project, not a new one named "26-147".
+    if (parseProjectFolder(name)?.code === name) {
+      const { rows: [same] } = await c.query(
+        `SELECT j.id, j.code, j.name, c.name AS "customerName", j.address, j.is_active AS "isActive", j.created_at AS "createdAt"
+           FROM jobs j LEFT JOIN contacts c ON c.id = j.customer_id WHERE j.company_id = $1 AND lower(j.code) = lower($2)
+          ORDER BY j.is_active DESC LIMIT 1`, [key.companyId, name]);
+      if (same) return { project: same, alreadyThere: true };
+    }
     const customerId = await projectCustomer(c, key, rights, input, actor);
     const project = await createJob(c, key.companyId, { name, code, customerId, address: typeof input.address === 'string' ? input.address : null }, { actor });
     return { project, alreadyThere: false };
@@ -195,6 +204,7 @@ export async function editRoadProject(db, key, access, jobId, input = {}) {
   const rights = projectRights(access);
   if (!rights.canAddProjects) throw new LedgerError('Your role can\'t change projects. Ask the company owner, or change it at your desk.');
   if (!isId(jobId)) throw new LedgerError('Project not found');
+  if (numberList(input.name)) throw new LedgerError('A project has one number: that looks like a list of project numbers.');
   const actor = await actorFor(db, key);
   return withTransaction(db, async (c) => {
     const { rows: [job] } = await c.query('SELECT id FROM jobs WHERE company_id = $1 AND id = $2 AND is_active', [key.companyId, jobId]);
@@ -288,7 +298,7 @@ async function cleanItem(db, key, kind, d) {
     if (ids.length + typed.length > MAX_TRIP_PROJECTS) errors.push(`list at most ${MAX_TRIP_PROJECTS} projects`);
     const { rows: found } = ids.length ? await db.query('SELECT id FROM jobs WHERE company_id = $1 AND id = ANY($2::uuid[])', [key.companyId, ids]) : { rows: [] };
     out.jobIds = [...new Set(found.map((j) => j.id))];
-    out.newProjects = typed.slice(0, MAX_TRIP_PROJECTS).map((p) => parseProjectFolder(String(p ?? '').slice(0, 200))).filter(Boolean);
+    out.newProjects = typedProjects(typed.slice(0, MAX_TRIP_PROJECTS).map((p) => String(p ?? '').slice(0, 200))).slice(0, MAX_TRIP_PROJECTS);
   } else if (kind === 'cost' || kind === 'time') {
     out = { trip: await tripRef(db, key, d.trip, errors), date: d.date };
     if (!isIsoDate(out.date)) errors.push('the date must be a real date');
@@ -608,7 +618,8 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
     };
     if (item.kind === 'trip') {
       const jobIds = [...d.jobIds];
-      for (const p of d.newProjects ?? []) {
+      // Read again here, so a trip sent before 2026-11-16 with "26-147, 26-148" on one line finds both projects.
+      for (const p of typedProjects((d.newProjects ?? []).map((x) => x.name))) {
         const { rows: [have] } = await c.query(
           'SELECT id FROM jobs WHERE company_id = $1 AND (lower(trim(name)) = lower($2) OR (code IS NOT NULL AND code = $3)) ORDER BY is_active DESC LIMIT 1',
           [companyId, p.name, p.code]);

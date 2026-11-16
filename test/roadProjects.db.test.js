@@ -178,3 +178,57 @@ test('Road projects: change a project and its customer from the phone, with the 
   ok(await patPhone.call('PUT', `/api/road/projects/${other.id}`, { name: '26-145 Miguel Cubano', address: '5733 Bill Hass, Schertz, TX 78514' }));
   assert.match((await patPhone.call('PATCH', `/api/road/customers/${cr.id}`, { phone: '1' })).body.error, /can't change customers/);
 });
+
+test('Road projects: "26-147, 26-148" is two projects already on the list, never a project numbered 26', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
+  const db = await freshDatabase({ withAppRole: true });
+  const server = createApp(db.appPool, { log: () => {} }).listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
+  t.after(async () => { server.close(); await db.drop(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const client = (bearer = null) => {
+    let cookie = '';
+    const call = async (method, path, body) => {
+      const r = await fetch(base + path, { method, body: body === undefined ? undefined : JSON.stringify(body),
+        headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) } });
+      const set = r.headers.get('set-cookie');
+      if (set) cookie = set.split(';')[0].endsWith('=') ? '' : set.split(';')[0];
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    return { call };
+  };
+  const ok = (r, status = 200) => { assert.equal(r.status, status, JSON.stringify(r.body)); return r.body; };
+  const desk = client();
+  await desk.call('POST', '/api/auth/signup', { email: 'homer@example.com', name: 'homer', password: 'a long enough passphrase' });
+  const setup = (await desk.call('POST', '/api/auth/mfa/setup', {})).body;
+  ok(await desk.call('POST', '/api/auth/mfa/enable', { code: totpCode(setup.secret, Date.now()) }));
+  const co = ok(await desk.call('POST', '/api/companies', { name: 'Parker Engineering', homeState: 'TX', fiscalYearStartMonth: 1 }), 201);
+  const b = `/api/companies/${co.id}`;
+  const j147 = ok(await desk.call('POST', `${b}/jobs`, { code: '26-147', name: 'CastleRock customer, 3204 Stirrat' }), 201);
+  const j148 = ok(await desk.call('POST', `${b}/jobs`, { code: '26-148', name: 'CastleRock Customer, 6709 Avila Way' }), 201);
+  const phone = client(ok(await desk.call('POST', `${b}/road-keys`, { name: 'iPhone' }), 201).url.split('#key=')[1]);
+
+  // Homer's trip: both jobs typed on one line of "New projects". They are the two projects on the list, split 50/50.
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'trip-castlerock-1', kind: 'trip',
+    data: { name: 'Pflugerville', startDate: '2026-11-15', jobIds: [], newProjects: ['26-147, 26-148'] } }), 201);
+  // A trip stored the old way (sent before this fix): read again at Accept, with the same result.
+  const { rows: [k] } = await db.pool.query('SELECT id FROM road_keys LIMIT 1');
+  await db.pool.query(`INSERT INTO road_items (company_id, key_id, user_id, client_id, kind, data)
+    SELECT company_id, key_id, user_id, 'trip-castlerock-old', 'trip', $1 FROM road_items WHERE client_id = 'trip-castlerock-1'`,
+  [JSON.stringify({ name: 'Old way', startDate: '2026-11-14', endDate: null, notes: null, jobIds: [], newProjects: [{ name: '26-147, 26-148', code: '26' }] })]);
+  assert.ok(k);
+  const inbox = ok(await desk.call('GET', `${b}/road-items`));
+  assert.deepEqual(inbox.find((i) => i.clientId === 'trip-castlerock-1').data.newProjects, [{ name: '26-147', code: '26-147' }, { name: '26-148', code: '26-148' }]);
+  for (const item of inbox.filter((i) => i.kind === 'trip')) {
+    const tr = ok(await desk.call('POST', `${b}/road-items/${item.id}/accept`, {}));
+    const trip = ok(await desk.call('GET', `${b}/trips/${tr.tripId}`));
+    assert.deepEqual(trip.jobs.map((j) => j.jobId).sort(), [j147.id, j148.id].sort());
+  }
+  const jobs = ok(await desk.call('GET', `${b}/jobs?inactive=1`));
+  assert.deepEqual(jobs.map((j) => j.code).sort(), ['26-147', '26-148']); // no project numbered 26
+
+  // The Projects screen: a list of numbers is refused; a number alone that is already a project opens that project.
+  assert.match((await phone.call('POST', '/api/road/projects', { name: '26-147, 26-148' })).body.error, /one project at a time/i);
+  const same = ok(await phone.call('POST', '/api/road/projects', { name: '26-147' }), 201);
+  assert.deepEqual([same.alreadyThere, same.project.id], [true, j147.id]);
+  assert.match((await phone.call('PUT', `/api/road/projects/${j147.id}`, { name: '26-147, 26-148' })).body.error, /one number/);
+});
