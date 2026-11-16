@@ -64,6 +64,10 @@ that shows it redraws by itself. You never write "find this element and change i
   (the printed invoice's blue heading and light-blue bands in `styles.css` use it). An `@page` margin box
   (`@bottom-right` page number) turns off Chrome's own print header and footer (date, title, web address).
 - **Dates:** ISO `'YYYY-MM-DD'` everywhere. `usDate()` shows MM/DD/YYYY on printed documents.
+  "Today" is the computer's own calendar day: `today()` in `app.js` (and `road.js`) shifts by `getTimezoneOffset()`
+  before `toISOString()`, because `toISOString()` alone is the UTC date, already tomorrow after 6 PM Central.
+  Never use `new Date().toISOString().slice(0, 10)` for today in the browser. Date boxes for work done (time) take
+  `:max="todayIso()"` and no lower limit.
 - **Build number:** `GET /api/auth/me` (and sign-in) return `version` from `appVersion()` in `src/core/platform.js`:
   `package.json`'s version plus `+` and the first 7 characters of Railway's `RAILWAY_GIT_COMMIT_SHA`. The status bar at the
   bottom shows it after the company name as `Build …`, and beta reports record the same string.

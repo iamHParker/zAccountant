@@ -2284,7 +2284,7 @@
         <h2>{{ time.editing ? 'Change time' : 'Add time' }}</h2>
         <p class="hint">Enter a start and end time, or just the hours (7.5 or 7:30). A shift that ends after midnight belongs to the day it started.</p>
         <div class="grid4">
-          <label>Day <select v-model="time.form.date"><option v-for="d in weekDays()" :value="d">{{ new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) }}</option></select></label>
+          <label>Day <input type="date" v-model="time.form.date" :max="todayIso()" @change="timeDayPicked" required></label>
           <label>Job <select v-model="time.form.jobId"><option value="">(no job)</option><option v-for="j in time.jobs" :value="j.id">{{ j.code ? j.code + ' · ' : '' }}{{ j.name }}</option></select></label>
           <label>Start <input type="time" v-model="time.form.start"></label>
           <label>End <input type="time" v-model="time.form.end"></label>
@@ -2293,7 +2293,7 @@
         </div>
         <label class="check"><input type="checkbox" v-model="time.form.billable"> Billable to the customer</label>
         <button class="primary">{{ time.editing ? 'Save' : 'Add' }}</button>
-        <button type="button" v-if="time.editing" @click="time.editing = null; time.form = blankTime(time.week)">Cancel</button>
+        <button type="button" v-if="time.editing" @click="time.editing = null; time.form = blankTime(time.form.date)">Cancel</button>
       </form>
 
       <div class="card">
