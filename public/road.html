@@ -153,7 +153,8 @@
             <label>What it was <input v-model="buyForm.description" maxlength="300" :placeholder="buyForm.category === 'equipment' ? 'Laser level' : 'Batteries, markers'"></label>
             <label v-if="buyForm.category === 'equipment'">Serial or model number (optional) <input v-model.trim="buyForm.serialNumber" maxlength="60" autocapitalize="characters" autocomplete="off"></label>
             <label>For a project (optional)
-              <select v-model="buyForm.jobId"><option value="">None</option><option v-for="p in projectsByNumber" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+              <select class="project-pick" v-model="buyForm.jobId" @focus="keepJob(buyForm)" @change="pickProject('buyForm')"><option value="">None</option>
+                <option v-if="canAddProjects" :value="newProjectChoice">+ New project…</option><option v-for="p in projectsByNumber" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
             <div class="photo-row" @dragover.prevent @drop.prevent="dropPhotos"><span class="label-like">Receipt photos (optional, but keep one for a big purchase)</span>
               <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
               <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
@@ -221,9 +222,10 @@
                 <option v-for="c in summary?.customers ?? []" :value="c.id">{{ c.name }}</option></select></label>
             <label v-if="projectForm.customerId === newCustomer">New customer's name <input v-model="projectForm.customerName" maxlength="120" placeholder="Garcia Ranch LLC" autocomplete="off"></label>
             <label>Site address (optional) <textarea v-model="projectForm.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
+            <p class="muted small" v-if="projectReturn">After Add project you go back to what you were typing, with this project picked.</p>
             <p class="muted small" v-if="!online && !projectForm.serverId">No signal: it is kept on this phone and added when there is signal.</p>
             <p class="muted small" v-if="!online && projectForm.serverId">No signal: a change to a saved project is sent at once, so it needs signal.</p>
-            <button class="primary" :disabled="busy">{{ projectForm.editId || projectForm.serverId ? 'Save' : 'Add project' }}</button> <button type="button" @click="projectForm = null">Cancel</button>
+            <button class="primary" :disabled="busy">{{ projectForm.editId || projectForm.serverId ? 'Save' : 'Add project' }}</button> <button type="button" @click="cancelProject">Cancel</button>
           </form>
         </section>
         <!-- The project's customer (Homer, 2026-11-16): name, phone, email and mailing address, as on the desk's customer card. -->
@@ -307,7 +309,8 @@
                 <option v-for="t in [...tripChoices.rest, ...tripChoices.ahead]" :value="t.key">{{ t.name }}</option></select></label>
             <template v-if="!(blockForm.type === 'travel' && blockForm.tripKey)">
               <label>Project{{ blockForm.type === 'office' ? ' (optional)' : '' }}
-                <select v-model="blockForm.jobId"><option value="">{{ blockForm.type === 'office' ? 'General office' : 'Choose…' }}</option>
+                <select class="project-pick" v-model="blockForm.jobId" @focus="keepJob(blockForm)" @change="pickProject('blockForm')"><option value="">{{ blockForm.type === 'office' ? 'General office' : 'Choose…' }}</option>
+                  <option v-if="canAddProjects" :value="newProjectChoice">+ New project…</option>
                   <option v-for="p in projectsByNumber" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
               <label v-if="blockForm.type === 'travel' && blockForm.jobId">Split with (travel on to the next job)
                 <select v-model="blockForm.splitJobId"><option value="">Not split</option>
