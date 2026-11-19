@@ -219,6 +219,12 @@ address on the phone's saved copy, so it works with no signal; 📍 Map opens Ap
 The list is in job-number order, highest first (`projectsByNumber`, the Time lists' sort). New project fills the number box
 with `nextNumber` (highest number in use + 1, keeping zero padding; a `YY-` series rolls to the current year's `-001`)
 and `numberClash` warns live when the number is on the list or waiting on the phone (Homer 2026-11-16).
+"+ New project…" in a form's project box (Supplies/Equipment `buyForm`, Time `blockForm`; Homer 2026-11-19):
+`pickProject(formKey)` keeps the form object in `projectReturn`, pushes a `projects` history entry and opens the new
+project form. Add project waits for `sync()` to put it on the list (`backWithNewProject`), then `history.back()`; the
+`popstate` handler puts the same form object back (`restoreForm`) with `jobId` set. Cancel and Back return the same way;
+‹ Home steps back two entries. `flash()` now clears problem messages after 10 s (good news 4 s), and a photo added
+clears an old problem message.
 Deleting a project (Homer 2026-11-16, no migration; `GRANT DELETE ON jobs`, `UPDATE (job_id) ON purchases`):
 `GET …/jobs/:id/uses` (`projectUses`) lists invoices/bills (documents or lines naming it, any status; never movable),
 time entries (movable unless one is billed), trip shares above 0%, purchases, and pending road items whose data holds

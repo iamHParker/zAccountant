@@ -406,7 +406,11 @@ signal. Editing a project needs the same role as adding one; editing a customer 
 
 **Equipment and supplies bought on the road.** Batteries and markers for a job, survey stakes, a new laser level:
 tap **Supplies** (used up) or **Equipment** (lasts), then **+ Supplies bought** or **+ Equipment bought**. Type the
-amount, the store, what it was and, if you like, the project it was for. For equipment, add the serial or model number:
+amount, the store, what it was and, if you like, the project it was for. A project that isn't on the list yet:
+choose **+ New project…** at the top of the project box. The new project form opens; press **Add project** and you
+come back to the purchase with everything you typed (and the photos) still there and the new project picked. **Cancel**
+or the phone's Back button also brings you back, with nothing changed. With no signal the project waits on the phone
+and you pick it later. The same choice is in the Time screen's project box. For equipment, add the serial or model number:
 it goes on your equipment list. A receipt photo is optional for small supplies (the card statement shows the store),
 but keep one for equipment and anything large. At your desk, **Bills → Bought on the road** shows what arrived:
 equipment starts on **1500 Equipment** (it stays on your books as something you own), supplies on **6200 Office
@@ -423,7 +427,8 @@ remembers your choice. Tap the eye to show them, tap again to hide them.
 **A screenshot or an emailed receipt as the receipt photo.** Take the screenshot, tap its little picture in the
 corner, then **Share → Copy** (or press and hold a picture in an email or web page and choose **Copy**). Then tap
 **📋 Paste** on the cost; Safari shows a small **Paste** bubble, tap it. Screenshots are also in Photos, so
-**🖼 Choose photo** works too. The same three buttons are on payment photos (checks and remittances).
+**🖼 Choose photo** works too. The same three buttons are on payment photos (checks and remittances). If Paste finds no
+picture, a red note says so; it goes away once a photo is added, when you tap it, or after 10 seconds.
 
 **Let the receipt fill in the cost.** On a new cost, the first receipt photo you take, choose, paste or drag in is
 read for you: the amount, the date, who was paid, the kind (airfare, hotel, rental car…) and a few words on what it

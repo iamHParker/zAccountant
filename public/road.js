@@ -81,6 +81,8 @@ const SCREENS = {
 // The project number at the front of a name, the way the server reads it (src/core/projects.js parseProjectFolder).
 const leadingNumber = (name) => /^([A-Za-z]{0,3}\d[\d.-]*[A-Za-z]?)(?=$|[\s_–—:,;()-])/.exec(String(name ?? '').trim())?.[1].replace(/[.-]+$/, '') ?? '';
 const NEW_CUSTOMER = '+new';
+/** The "+ New project" choice in a form's project list (Homer, 2026-11-19). */
+const NEW_PROJECT = '+newproject';
 // Time in blocks (Homer, 2026-11-06): travel, site time, office/drafting; lunch is the gap between two blocks.
 const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
 const BLOCK_ICON = { travel: '🚗', site: '🏗️', office: '📐' };
@@ -104,7 +106,9 @@ createApp({
       tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, buyForm: null, blockForm: null, blockDay: today(), blockTypes: BLOCK_TYPES, blockIcon: BLOCK_ICON, kinds: KINDS, reading: false,
       bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
       // Projects (Homer, 2026-11-16): look one up, or add one from the field.
-      projectForm: null, customerForm: null, projectQuery: '', openProjectKey: '', newCustomer: NEW_CUSTOMER,
+      projectForm: null, customerForm: null, projectQuery: '', openProjectKey: '', newCustomer: NEW_CUSTOMER, newProjectChoice: NEW_PROJECT,
+      // A form left for "+ New project": { screen, formKey, form }. Saving the project brings it back, with the project picked.
+      projectReturn: null,
       screen: 'home', screens: SCREENS,
       // Amounts start hidden (blurred) and the phone remembers the choice: someone beside you sees no deposit totals.
       hide: getLocal('zacc.roadHide') !== 'show',
@@ -261,7 +265,13 @@ createApp({
     if (m) { this.setKey(m[1]); history.replaceState(null, '', '/road'); }
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/road-sw.js', { scope: '/road' }).catch(() => {});
     // The phone's own Back button goes from a screen back to the four buttons.
-    window.addEventListener('popstate', () => { this.closeForms(); this.screen = SCREENS[history.state?.road] ? history.state.road : 'home'; });
+    // Back from a new project started in a form's project list returns to that form, as it was typed.
+    window.addEventListener('popstate', () => {
+      const back = this.projectReturn;
+      this.closeForms();
+      this.screen = SCREENS[history.state?.road] ? history.state.road : 'home';
+      if (back && this.screen === back.screen) this.restoreForm(back);
+    });
     window.addEventListener('online', () => { this.online = true; this.sync(); });
     window.addEventListener('offline', () => { this.online = false; });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.sync(); });
@@ -272,7 +282,12 @@ createApp({
   methods: {
     money,
     usDate(d) { const x = /^(\d{4})-(\d{2})-(\d{2})/.exec(d ?? ''); return x ? `${x[2]}/${x[3]}/${x[1]}` : (d ?? ''); },
-    flash(text, kind = 'ok') { this.message = { text, kind }; if (kind === 'ok') setTimeout(() => { if (this.message?.text === text) this.message = null; }, 4000); },
+    /** A message at the bottom. Good news goes after 4 seconds, a problem after 10 (Homer, 2026-11-19: it stayed on screen). */
+    flash(text, kind = 'ok') {
+      const id = (this.message?.id ?? 0) + 1;
+      this.message = { text, kind, id };
+      setTimeout(() => { if (this.message?.id === id) this.message = null; }, kind === 'ok' ? 4000 : 10000);
+    },
     setKey(k) { this.key = k; this.keyProblem = ''; setLocal(KEY_STORE, k); },
     useLink() {
       const m = /#key=(zr_[A-Za-z0-9_-]+)/.exec(this.pasted);
@@ -309,12 +324,13 @@ createApp({
       window.scrollTo({ top: 0 });
     },
     goHome() {
+      const steps = this.projectReturn ? 2 : 1; // from a new project started in a form: past the form's screen too
       this.closeForms();
-      if (history.state?.road) history.back(); else this.screen = 'home';
+      if (history.state?.road) history.go(-steps); else this.screen = 'home';
     },
     goTime() { this.go('time'); },
     openTrip(key) { this.tripKey = key; this.go('trip'); },
-    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; this.blockForm = null; this.projectForm = null; this.customerForm = null; this.openProjectKey = ''; },
+    closeForms() { this.tripForm = null; this.costForm = null; this.timeForm = null; this.checkForm = null; this.bookingForm = null; this.buyForm = null; this.blockForm = null; this.projectForm = null; this.customerForm = null; this.openProjectKey = ''; this.projectReturn = null; },
     toggleHide() { this.hide = !this.hide; setLocal('zacc.roadHide', this.hide ? null : 'show'); },
     newTrip() { this.tripForm = { name: '', startDate: today(), endDate: '', jobIds: [], newProjects: '', notes: '' }; this.projectSearch = ''; },
     /** A trip planned ahead (Homer, 2026-11-06): the New trip form starting tomorrow; its bookings go on it once saved. */
@@ -473,6 +489,7 @@ createApp({
       const list = (this.summary?.projects ?? []).filter((p) => p.id !== f.serverId);
       const same = list.find((p) => p.name.trim().toLowerCase() === name.toLowerCase());
       if (same && f.serverId) { this.flash(`There is already a project named ${same.name}.`, 'bad'); return; }
+      if (same && this.projectReturn) { this.returnFromProject(same.id); this.flash(`${same.name} was already on the list: it is picked.`); return; }
       if (same) { this.projectForm = null; this.openProjectKey = `s:${same.id}`; this.flash(`${name} is already on the list.`); return; }
       const clash = this.numberClash;
       if (clash && !confirm(`Number ${code} is already used by ${clash.name}. ${f.serverId ? 'Save' : 'Add this project'} anyway?`)) return;
@@ -489,9 +506,54 @@ createApp({
       }
       const item = await this.saveItem('project', f, data);
       if (!item) return;
+      if (this.projectReturn) { await this.backWithNewProject(item); return; }
       this.projectForm = null; this.projectQuery = '';
       this.openProjectKey = `c:${item.clientId}`;
       this.flash(this.online ? 'Adding the project…' : 'No signal: the project is kept on this phone and added when there is signal.');
+    },
+    /**
+     * "+ New project" chosen in a form's project list (Homer, 2026-11-19): the Projects screen's new project form, then
+     * back to the form, with what was typed kept and the new project picked. It is its own history entry, so the phone's
+     * Back button (or Cancel) returns to the form too.
+     */
+    pickProject(formKey) {
+      const form = this[formKey];
+      if (form?.jobId !== NEW_PROJECT) return;
+      form.jobId = form.lastJobId ?? '';
+      const back = { screen: this.screen, formKey, form };
+      this.closeForms();
+      history.pushState({ road: 'projects' }, '');
+      this.screen = 'projects';
+      this.projectQuery = '';
+      this.newProject();
+      this.projectReturn = back;
+    },
+    /** Remember the project picked, so choosing "+ New project" and coming back without one leaves it as it was. */
+    keepJob(form) { if (form && form.jobId !== NEW_PROJECT) form.lastJobId = form.jobId; },
+    restoreForm(back) {
+      this[back.formKey] = back.form;
+      if (back.pickId) { back.form.jobId = back.pickId; back.form.lastJobId = back.pickId; }
+      this.$nextTick(() => document.querySelector('.project-pick')?.scrollIntoView({ block: 'center' }));
+    },
+    /** Back to the form left for "+ New project", with this project picked (null: none, it isn't on the list yet). */
+    returnFromProject(id) {
+      const back = this.projectReturn;
+      back.pickId = id;
+      history.back(); // the popstate above puts the form back
+    },
+    cancelProject() { if (this.projectReturn) history.back(); else this.projectForm = null; },
+    /** A new project from a form: it goes onto zAccountant's list at once with signal; wait for that, then pick it. */
+    async backWithNewProject(item) {
+      this.busy = true;
+      try {
+        const until = Date.now() + 30_000;
+        while (!item.projectId && !item.error && this.syncing && Date.now() < until) await new Promise((r) => setTimeout(r, 200));
+      } finally { this.busy = false; }
+      if (!this.projectReturn) return; // left the screen meanwhile
+      const id = item.projectId && this.summary?.projects?.some((p) => p.id === item.projectId) ? item.projectId : null;
+      this.returnFromProject(id);
+      if (id) this.flash(`Project ${item.data.name} added and picked.`);
+      else this.flash(this.online && item.error ? item.error : 'No signal: the project is kept on this phone. Pick it here once it is added (it goes when there is signal).', 'bad');
     },
     /** "✏️ Edit project": the same form, filled in from the project on zAccountant's list. */
     editProject(p) {
@@ -577,13 +639,16 @@ createApp({
       ev.target.value = '';
       const form = this.checkForm ?? this.buyForm ?? this.costForm;
       const first = form.photos.length;
+      let problem = false;
       this.busy = true;
       try {
         for (const f of files) {
-          if (form.photos.length >= 6) { this.flash('At most 6 photos.', 'bad'); break; }
+          if (form.photos.length >= 6) { this.flash('At most 6 photos.', 'bad'); problem = true; break; }
           form.photos.push({ clientId: `photo-${newId()}`, dataUrl: await shrinkPhoto(f) });
         }
-      } catch { this.flash('That photo could not be read. Try taking it again.', 'bad'); } finally { this.busy = false; }
+      } catch { this.flash('That photo could not be read. Try taking it again.', 'bad'); problem = true; } finally { this.busy = false; }
+      // A photo went in: an old problem message ("no picture on the clipboard") no longer applies.
+      if (form.photos.length > first && !problem && this.message?.kind === 'bad') this.message = null;
       // A new cost's first receipt is read right away (with signal), to fill in the amount, date and who was paid.
       if ((form === this.costForm || form === this.buyForm) && first === 0 && form.photos.length && !form.editId && this.canRead && this.online && !String(form.amount).trim()) {
         this.readReceipt();
