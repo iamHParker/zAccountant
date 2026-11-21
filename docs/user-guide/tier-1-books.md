@@ -403,6 +403,10 @@ number, name, customer or site address (*Austin, Texas* → *3204 Stirrat*) and 
 the customer's name, phone, email and address; every project for that customer shows the change. The customer's
 phone and email show on the project as links: tap to call or write. These changes are made at once, so they need
 signal. Editing a project needs the same role as adding one; editing a customer needs invoices or admin as well.
+**Customers from the field.** At the top of the Projects screen, **👤 Customers** lists your customers A to Z; type a
+name, phone, email or street to find one. Tap a customer to see their phone, email, address and open projects, and
+**✏️ Edit customer** to change them, even a customer with no project yet. **📁 Projects** goes back to the projects.
+(The Customers button shows only for a role that may change customers.)
 
 **Equipment and supplies bought on the road.** Batteries and markers for a job, survey stakes, a new laser level:
 tap **Supplies** (used up) or **Equipment** (lasts), then **+ Supplies bought** or **+ Equipment bought**. Type the
