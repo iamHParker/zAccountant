@@ -106,7 +106,7 @@ createApp({
       tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, buyForm: null, blockForm: null, blockDay: today(), blockTypes: BLOCK_TYPES, blockIcon: BLOCK_ICON, kinds: KINDS, reading: false,
       bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
       // Projects (Homer, 2026-11-16): look one up, or add one from the field.
-      projectForm: null, customerForm: null, projectQuery: '', openProjectKey: '', newCustomer: NEW_CUSTOMER, newProjectChoice: NEW_PROJECT,
+      projectForm: null, customerForm: null, projectQuery: '', openProjectKey: '', projectTab: 'projects', customerQuery: '', openCustomerId: '', newCustomer: NEW_CUSTOMER, newProjectChoice: NEW_PROJECT,
       // A form left for "+ New project": { screen, formKey, form }. Saving the project brings it back, with the project picked.
       projectReturn: null,
       screen: 'home', screens: SCREENS,
@@ -211,6 +211,15 @@ createApp({
       return this.projectsByNumber.filter((p) => { const hay = `${p.code ?? ''} ${p.name} ${p.customerName ?? ''} ${p.address ?? ''}`.toLowerCase(); return words.every((w) => hay.includes(w)); })
         .slice(0, 50);
     },
+    /** Customers on the Projects screen's Customers tab (Homer, 2026-11-21): typed words match name, phone, email or address; A to Z. */
+    customerList() {
+      const words = this.customerQuery.toLowerCase().split(/\s+/).filter(Boolean);
+      return (this.summary?.customers ?? [])
+        .filter((c) => { const hay = `${c.name} ${c.phone ?? ''} ${c.email ?? ''} ${c.address ?? ''}`.toLowerCase(); return words.every((w) => hay.includes(w)); })
+        .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' })).slice(0, 100);
+    },
+    /** Open projects for a customer, highest number first. */
+    customerProjects() { return (id) => this.projectsByNumber.filter((p) => p.customerId === id); },
     /** Every project number in use: zAccountant's list plus projects still waiting on this phone. */
     takenNumbers() {
       const saved = (this.summary?.projects ?? []).map((p) => ({ id: p.id, code: p.code || leadingNumber(p.name), name: p.name }));
@@ -565,8 +574,10 @@ createApp({
     /** "✏️ Edit customer": the customer's name, phone, email and address (the desk's Customers → edit, the main boxes). */
     editCustomer(p) {
       const c = this.customerOf(p);
-      if (!c) return;
-      const back = p.id;
+      if (c) this.editCustomerCard(c, p.id);
+    },
+    /** The same form from the Customers tab (back = null: it returns to that customer on the tab). */
+    editCustomerCard(c, back = null) {
       this.closeForms();
       this.customerForm = { id: c.id, back, name: c.name, phone: c.phone ?? '', email: c.email ?? '', address: c.address ?? '' };
       window.scrollTo({ top: 0 });
@@ -575,7 +586,8 @@ createApp({
       const f = this.customerForm;
       if (!f.name.trim()) { this.flash('The customer needs a name.', 'bad'); return; }
       if (!(await this.sendNow('PATCH', `/customers/${f.id}`, { name: f.name.trim(), phone: f.phone.trim(), email: f.email.trim(), address: f.address.trim() }))) return;
-      this.customerForm = null; this.openProjectKey = `s:${f.back}`;
+      this.customerForm = null;
+      if (f.back) this.openProjectKey = `s:${f.back}`; else this.openCustomerId = f.id;
       this.flash('Customer saved.');
     },
     /** Send a change now (it needs signal), then fetch the lists again so every screen shows it. False if it didn't go. */

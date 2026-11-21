@@ -219,6 +219,8 @@ address on the phone's saved copy, so it works with no signal; 📍 Map opens Ap
 The list is in job-number order, highest first (`projectsByNumber`, the Time lists' sort). New project fills the number box
 with `nextNumber` (highest number in use + 1, keeping zero padding; a `YY-` series rolls to the current year's `-001`)
 and `numberClash` warns live when the number is on the list or waiting on the phone (Homer 2026-11-16).
+A 👤 Customers tab (`projectTab`, `customerList`, `editCustomerCard`; Homer 2026-11-21) lists the summary's customers
+(sent only with `canAddCustomers` details) and opens the same customer form, `PATCH /api/road/customers/:id`.
 "+ New project…" in a form's project box (Supplies/Equipment `buyForm`, Time `blockForm`; Homer 2026-11-19):
 `pickProject(formKey)` keeps the form object in `projectReturn`, pushes a `projects` history entry and opens the new
 project form. Add project waits for `sync()` to put it on the list (`backWithNewProject`), then `history.back()`; the

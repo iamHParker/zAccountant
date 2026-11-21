@@ -186,8 +186,13 @@
       <!-- Projects (Homer, 2026-11-16): look a project up (number, customer, site address and a map), or add one with the
            same boxes as the desk's Projects → Add project. With signal it goes straight onto the list; with none it waits here. -->
       <template v-if="screen === 'projects'">
+        <!-- Projects or Customers (Homer, 2026-11-21: a button to change a customer's details straight from the phone). -->
+        <div class="chips" v-if="!projectForm && !customerForm && summary?.canAddCustomers">
+          <button type="button" :class="{ active: projectTab === 'projects' }" @click="projectTab = 'projects'">📁 Projects</button>
+          <button type="button" :class="{ active: projectTab === 'customers' }" @click="projectTab = 'customers'">👤 Customers</button>
+        </div>
         <!-- The project just added on this phone, shown on top until another one is opened. -->
-        <section class="card" v-if="!projectForm && !customerForm && openProject?.item">
+        <section class="card" v-if="!projectForm && !customerForm && projectTab === 'projects' && openProject?.item">
           <div class="row wrap"><h2>{{ openProject.code && !openProject.name.startsWith(openProject.code) ? openProject.code + ' · ' : '' }}{{ openProject.name }}</h2>
             <span class="pill" :class="statusClass(openProject.item)">{{ openProject.item.alreadyThere ? 'Already on the list' : statusText(openProject.item) }}</span></div>
           <div class="small" v-if="openProject.code"><span class="muted">Number</span> <strong>{{ openProject.code }}</strong></div>
@@ -241,6 +246,27 @@
             <p class="muted small">The project's site address is on the project (✏️ Edit project). Every project for this customer shows the change.</p>
             <button class="primary" :disabled="busy">Save</button> <button type="button" @click="customerForm = null">Cancel</button>
           </form>
+        </section>
+        <section class="card" v-else-if="projectTab === 'customers' && summary?.canAddCustomers">
+          <label>Find a customer <input type="search" v-model="customerQuery" placeholder="Name, phone, email or street" autocomplete="off" enterkeyhint="search"></label>
+          <h2 class="sub">{{ customerQuery.trim() ? `Found ${customerList.length}` : 'Customers, A to Z' }}</h2>
+          <p class="hint" v-if="!customerList.length">{{ customerQuery.trim() ? 'No customer like that.' : 'No customers yet.' }}</p>
+          <div class="proj-list">
+            <template v-for="c in customerList" :key="c.id">
+              <button class="proj-row" :aria-expanded="openCustomerId === c.id ? 'true' : 'false'" @click="openCustomerId = openCustomerId === c.id ? '' : c.id">
+                <strong>{{ c.name }}</strong>
+                <span class="muted small" v-if="c.phone || c.address">{{ [c.phone, c.address].filter(Boolean).join(' · ') }}</span>
+              </button>
+              <div class="proj-detail" v-if="openCustomerId === c.id">
+                <div class="small cust-links" v-if="c.phone || c.email">
+                  <a v-if="c.phone" :href="telLink(c.phone)">📞 {{ c.phone }}</a>
+                  <a v-if="c.email" class="cust-email" :href="'mailto:' + c.email">✉️ {{ c.email }}</a></div>
+                <div class="small" v-if="c.address"><span class="muted">Address</span> {{ c.address }}</div>
+                <div class="small" v-if="customerProjects(c.id).length"><span class="muted">Projects</span> {{ customerProjects(c.id).map((p) => p.code || p.name).join(', ') }}</div>
+                <div class="row wrap road-actions edit-row"><button @click="editCustomerCard(c)">✏️ Edit customer</button></div>
+              </div>
+            </template>
+          </div>
         </section>
         <section class="card" v-else>
           <label>Find a project <input type="search" v-model="projectQuery" placeholder="Number, name, customer or street" autocomplete="off" enterkeyhint="search"></label>
