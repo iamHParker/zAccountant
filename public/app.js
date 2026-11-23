@@ -9,6 +9,7 @@ import { picturesFromClipboard } from '/paste.js';
 import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
 import { clockTime, clock12, hhmm, nextDay } from '/clock.js';
 import { payeeKey, payeeRuleText } from '/payee.js';
+import { projectChoices, projectLabel } from '/projectPick.js';
 
 // Today's date on this computer's own calendar (Central time for Homer), as YYYY-MM-DD. toISOString() alone gives the
 // date in London (UTC), which is already tomorrow after 6 PM Central (Homer, 2026-11-15). Same rule as road.js.
@@ -1633,6 +1634,9 @@ createApp({
       return j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: '2-digit', day: '2-digit', year: 'numeric' }) : '';
     },
     jobLabel(j) { return j.code && !j.name.startsWith(j.code) ? `${j.code} · ${j.name}` : j.name; },
+    // Project drop-downs: newest number first, every entry "number · project · customer" (public/projectPick.js).
+    jobChoices(keepId) { return projectChoices(this.ar.jobs, keepId); },
+    jobPickLabel(j) { return projectLabel(j); },
     editProject(j) {
       this.ar.proj.editId = j?.id ?? null; this.ar.proj.show = true;
       this.ar.proj.form = j ? { name: j.name, code: j.code ?? '', customerId: j.customerId ?? '', address: j.address ?? '' } : blankProject();

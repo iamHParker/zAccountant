@@ -10,6 +10,7 @@ import { render } from '/road.render.js';
 import { picturesFromClipboard } from '/paste.js';
 import { clockTime, clock12, nextDay, durationMinutes, hhmm } from '/clock.js';
 import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
+import { projectChoices, projectLabel as projectPickText } from '/projectPick.js';
 
 const KEY_STORE = 'zacc.roadKey';
 const SUMMARY_STORE = 'zacc.roadSummary';
@@ -115,12 +116,9 @@ createApp({
     };
   },
   computed: {
-    /** Open jobs for the time pick lists by job number, highest first (26-148 above 26-147); jobs with no number after, A to Z (Homer, 2026-11-15). */
-    projectsByNumber() {
-      const num = (j) => (j.code || (/^\d/.test(j.name) ? j.name : '')).trim();
-      const cmp = (x, y) => x.localeCompare(y, 'en', { numeric: true, sensitivity: 'base' });
-      return [...(this.summary?.projects ?? [])].sort((a, b) => { const x = num(a), y = num(b); return (!x - !y) || cmp(y, x) || cmp(a.name, b.name); });
-    },
+    /** Open jobs for the time pick lists by job number, highest first (26-148 above 26-147); jobs with no number after, A to Z
+     *  (Homer, 2026-11-15). Same order and labels as the desk's project drop-downs (public/projectPick.js). */
+    projectsByNumber() { return projectChoices(this.summary?.projects); },
     waiting() { return this.items.filter((i) => this.notSent(i)).length; },
     checkItems() { return this.items.filter((i) => i.kind === 'check').sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 20); },
     /** Equipment or supplies on this phone for the screen showing (newest first). */
@@ -323,6 +321,7 @@ createApp({
       }
     },
     serverTripFor(clientId) { return (this.summary?.trips ?? []).find((t) => t.fromClientId === clientId) ?? null; },
+    pickLabel(p) { return projectPickText(p); },
     projectLabel(id) { const p = this.summary?.projects?.find((x) => x.id === id); return p ? (p.code ?? p.name) : 'project'; },
     toggleJob(id) { const j = this.tripForm.jobIds; const i = j.indexOf(id); if (i >= 0) j.splice(i, 1); else j.push(id); },
     // ---- The four home buttons. Each screen is a history entry, so Back (or the ‹ Home link) returns to them.

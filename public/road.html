@@ -154,7 +154,7 @@
             <label v-if="buyForm.category === 'equipment'">Serial or model number (optional) <input v-model.trim="buyForm.serialNumber" maxlength="60" autocapitalize="characters" autocomplete="off"></label>
             <label>For a project (optional)
               <select class="project-pick" v-model="buyForm.jobId" @focus="keepJob(buyForm)" @change="pickProject('buyForm')"><option value="">None</option>
-                <option v-if="canAddProjects" :value="newProjectChoice">+ New project…</option><option v-for="p in projectsByNumber" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+                <option v-if="canAddProjects" :value="newProjectChoice">+ New project…</option><option v-for="p in projectsByNumber" :value="p.id">{{ pickLabel(p) }}</option></select></label>
             <div class="photo-row" @dragover.prevent @drop.prevent="dropPhotos"><span class="label-like">Receipt photos (optional, but keep one for a big purchase)</span>
               <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
               <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
@@ -341,10 +341,10 @@
               <label>Project{{ blockForm.type === 'office' ? ' (optional)' : '' }}
                 <select class="project-pick" v-model="blockForm.jobId" @focus="keepJob(blockForm)" @change="pickProject('blockForm')"><option value="">{{ blockForm.type === 'office' ? 'General office' : 'Choose…' }}</option>
                   <option v-if="canAddProjects" :value="newProjectChoice">+ New project…</option>
-                  <option v-for="p in projectsByNumber" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+                  <option v-for="p in projectsByNumber" :value="p.id">{{ pickLabel(p) }}</option></select></label>
               <label v-if="blockForm.type === 'travel' && blockForm.jobId">Split with (travel on to the next job)
                 <select v-model="blockForm.splitJobId"><option value="">Not split</option>
-                  <option v-for="p in projectsByNumber.filter(x => x.id !== blockForm.jobId)" :value="p.id">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</option></select></label>
+                  <option v-for="p in projectsByNumber.filter(x => x.id !== blockForm.jobId)" :value="p.id">{{ pickLabel(p) }}</option></select></label>
               <template v-if="blockForm.splitJobId">
                 <label>First project's share (%) <input type="number" v-model.number="blockForm.splitPercent" min="1" max="99" step="1" inputmode="numeric"></label>
                 <div class="chips"><button type="button" v-for="p in [50, 60, 70, 75]" :class="{ active: blockForm.splitPercent === p }" @click="blockForm.splitPercent = p">{{ p }}/{{ 100 - p }}</button></div>
@@ -413,7 +413,7 @@
             <button type="button" class="active" v-for="id in tripForm.jobIds" @click="toggleJob(id)">{{ projectLabel(id) }} ✕</button>
           </div>
           <div class="pick-list" v-if="projectSearch">
-            <button type="button" v-for="p in projectMatches" @click="toggleJob(p.id); projectSearch = ''">{{ p.code ? p.code + ' · ' : '' }}{{ p.name }}</button>
+            <button type="button" v-for="p in projectMatches" @click="toggleJob(p.id); projectSearch = ''">{{ pickLabel(p) }}</button>
             <p class="muted small" v-if="!projectMatches.length">No project like that. Add it as a new project below.</p>
           </div>
           <label>New projects, not on the list yet (one per line, like 2610 Garcia Barn; pick projects already on the list above)
