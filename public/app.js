@@ -211,7 +211,7 @@ async function api(method, url, body, headers = {}) {
   const signedOut = res.status === 401 && !url.startsWith('/auth/') && !url.includes('/lock');
   if (signedOut) onSignInNeeded(data.next);
   if (!res.ok && res.status !== 401) noteError('server', `${where} → ${res.status}: ${data.error ?? ''}`, res.headers.get('x-request-id'));
-  if (!res.ok) throw Object.assign(new Error(data.error ?? `Request failed (${res.status})`), { details: data.details ?? [], signedOut });
+  if (!res.ok) throw Object.assign(new Error(data.error ?? `Request failed (${res.status})`), { details: data.details ?? [], itemId: data.itemId, signedOut });
   return data;
 }
 
@@ -236,6 +236,7 @@ const ROAD_TRIP_KINDS = ['trip', 'cost', 'time', 'block', 'booking'];
 const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
 // Time blocks from the Road page (migration 042).
 const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
+const COST_KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
 const BOOKING_DATES = { airfare: ['Depart', 'Return'], lodging: ['Check in', 'Check out'], rental_car: ['Pick up', 'Drop off'], other: ['From', 'To'] };
 const COST_LABEL = { airfare: 'Airfare', lodging: 'Lodging', rental_car: 'Rental car', other: 'Other' };
 const SHARE_COLS = [{ key: 'air', label: 'Air' }, { key: 'hotel', label: 'Hotel' }, { key: 'car', label: 'Rental car' }, { key: 'rest', label: 'Rest' }, { key: 'share', label: 'Travel time' }];
@@ -310,7 +311,7 @@ createApp({
   render,
   data() {
     return {
-      SHARE_COLS, BOOKING_KINDS, ROAD_TRIP_KINDS, BOOKING_DATES, companies: [], companyId: null, company: null, tab: 'home', message: null,
+      SHARE_COLS, BOOKING_KINDS, ROAD_TRIP_KINDS, BOOKING_DATES, BLOCK_TYPES, COST_KINDS, companies: [], companyId: null, company: null, tab: 'home', message: null,
       auth: { screen: 'loading', notice: '', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
       passkeys: { list: [], name: '', code: '', busy: false, supported: canPasskey() },
       members: [], newMember: { email: '', role: 'bookkeeper', departmentId: '' },
@@ -382,7 +383,7 @@ createApp({
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null, del: null, merge: null, similar: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
-      road: { items: [], dismissed: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false },
+      road: { items: [], dismissed: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false, fix: null },
       mileiq: { file: null, preview: null, pick: {}, tripFor: {}, bulkTrip: '', newTripName: '', rate: '', expenseId: '', paidFromId: '', busy: false },
       bank: { accountId: '', file: null, preview: null, txs: [], view: 'review', choice: {}, sameAs: {}, matches: {}, rules: [], newRule: { matchText: '', direction: 'out', accountId: '' },
         imports: [], recons: [], recon: null, newRecon: { statementDate: '', endingBalance: '' } },
@@ -1504,10 +1505,13 @@ createApp({
       if (!body.accountId || !body.paidFromAccountId) { this.flash('Choose the account and what it was paid with.', 'bad'); return; }
       ar.buyBusy = true;
       try {
-        if (await this.run(() => api('POST', `${this.arBase()}/road-items/${i.id}/accept`, body), i.data.category === 'equipment' ? 'In the books, and on the equipment list.' : 'In the books.')) {
-          keepRoadAccounts({ ...lastRoadAccounts(), buyCardId: body.paidFromAccountId });
-          await this.loadBuys();
-        }
+        await api('POST', `${this.arBase()}/road-items/${i.id}/accept`, body);
+        this.flash(i.data.category === 'equipment' ? 'In the books, and on the equipment list.' : 'In the books.');
+        keepRoadAccounts({ ...lastRoadAccounts(), buyCardId: body.paidFromAccountId });
+        if (this.road.fix?.id === i.id) this.road.fix = null;
+        await this.loadBuys();
+      } catch (e) {
+        if (!e.signedOut) { if (e.network) this.flash(e.message, 'bad'); else this.fixRoad(i, e.message); }
       } finally { ar.buyBusy = false; }
     },
     async dismissBuy(i) {
@@ -1803,22 +1807,116 @@ createApp({
       if (!this.trip.editCostId && last && this.tripPaidFromAccounts().some((a) => a.id === last)) c.paidFromAccountId = last;
     },
     roadPhotoUrl(i, id) { return `/api${this.tripBase()}/road-items/${i.id}/photos/${id}`; },
-    async acceptRoad(i) {
+    /** What Accept sends besides any fixes: the accounts for a cost, the trip chosen here. Null (and a red message) if something is missing. */
+    roadAcceptBody(i) {
       const r = this.road;
       const body = {};
       if (i.kind === 'cost') {
-        if (!r.expenseId || !r.paidFromId) { this.flash('Choose the expense account and what it was paid with (top of this box) first.', 'bad'); return; }
+        if (!r.expenseId || !r.paidFromId) { this.flash('Choose the expense account and what it was paid with (top of this box) first.', 'bad'); return null; }
         Object.assign(body, { expenseAccountId: r.expenseId, paidFromAccountId: this.roadCard(i) });
+      }
+      if (i.kind !== 'trip' && r.tripFor[i.id]) body.tripId = r.tripFor[i.id];
+      return body;
+    },
+    async acceptRoad(i) {
+      const r = this.road;
+      const body = this.roadAcceptBody(i);
+      if (!body) return;
+      if (i.kind === 'cost') {
         keepRoadAccounts({ expenseId: r.expenseId, paidFromId: r.paidFromId });
         keepCardFor(i.data.kind ?? 'other', body.paidFromAccountId);
       }
-      if (i.kind !== 'trip' && r.tripFor[i.id]) body.tripId = r.tripFor[i.id];
       r.busy = true;
       try {
-        const ok = await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/accept`, body),
-          i.kind === 'trip' ? 'Trip added, with its projects sharing it evenly. Open it to change the shares.' : i.kind === 'block' && !i.trip ? 'Time added to its project.' : 'Added to the trip.');
-        if (ok) await this.loadTrips();
+        await api('POST', `${this.tripBase()}/road-items/${i.id}/accept`, body);
+        this.flash(i.kind === 'trip' ? 'Trip added, with its projects sharing it evenly. Open it to change the shares.' : i.kind === 'block' && !i.trip ? 'Time added to its project.' : 'Added to the trip.');
+        if (r.fix?.id === i.id) r.fix = null;
+        await this.loadTrips();
+      } catch (e) {
+        // It can't go in as it is (Homer, 2026-11-23): open it to fix, with the reason shown on it, not just a red message.
+        if (!e.signedOut) this.roadFailed(i, e);
       } finally { r.busy = false; }
+    },
+    /** An accept was refused: open that item's Fix form with the reason (the inbox only; inside a trip, Edit on its row does this). */
+    roadFailed(i, e) {
+      if (this.trip.cur || e.network) { this.flash(e.message, 'bad'); return; }
+      this.fixRoad(i, e.message);
+    },
+    // ---- Fix an item from the road before it goes in (Homer, 2026-11-23: "when there is an error, i need to be able to fix it").
+    // The form edits what the phone sent; "Save and accept" puts it in the books with the changes in one step (all or nothing),
+    // "Save, accept later" keeps it waiting with the changes. The server checks the changes exactly like an item from the phone.
+    fixRoad(i, error = '') {
+      const d = i.data;
+      const hm = (m) => (m == null ? '' : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`);
+      const dollars = (c) => (c != null ? (c / 100).toFixed(2) : '');
+      const f = i.kind === 'block' ? { type: d.type, date: d.date, start: d.start ?? '', end: d.end ?? '', hours: d.start ? '' : hm(d.minutes),
+        jobId: d.jobId ?? '', splitJobId: d.splitJobId ?? '', splitPercent: d.splitPercent ?? 50, notes: d.notes ?? '' }
+        : i.kind === 'time' ? { date: d.date, start: d.start ?? '', end: d.end ?? '', breaks: d.breakMinutes ? hm(d.breakMinutes) : '', hours: d.start ? '' : hm(d.minutes), notes: d.notes ?? '' }
+          : i.kind === 'cost' ? { date: d.date, kind: d.kind ?? 'other', vendor: d.vendor ?? '', description: d.description ?? '', amount: dollars(d.amountCents),
+            miles: d.miles ?? '', mileRate: d.mileRate ?? '' }
+            : i.kind === 'trip' ? { name: d.name ?? '', startDate: d.startDate, endDate: d.endDate ?? '', notes: d.notes ?? '' }
+              : i.kind === 'booking' ? { kind: d.kind, vendor: d.vendor ?? '', confirmation: d.confirmation ?? '', startsOn: d.startsOn, startTime: d.startTime ?? '',
+                endsOn: d.endsOn ?? '', endTime: d.endTime ?? '', amount: dollars(d.amountCents), details: d.details ?? '' }
+                : { date: d.date, category: d.category, vendor: d.vendor ?? '', description: d.description ?? '', serialNumber: d.serialNumber ?? '',
+                  amount: dollars(d.amountCents), jobId: d.jobId ?? '' };
+      this.road.fix = { id: i.id, item: i, data: f, error, busy: false };
+      this.$nextTick(() => document.querySelector('.road-fix')?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+    },
+    /** The fix form's changes, as the server reads them (deskData in src/services/roadService.js). */
+    roadFixData() {
+      const { item: i, data: f } = this.road.fix;
+      if (i.kind !== 'block' && i.kind !== 'time') return { ...f };
+      const clock = f.start && f.end;
+      const out = { ...f, ...(clock ? { hours: '' } : { start: '', end: '', breaks: '' }) };
+      if (i.kind === 'block' && (f.type !== 'travel' || !f.splitJobId)) Object.assign(out, { splitJobId: '', splitPercent: '' });
+      return out;
+    },
+    /** Hours shown on the fix form while typing: the clock's span (past midnight counts as the next morning), or what was typed. */
+    roadFixHours() {
+      const f = this.road.fix?.data;
+      if (!f) return '';
+      if (f.start && f.end) { const c = clockTime(f.start, f.end, f.breaks ?? ''); return c?.error ?? `${c.hours} h`; }
+      return '';
+    },
+    async saveRoadFix(accept) {
+      const r = this.road, fx = r.fix, i = fx.item;
+      const data = this.roadFixData();
+      fx.error = '';
+      let body = { data }, base = this.tripBase(), done = 'Saved. It is still waiting here; Accept puts it in the books.';
+      if (accept) {
+        if (i.kind === 'purchase') {
+          Object.assign(body, { accountId: this.buyAccount(i), paidFromAccountId: this.buyCardFor(i) });
+          if (!body.accountId || !body.paidFromAccountId) { fx.error = 'Choose the account and what it was paid with (on its row) first.'; return; }
+          base = this.arBase();
+          done = i.data.category === 'equipment' ? 'In the books, and on the equipment list.' : 'In the books.';
+        } else {
+          const extra = this.roadAcceptBody(i);
+          if (!extra) return;
+          Object.assign(body, extra);
+          done = 'Fixed and put into the books.';
+        }
+      }
+      fx.busy = true;
+      try {
+        await api(accept ? 'POST' : 'PATCH', `${base}/road-items/${i.id}${accept ? '/accept' : ''}`, body);
+        r.fix = null;
+        this.flash(done);
+        if (i.kind === 'purchase') await this.loadBuys(); else await this.loadTrips();
+      } catch (e) {
+        if (!e.signedOut) fx.error = e.message;
+      } finally { fx.busy = false; }
+    },
+    /**
+     * A time block or travel time whose end is earlier than its start counts as running past midnight. That is
+     * almost always a slip on the phone (AM for PM, or the phone filling in the time it was typed), so the inbox
+     * says so in red (Homer, 2026-11-23: 20:28–11:15 came in as 14.78 h).
+     */
+    roadTimeWarning(i) {
+      const d = i.data;
+      if ((i.kind !== 'block' && i.kind !== 'time') || !d.start || !d.end) return '';
+      if (d.end <= d.start) return `Ends (${d.end}) before it starts (${d.start}), so it counts as running past midnight: ${i.hours} h. Fix it if that is wrong.`;
+      if (d.minutes > 12 * 60) return `That is ${i.hours} hours in one block. Fix it if that is wrong.`;
+      return '';
     },
     /** Accept all: every item of one trip in the inbox (the trip itself first), in one step. */
     async acceptRoadGroup(items) {
@@ -1836,8 +1934,19 @@ createApp({
         if (r.expenseId) keepRoadAccounts({ expenseId: r.expenseId, paidFromId: r.paidFromId });
         // Each cost goes on its own row's card.
         const cards = Object.fromEntries(items.filter((i) => i.kind === 'cost').map((i) => [i.id, this.roadCard(i)]));
-        let ok = !rest.length || await this.run(() => api('POST', `${this.tripBase()}/road-items/accept-all`,
-          { itemIds: rest.map((i) => i.id), expenseAccountId: r.expenseId || undefined, paidFromAccountId: r.paidFromId || undefined, paidFrom: cards }));
+        let ok = true;
+        if (rest.length) {
+          try {
+            await api('POST', `${this.tripBase()}/road-items/accept-all`,
+              { itemIds: rest.map((i) => i.id), expenseAccountId: r.expenseId || undefined, paidFromAccountId: r.paidFromId || undefined, paidFrom: cards });
+          } catch (e) {
+            ok = false;
+            // Nothing went in (all or nothing); open the one that stopped it, so it can be fixed (Homer, 2026-11-23).
+            const bad = items.find((x) => x.id === e.itemId);
+            if (e.signedOut) { /* the sign-in screen says why */ } else if (bad) this.roadFailed(bad, { ...e, message: `Nothing went in yet. This one stopped it: ${e.message}` });
+            else this.flash(e.message, 'bad');
+          }
+        }
         for (const i of chosen) if (ok) ok = await this.run(() => api('POST', `${this.tripBase()}/road-items/${i.id}/accept`,
           { tripId: r.tripFor[i.id], expenseAccountId: r.expenseId || undefined, paidFromAccountId: cards[i.id] || r.paidFromId || undefined }));
         if (ok) for (const i of items.filter((x) => x.kind === 'cost')) keepCardFor(i.data.kind ?? 'other', cards[i.id]);

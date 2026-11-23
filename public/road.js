@@ -363,13 +363,14 @@ createApp({
         this.bookingForm = { ...base, kind: d.kind, vendor: d.vendor ?? '', confirmation: d.confirmation ?? '', startsOn: d.startsOn, startTime: d.startTime ?? '',
           endsOn: d.endsOn ?? '', endTime: d.endTime ?? '', amount: d.amount ?? '', details: d.details ?? '' };
       } else if (i.kind === 'time') {
-        this.timeForm = { ...base, date: d.date, hours: d.start ? '' : d.hours, start: d.start ?? '', end: d.end ?? '', breaks: d.breaks ?? '', notes: d.notes ?? '' };
+        this.timeForm = { ...base, date: d.date, hours: d.start ? '' : d.hours, start: d.start ?? '', end: d.end ?? '', breaks: d.breaks ?? '', notes: d.notes ?? '', overnight: Boolean(d.start && d.end && d.end <= d.start) };
       } else if (i.kind === 'check') {
         this.checkForm = { ...base, date: d.date, amount: d.amount, from: d.from ?? '', checkNumber: d.checkNumber ?? '', invoices: d.invoices ?? '',
           notes: d.notes ?? '', photos: [...(i.photos ?? [])] };
       } else if (i.kind === 'block') {
         this.blockForm = { ...base, type: d.type, date: d.date, start: d.start ?? '', end: d.end ?? '', hours: d.start ? '' : d.hours ?? '',
-          jobId: d.jobId ?? '', splitJobId: d.splitJobId ?? '', splitPercent: d.splitPercent ?? 50, tripKey: d.trip ? (d.trip.clientId ? `c:${d.trip.clientId}` : `s:${d.trip.id}`) : '', notes: d.notes ?? '' };
+          jobId: d.jobId ?? '', splitJobId: d.splitJobId ?? '', splitPercent: d.splitPercent ?? 50, tripKey: d.trip ? (d.trip.clientId ? `c:${d.trip.clientId}` : `s:${d.trip.id}`) : '', notes: d.notes ?? '',
+          overnight: Boolean(d.start && d.end && d.end <= d.start) };
       } else if (i.kind === 'project') {
         this.projectForm = { ...base, code: d.code ?? '', name: d.name, customerId: d.customerId ?? (d.customerName ? NEW_CUSTOMER : ''), customerName: d.customerName ?? '', address: d.address ?? '' };
       } else if (i.kind === 'purchase') {
@@ -619,9 +620,27 @@ createApp({
       this.closeForms();
       this.blockForm = { type, date: this.blockDay, start: last?.end ?? '', end: '', hours: '', jobId: last?.jobId ?? '', splitJobId: '', splitPercent: 50, tripKey: '', notes: '' };
     },
+    /**
+     * The end is earlier than the start (Homer, 2026-11-23: 20:28–11:15 came in as 14.78 h). That reads as running past
+     * midnight, but it is nearly always a slip: PM for AM, or an empty iPhone time box filling in the time it is now.
+     * Saving asks for "Yes, it ran past midnight" first.
+     */
+    endsBefore(f) { return Boolean(f?.start && f?.end && f.end <= f.start); },
+    /** A block on the same day that shares some of the same minutes (a person can't be in two places). */
+    overlapping(f) {
+      if (!(f.start && f.end)) return null;
+      const at = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+      const span = (d) => { const a = at(d.start); let b = at(d.end); if (b <= a) b += 1440; return [a, b]; };
+      const [a1, a2] = span(f);
+      return this.items.find((i) => i.kind === 'block' && i.clientId !== f.editId && i.data.date === f.date && i.data.start && i.data.end
+        && (([b1, b2]) => a1 < b2 && b1 < a2)(span(i.data))) ?? null;
+    },
     async saveBlock(next = false) {
       const f = this.blockForm;
       if (!(f.start && f.end) && !durationMinutes(f.hours)) { this.flash('Type the start and end times, or the hours.', 'bad'); return; }
+      if (this.endsBefore(f) && !f.overnight) { this.flash('The end is earlier than the start. Fix the times, or tick "Yes, it ran past midnight".', 'bad'); return; }
+      const clash = this.overlapping(f);
+      if (clash && !confirm(`This overlaps another block that day: ${this.itemText(clash)}. Save it anyway?`)) return;
       if (f.type !== 'office' && !f.jobId && !(f.type === 'travel' && f.tripKey)) { this.flash(f.type === 'travel' ? 'Choose the project, or the trip.' : 'Choose the project.', 'bad'); return; }
       if (f.splitJobId && f.splitJobId === f.jobId) { this.flash('Split it with a different project.', 'bad'); return; }
       const pct = Number(f.splitPercent);
@@ -708,6 +727,7 @@ createApp({
     async saveTime(next = false) {
       const f = this.timeForm; const clock = clockTime(f.start, f.end, f.breaks);
       if (clock?.error) { this.flash(clock.error, 'bad'); return; }
+      if (this.endsBefore(f) && !f.overnight) { this.flash('The end is earlier than the start. Fix the times, or tick "Yes, it ran past midnight".', 'bad'); return; }
       const data = { trip: this.tripRef, date: f.date, notes: f.notes.trim() || null,
         ...(clock ? { start: f.start, end: f.end, breaks: f.breaks, hours: clock.hours } : { hours: f.hours }) };
       if (!(await this.saveItem('time', f, data))) return;
