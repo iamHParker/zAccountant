@@ -76,7 +76,7 @@ zAccountant never half-saves: a save either completes or nothing changes. Messag
 | "zAccountant is restarting or briefly unavailable" | a new version is being installed (takes about a minute) | wait a minute and try again |
 | "That is too large to send" | the file or picture is over the limit | use a smaller file or picture |
 | "Something went wrong on our side. Nothing was saved." | a problem in zAccountant itself | press 🐞 Beta feedback so we can fix it |
-| "Please sign in" / the sign-in screen appears | your session ended | sign in again; your saved work is safe |
+| The sign-in screen says "You were signed out after 30 minutes without use" | nothing was clicked for 30 minutes, so zAccountant signed you out to protect your books | sign in again; your saved work is safe |
 | "zAccountant could not start in this browser" with a list of errors | the app couldn't start on this phone or browser (often an old version) | update the phone or browser, or close and reopen the page; take a screenshot of the page and send it to us |
 
 Saves of entries, invoices, bills and payments are protected against doubles. If you press Save again after a

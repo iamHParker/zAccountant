@@ -9,7 +9,7 @@ half-saved, and a developer can find the cause from the request id, without the 
 |---|---|---|---|
 | A mistake in what they typed or chose | `LedgerError(message, details[])` (`src/core/ledger.js`) | 400 (404 if the message says "not found") | "Invoice is not valid: line 2: enter a price or amount; due date must be on or after the date" |
 | A payroll input or table problem | `PayrollError` | 400 | the engine's sentence |
-| Not signed in / two-step not done | handled in `src/app.js` | 401 | the sign-in screen |
+| Not signed in / two-step not done | handled in `src/app.js` | 401 | the sign-in screen (after 30 idle minutes it says so; no red message, which would stay on screen after signing back in) |
 | Role lacks the permission | `AuthError(msg, 403)` | 403 | "Your role (Bookkeeper) can't do that. Ask the company owner." |
 | Plan lacks the feature | `AuthError(msg, 402)` | 402 | "Payroll isn't in this company's plan. Ask zAccountant to add it." |
 | Not a member, or an id that doesn't exist | `AuthError(..., 404)` / UUID check | 404 | "Company not found" (never reveals that someone else's company exists) |
