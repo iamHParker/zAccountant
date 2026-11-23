@@ -43,6 +43,8 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 - **Backups:** nightly off-site backup is ON since 2026-11-23 (`src/jobs/offsiteBackup.js` → Cloudflare R2 bucket
   `zaccountant-backups`, 90-day delete rule; keys and the encryption key are in Homer's 1Password). Restore drill of the
   real off-site file passed 2026-11-23 (`npm run drill:offsite` in Railway's Console; log in runbook section 4).
+- `DEVELOPER_EMAILS` is not set in Railway yet (Homer has no Developer/Admin tab). Set it before Dec 1 so backup status,
+  beta reports and plan switching are visible (Homer 2026-11-23: not tonight).
 - **Edit sweep** (CPA review 2026-10-25, `docs/board/edit-sweep.md`): batches 1-5 done (PRs 52-56). Email change and
   password reset wait for outgoing email; "Later" items are listed there.
 - Tax-ready level 1 is built (see below). Level 2+ (printed forms, e-file) is not planned: a CPA partner does real
