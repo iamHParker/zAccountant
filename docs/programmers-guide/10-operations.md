@@ -51,6 +51,7 @@ Each job is a plain Node script, like a separate check program you run against t
 | `booksCheck.js` | `npm run job:nightly` | the nightly books check, like re-closing a survey traverse each night: posts recurring entries that came due, re-verifies each company's audit chain, checks the trial balance, balance sheet and aging tie out. The server runs it about 2 a.m. Central unless `NIGHTLY_JOB=off` |
 | `offsiteBackup.js` | `npm run backup:offsite`, `npm run backup:decrypt` | the nightly off-site backup (above), or unlock a backup file |
 | `backup.js` | (Developer dashboard button) | a pg_dump for **Download backup** |
+| `offsiteDrill.js` | `npm run drill:offsite` | the restore drill against the real off-site copy: fetches the newest sent file back from the bucket, checks its SHA-256, unlocks it, restores it into a throwaway `zacc_drill_<date>` database on the same server, runs `restoreDrill.js`'s checks, then deletes the throwaway |
 | `restoreDrill.js` | `npm run drill:restore` | restores a backup into an **empty** database, compares row counts, then runs the full books check on the copy; each step is timed (target under 4 hours). Results go in `docs/runbooks/operations.md` |
 | `loadTest.js` | `npm run test:load` | proof-loads a test server (never production) with simulated people; design point 50 requests a second, 95% answered within 800 ms (runbook section 5) |
 

@@ -66,7 +66,14 @@ Amazon S3 work the same way.
 
 **Opening one:** download the `.dump.zbk` file from the bucket, then
 `BACKUP_ENCRYPTION_KEY=… npm run backup:decrypt -- zaccountant-2026-11-02-pg16.dump.zbk backup.dump`, and restore
-`backup.dump` with the drill below (`--file backup.dump`). Do that once as the restore drill before alpha.
+`backup.dump` with the drill below (`--file backup.dump`).
+
+**Restore drill of the off-site copy, in one command** (Railway → zAccountant service → **Console**):
+`cd /app && npm run drill:offsite`. It downloads the newest sent file from the bucket, checks its SHA-256 against the
+one recorded when it was sent, unlocks it, restores it into a throwaway database on the same server
+(`zacc_drill_<date>`), compares row counts with the live database, runs the full books check, and deletes the
+throwaway database, pass or fail. The live database is only read. The last line says PASSED or FAILED; write it in
+the drill log below. `npm run drill:offsite -- <object key>` drills an older file.
 
 ### Downloading a backup by hand
 

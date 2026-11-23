@@ -51,6 +51,7 @@ simulates a dropped connection, and `r.fulfill({ status: 502, body: '<h1>Bad gat
 
 ## Other checks
 
+- `npm run drill:offsite`: the same drill on the newest off-site file, fetched back from the bucket (chapter 10).
 - `npm run drill:restore`: restores a backup into a scratch database and proves the books still verify (chapter 10).
 - `npm run test:load`: the load test against the 0.8 s target.
 - `npm run verify:books`: re-verifies every company's audit chain and ledger.
