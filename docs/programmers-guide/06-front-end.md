@@ -15,6 +15,7 @@ The screens are plain files the server sends as they are, except that the server
 | `paste.js` | `picturesFromClipboard()`: copied screenshots/photos as `File`s for the **📋 Paste** buttons beside photo pickers (app and Road page) |
 | `boot.js` | a start-up guard loaded before the app: if the app hasn't drawn its first screen after 6 seconds (an old phone, a script that failed to load), it shows "zAccountant could not start in this browser" with the errors, instead of a blank page |
 | `payee.js` | `payeeKey()`: the "same payee" key Banking uses to fill one choice into every line from the same payee (chapter 5, Banking) |
+| `projectPick.js` | project drop-downs on the desk and the Road page: `projectChoices()` (open projects, newest number first) and `projectLabel()` ("number · project · customer") |
 | `road.html`, `road.js`, `road-sw.js`, `road.webmanifest` | the phone's Road page at `/road`: its own small Vue app, the service worker that keeps a copy for no-signal starts, and the "add to Home Screen" description (chapter 5, Road page) |
 | `templates/` | CSV templates people download for imports |
 
