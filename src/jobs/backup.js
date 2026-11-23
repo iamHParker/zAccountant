@@ -9,13 +9,16 @@ import { existsSync } from 'node:fs';
 import pg from 'pg';
 
 /** pg_dump for the server's major version when several are installed (the Docker image has 16, 17 and 18). */
-export async function pgDumpFor(url) {
+export async function pgDumpFor(url) { return pgToolFor(url, 'pg_dump'); }
+
+/** A PostgreSQL client tool (pg_dump, pg_restore) matching the server's major version, or the one on the PATH. */
+export async function pgToolFor(url, tool) {
   const c = new pg.Client({ connectionString: url });
   await c.connect();
   let major;
   try { major = Math.floor(Number((await c.query('SHOW server_version_num')).rows[0].server_version_num) / 10000); } finally { await c.end(); }
-  const exact = `/usr/lib/postgresql/${major}/bin/pg_dump`;
-  return { major, bin: existsSync(exact) ? exact : 'pg_dump' };
+  const exact = `/usr/lib/postgresql/${major}/bin/${tool}`;
+  return { major, bin: existsSync(exact) ? exact : tool };
 }
 
 /** Stream a backup of `url` into an HTTP response. Resolves when done; rejects if pg_dump can't start or fails before sending. */

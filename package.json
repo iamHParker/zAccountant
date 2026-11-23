@@ -20,6 +20,7 @@
     "drill:restore": "node src/jobs/restoreDrill.js",
     "backup:offsite": "node src/jobs/offsiteBackup.js",
     "backup:decrypt": "node src/jobs/offsiteBackup.js decrypt",
+    "drill:offsite": "node src/jobs/offsiteDrill.js",
     "test:load": "node src/jobs/loadTest.js"
   },
   "license": "UNLICENSED",

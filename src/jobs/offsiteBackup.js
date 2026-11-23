@@ -101,6 +101,21 @@ export async function putObject(cfg, key, body, { fetchImpl = fetch, now = new D
   }
 }
 
+/** Download one object (the restore drill uses this to fetch a backup back from the bucket). */
+export async function getObject(cfg, key, { fetchImpl = fetch, now = new Date() } = {}) {
+  const path = `/${cfg.bucket}/${key}`;
+  const url = new URL(cfg.endpoint);
+  const headers = signV4({ method: 'GET', path, headers: { host: url.host }, payloadHash: sha256hex(Buffer.alloc(0)),
+    region: cfg.region, keyId: cfg.keyId, secret: cfg.secret, now });
+  delete headers.host;
+  const res = await fetchImpl(`${cfg.endpoint}${encodePath(path)}`, { method: 'GET', headers, signal: AbortSignal.timeout(10 * 60_000) });
+  if (!res.ok) {
+    const text = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+    throw new Error(`The storage service would not send the backup back (HTTP ${res.status}): ${text}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
 // ---------------------------------------------------------------- The nightly job
 
 /** pg_dump (custom format) of the whole database, into memory (fine at our size: the database is a few MB). */

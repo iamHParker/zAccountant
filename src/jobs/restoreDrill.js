@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { verifyAllBooks } from '../db/verify-books.js';
+import { pgToolFor } from './backup.js';
 
 const RTO_TARGET_HOURS = 4;
 
@@ -64,12 +65,14 @@ export async function restoreDrill({ sourceUrl, targetUrl, file = null, log = (l
       dir = await mkdtemp(join(tmpdir(), 'zacc-drill-'));
       dump = join(dir, 'backup.dump');
       await step('backup', async () => {
-        await run('pg_dump', ['--format=custom', '--no-owner', '--no-acl', `--file=${dump}`, `--dbname=${sourceUrl}`]);
+        await run((await pgToolFor(sourceUrl, 'pg_dump')).bin, ['--format=custom', '--no-owner', '--no-acl', `--file=${dump}`, `--dbname=${sourceUrl}`]);
         return { bytes: (await stat(dump)).size };
       });
     }
     await step('restore', async () => {
-      await run('pg_restore', ['--no-owner', '--no-acl', '--exit-on-error', `--dbname=${targetUrl}`, dump]);
+      // pg_restore matching the target server (the Docker image has 16, 17 and 18; an older one can't read a newer dump).
+      const { bin } = await pgToolFor(targetUrl, 'pg_restore');
+      await run(bin, ['--no-owner', '--no-acl', '--exit-on-error', `--dbname=${targetUrl}`, dump]);
       return {};
     });
 
