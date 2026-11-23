@@ -330,6 +330,10 @@
               <label>Start <input type="time" v-model="blockForm.start"></label>
               <label>End <input type="time" v-model="blockForm.end"></label>
             </div>
+            <template v-if="endsBefore(blockForm)">
+              <p class="small bad">The end is earlier than the start, so this reads as running past midnight. Check AM and PM: on an iPhone, an empty time box fills in the time it is now.</p>
+              <label class="check"><input type="checkbox" v-model="blockForm.overnight"> Yes, it ran past midnight</label>
+            </template>
             <label v-if="blockForm.type === 'travel' && (tripChoices.ahead.length || tripChoices.rest.length)">On a trip (optional)
               <select v-model="blockForm.tripKey"><option value="">No, on projects</option>
                 <option v-for="t in [...tripChoices.rest, ...tripChoices.ahead]" :value="t.key">{{ t.name }}</option></select></label>
@@ -513,6 +517,10 @@
               <label>Start <input type="time" v-model="timeForm.start"></label>
               <label>End <input type="time" v-model="timeForm.end"></label>
             </div>
+            <template v-if="endsBefore(timeForm)">
+              <p class="small bad">The end is earlier than the start, so this reads as running past midnight. Check AM and PM: on an iPhone, an empty time box fills in the time it is now.</p>
+              <label class="check"><input type="checkbox" v-model="timeForm.overnight"> Yes, it ran past midnight</label>
+            </template>
             <label>Breaks (h:mm) <input v-model.trim="timeForm.breaks" inputmode="decimal" placeholder="0:45"></label>
             <p class="small" :class="clockTime(timeForm.start, timeForm.end, timeForm.breaks)?.error ? 'bad' : 'muted'" v-if="clockTime(timeForm.start, timeForm.end, timeForm.breaks)">
               {{ clockTime(timeForm.start, timeForm.end, timeForm.breaks).error || clockTime(timeForm.start, timeForm.end, timeForm.breaks).text }}</p>

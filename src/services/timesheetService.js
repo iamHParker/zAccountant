@@ -199,7 +199,9 @@ async function checkDayTotal(db, companyId, userId, date, minutes, exceptId = nu
   const { rows: [r] } = await db.query(
     'SELECT coalesce(sum(minutes), 0)::int AS m FROM time_entries WHERE company_id = $1 AND user_id = $2 AND work_date = $3 AND id IS DISTINCT FROM $4',
     [companyId, userId, date, exceptId]);
-  if (r.m + minutes > 1440) throw new LedgerError(`That would put more than 24 hours on ${date}`);
+  const hm = (m) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+  // Say what is already there, so the person can see which entry is wrong (Homer, 2026-11-23).
+  if (r.m + minutes > 1440) throw new LedgerError(`That would put more than 24 hours on ${date}: the day already has ${hm(r.m)} h and this adds ${hm(minutes)} h`);
 }
 
 export async function createTimeEntry(pool, companyId, viewer, input, { actor = null } = {}) {

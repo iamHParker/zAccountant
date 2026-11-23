@@ -734,7 +734,14 @@ export async function acceptRoadItems(db, companyId, viewer, { itemIds, expenseA
     const out = [];
     for (const r of rows) {
       const card = isId(cardFor[r.id]) ? cardFor[r.id] : paidFromAccountId;
-      const one = await acceptRoadItem(c, companyId, viewer, r.id, { expenseAccountId, paidFromAccountId: card, tripId: r.kind === 'trip' ? null : tripId }, { actor });
+      let one;
+      try {
+        one = await acceptRoadItem(c, companyId, viewer, r.id, { expenseAccountId, paidFromAccountId: card, tripId: r.kind === 'trip' ? null : tripId }, { actor });
+      } catch (e) {
+        // Say which item stopped it, so the desk can open that one to fix (Homer, 2026-11-23).
+        if (e instanceof LedgerError) e.itemId = r.id;
+        throw e;
+      }
       out.push({ id: r.id, kind: r.kind, ...one });
     }
     return { accepted: out.length, items: out };

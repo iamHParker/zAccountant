@@ -295,6 +295,9 @@ fieldset.people legend { color: var(--muted); font-size: 13px; padding: 0 4px; }
 label.end { display: flex; align-items: flex-end; }
 /* Trips → From the road (the phone's inbox) and Your phone on the road (keys). */
 .road-item { border-top: 1px solid var(--line, #e5e7eb); padding: 8px 0; display: grid; gap: 6px; }
+.road-fix { border: 1px solid var(--line, #e5e7eb); border-left: 4px solid var(--brand); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; margin: 4px 0; }
+.road-fix h3 { margin: 0; }
+.road-fix p { margin: 0; }
 .photo-strip { display: flex; gap: 6px; flex-wrap: wrap; }
 .photo-strip img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line, #e5e7eb); }
 .road-keys summary { cursor: pointer; }

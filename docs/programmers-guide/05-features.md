@@ -180,7 +180,11 @@ keeps items in IndexedDB and sends them with its road key (see Security); each i
 `client_id`, so a resend changes nothing. A service worker keeps a copy of the page for no-signal starts (network
 first). Trips → From the road accepts an item in one transaction: a trip (new project numbers become jobs unless a
 job with that name or number exists; even shares via `evenShares`), a cost (`addTripCost` with idempotency key
-`road-<item id>`, photos copied), or travel time (a time entry for the sender). QR codes come from
+`road-<item id>`, photos copied), or travel time (a time entry for the sender). **Fix** on any inbox row (Homer, 2026-11-23) opens
+an inline form (`fixRoad` / `saveRoadFix` in `public/app.js`): "Save and accept" sends the changes as `data` with the
+accept (one transaction: `deskData` re-checks them like a new item), "Save, accept later" uses `PATCH …/road-items/:id`.
+A refused accept opens that item's Fix form with the reason; `acceptRoadItems` tags the failing item's error with
+`itemId` (sent in the 400 body) so Accept all can open the right one. QR codes come from
 `qrcode-generator` on the server (SVG). A **check** item (migration 033: date, from, amount, check number, typed
 invoice numbers, photos) shows on Sales instead; `listRoadItems` matches the typed numbers to unpaid invoices.
 The desk records it through the normal Receive payment form, then `POST …/road-items/:id/accept-check
