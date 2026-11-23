@@ -98,6 +98,7 @@ in the copy are intact. Run it monthly, and before Board Review #3:
 | Date | Database size | Minutes | Result | By |
 |---|---|---|---|---|
 | 2026-10-24 | dev copy, 13,223 rows, 49 companies | 0.03 | ok, 0 failures | Claude (local) |
+| 2026-11-23 | **production, off-site copy** `zaccountant-2026-11-23-pg18.dump.zbk` (15.8 MB) fetched back from R2, SHA-256 matched; 51 tables, 4,107 rows, 1 company, no row-count differences (`npm run drill:offsite`) | 0.1 | ok, 0 failures | Homer (Railway console) |
 
 ## 5. Load test
 

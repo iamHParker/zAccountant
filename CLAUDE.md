@@ -40,9 +40,11 @@ paid on every turn. When it passes about **120 lines**, split it, in the same PR
 ## Open items
 - DC $4,150 per-allowance withholding amount: no official 2026 source (latest FR-230 is 2018). Needs DC OTR
   confirmation before the Board certifies DC.
-- **Backups:** nightly off-site backup is built (`src/jobs/offsiteBackup.js`, pg_dump → AES-GCM → S3-compatible
-  bucket, migration 027); off until Homer creates the bucket and sets the `BACKUP_*` variables (runbook section 4).
-  Needs one real restore drill from the bucket before alpha (Dec 1).
+- **Backups:** nightly off-site backup is ON since 2026-11-23 (`src/jobs/offsiteBackup.js` → Cloudflare R2 bucket
+  `zaccountant-backups`, 90-day delete rule; keys and the encryption key are in Homer's 1Password). Restore drill of the
+  real off-site file passed 2026-11-23 (`npm run drill:offsite` in Railway's Console; log in runbook section 4).
+- `DEVELOPER_EMAILS` is not set in Railway yet (Homer has no Developer/Admin tab). Set it before Dec 1 so backup status,
+  beta reports and plan switching are visible (Homer 2026-11-23: not tonight).
 - **Edit sweep** (CPA review 2026-10-25, `docs/board/edit-sweep.md`): batches 1-5 done (PRs 52-56). Email change and
   password reset wait for outgoing email; "Later" items are listed there.
 - Tax-ready level 1 is built (see below). Level 2+ (printed forms, e-file) is not planned: a CPA partner does real
