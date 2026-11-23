@@ -123,6 +123,8 @@ phone. Press **+ Add person** to add one.
    **Project** (optional): the project name and site address. They print beside Bill To.
    **Project** (the list above the project block): pick it and the customer, the project block (name and site
    address) and the invoice number (the project number) fill in when they're empty.
+   The list is by project number, newest first (26-153 above 26-152, 25-107A after 25-108), and every entry reads
+   *number · project · customer*. The project lists on bill lines, trips and the Road page are in the same order.
    **⏱ Pull in unbilled time and costs** lists the project's billable hours from timesheets and the costs on bills
    marked "bill to client" that aren't on an invoice yet. Pick the rate for the hours (Eng Std Rate…) and the item for
    the costs, untick anything to leave for later, and press **Add … lines**. Each hour or cost can be billed only

@@ -216,7 +216,8 @@ then the desk's own `createJob` (same checks, row and audit, actor = the key per
 the phone keeps a project in IndexedDB as kind `project`, `sync()` sends projects first and marks them `accepted`
 (*On the list*), then fetches the summary again. Lookup (`projectList`) searches number, name, customer and site
 address on the phone's saved copy, so it works with no signal; 📍 Map opens Apple Maps on the site address.
-The list is in job-number order, highest first (`projectsByNumber`, the Time lists' sort). New project fills the number box
+The list is in job-number order, highest first (`projectsByNumber`, the Time lists' sort; it and every desk project
+drop-down share `public/projectPick.js`, which also gives every entry the same "number · project · customer" label). New project fills the number box
 with `nextNumber` (highest number in use + 1, keeping zero padding; a `YY-` series rolls to the current year's `-001`)
 and `numberClash` warns live when the number is on the list or waiting on the phone (Homer 2026-11-16).
 A 👤 Customers tab (`projectTab`, `customerList`, `editCustomerCard`; Homer 2026-11-21) lists the summary's customers
