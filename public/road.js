@@ -11,6 +11,7 @@ import { picturesFromClipboard } from '/paste.js';
 import { clockTime, clock12, nextDay, durationMinutes, hhmm } from '/clock.js';
 import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
 import { projectChoices, projectLabel as projectPickText } from '/projectPick.js';
+import { similarProjects } from '/projectSimilar.js';
 
 const KEY_STORE = 'zacc.roadKey';
 const SUMMARY_STORE = 'zacc.roadSummary';
@@ -502,6 +503,11 @@ createApp({
       if (same) { this.projectForm = null; this.openProjectKey = `s:${same.id}`; this.flash(`${name} is already on the list.`); return; }
       const clash = this.numberClash;
       if (clash && !confirm(`Number ${code} is already used by ${clash.name}. ${f.serverId ? 'Save' : 'Add this project'} anyway?`)) return;
+      // Same claim number or street as a project already on the list (Homer, 2026-11-23): ask, so time and costs stay together.
+      if (!f.serverId && !clash) {
+        const hits = similarProjects(list, { name, code, address: f.address });
+        if (hits.length && !confirm(`This looks like a project you already have:\n${hits.slice(0, 3).map((h) => `${projectPickText(h.job)} (${h.why})`).join('\n')}\n\nAdd a new project anyway?`)) return;
+      }
       const newCust = f.customerId === NEW_CUSTOMER;
       if (newCust && !f.customerName.trim()) { this.flash('Type the new customer\'s name, or choose None.', 'bad'); return; }
       const data = { code: f.code.trim() || null, name, address: f.address.trim() || null,

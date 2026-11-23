@@ -461,3 +461,8 @@ button.danger { background: var(--bad); border-color: var(--bad); color: var(--c
 button.link.danger-link { color: var(--bad); }
 /* Road → New project: a number already in use (Homer, 2026-11-16). */
 .warn-line { color: var(--bad); font-weight: 600; font-size: .9rem; margin: .25rem 0 .5rem; }
+/* "This looks like a project you already have" (public/projectSimilar.js): a gentle warning, not an error. */
+.similar-box { background: var(--warn-bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 8px 0; }
+.similar-box ul { margin: 4px 0 8px; padding-left: 20px; }
+.similar-box p { margin: 4px 0; }
+.grid4 > .span-all { grid-column: 1 / -1; }

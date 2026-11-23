@@ -10,6 +10,7 @@ import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
 import { clockTime, clock12, hhmm, nextDay } from '/clock.js';
 import { payeeKey, payeeRuleText } from '/payee.js';
 import { projectChoices, projectLabel } from '/projectPick.js';
+import { similarProjects } from '/projectSimilar.js';
 
 // Today's date on this computer's own calendar (Central time for Homer), as YYYY-MM-DD. toISOString() alone gives the
 // date in London (UTC), which is already tomorrow after 6 PM Central (Homer, 2026-11-15). Same rule as road.js.
@@ -379,7 +380,7 @@ createApp({
       ],
       ar: { panel: 'docs', view: 'open', docs: [], docSort: { invoice: docSort('invoice'), bill: docSort('bill') }, contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
         pdfOver: false, pdfBusy: false, roadChecks: [], roadBuys: [], buys: [], buyView: 'recent', buyAcct: {}, buyCard: {}, buyBusy: false, plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
-        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null, del: null }, pull: null },
+        jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null, del: null, merge: null, similar: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
       road: { items: [], dismissed: [], keys: [], keyName: '', made: null, expenseId: '', paidFromId: '', tripFor: {}, cardFor: {}, busy: false, fix: null },
@@ -1638,11 +1639,17 @@ createApp({
     jobChoices(keepId) { return projectChoices(this.ar.jobs, keepId); },
     jobPickLabel(j) { return projectLabel(j); },
     editProject(j) {
-      this.ar.proj.editId = j?.id ?? null; this.ar.proj.show = true;
+      this.ar.proj.editId = j?.id ?? null; this.ar.proj.show = true; this.ar.proj.similar = null;
       this.ar.proj.form = j ? { name: j.name, code: j.code ?? '', customerId: j.customerId ?? '', address: j.address ?? '' } : blankProject();
     },
-    async saveProject() {
+    async saveProject(anyway = false) {
       const p = this.ar.proj; const f = { ...p.form, customerId: p.form.customerId || null };
+      // A new project that looks like one already on the list (same claim number or street): ask first (public/projectSimilar.js).
+      if (!p.editId && !anyway) {
+        const hits = similarProjects(this.ar.jobs, f);
+        if (hits.length) { p.similar = hits; return; }
+      }
+      p.similar = null;
       const r = p.editId
         ? await this.run(() => api('PATCH', `${this.arBase()}/jobs/${p.editId}`, { ...f, isActive: this.ar.jobs.find((j) => j.id === p.editId)?.isActive !== false }), 'Project saved.')
         : await this.run(() => api('POST', `${this.arBase()}/jobs`, f), 'Project added.');
@@ -1654,10 +1661,10 @@ createApp({
       if (popup && this.ar.showDoc) { this.ar.doc.jobId = r.id; this.pickDocProject(); }
     },
     quickAddProject() {
-      Object.assign(this.ar.proj, { editId: null, popup: true, form: { ...blankProject(), customerId: this.ar.doc.contactId || '' } });
+      Object.assign(this.ar.proj, { editId: null, popup: true, similar: null, form: { ...blankProject(), customerId: this.ar.doc.contactId || '' } });
       this.ar.doc.jobId = '';
     },
-    closeProjectPopup() { Object.assign(this.ar.proj, { popup: false, form: blankProject() }); },
+    closeProjectPopup() { Object.assign(this.ar.proj, { popup: false, form: blankProject(), similar: null }); },
     async toggleProject(j) {
       if (await this.run(() => api('PATCH', `${this.arBase()}/jobs/${j.id}`, { name: j.name, code: j.code, customerId: j.customerId, isActive: !j.isActive }),
         j.isActive ? 'Project closed.' : 'Project reopened.')) this.loadAr();
@@ -1666,6 +1673,7 @@ createApp({
     // list shows that and asks before anything is deleted. Time, trip shares and purchases can be moved to another
     // project first; an invoice or bill that names it has to be edited by hand (a saved record is never changed here).
     async askDeleteProject(j) {
+      this.ar.proj.merge = null;
       const r = await this.run(() => api('GET', `${this.arBase()}/jobs/${j.id}/uses`));
       if (r) this.ar.proj.del = { ...r, toJobId: '' };
     },
@@ -1680,6 +1688,25 @@ createApp({
         this.ar.proj.del = null;
         await this.loadAr();
       } else await this.askDeleteProject(d.project); // something changed meanwhile: show what uses it now
+    },
+    // Merge two projects for the same job (Homer, 2026-11-23: 26-143 and 26-151 were one claim). Pick the project to keep;
+    // the server answers what would move (preview, nothing changed) and the panel shows it before anything happens.
+    startMergeProject(j) { this.ar.proj.del = null; this.ar.proj.merge = { from: j, toJobId: '', preview: null }; },
+    async previewMerge() {
+      const m = this.ar.proj.merge;
+      m.preview = null;
+      if (!m?.toJobId) return;
+      const r = await this.run(() => api('POST', `${this.arBase()}/jobs/${m.from.id}/merge`, { toJobId: m.toJobId, preview: true }));
+      if (r && this.ar.proj.merge === m) m.preview = r;
+    },
+    async mergeProject() {
+      const m = this.ar.proj.merge;
+      if (!m?.preview || m.preview.problems.length) return;
+      const r = await this.run(() => api('POST', `${this.arBase()}/jobs/${m.from.id}/merge`, { toJobId: m.toJobId }));
+      if (!r) { await this.previewMerge(); return; } // something changed meanwhile: show what it would do now
+      this.ar.proj.merge = null;
+      this.flash(`Merged ${r.from.name} into ${r.to.name}${r.deleted ? ` and deleted ${r.from.code || r.from.name}` : `; ${r.from.code || r.from.name} is closed (void invoices keep its name in their history)`}.`);
+      await this.loadAr();
     },
     // Folder names pasted from File Explorer ("Copy as path") become projects: 2601 Smith Residence → number 2601.
     async pasteProjects(preview) {

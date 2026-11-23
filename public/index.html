@@ -1277,7 +1277,7 @@
 
       <!-- "+ Add new project…" in the invoice's Project list: a small pop-up; saving picks it on the invoice. -->
       <div class="overlay" v-if="ar.proj.popup" @click.self="closeProjectPopup">
-        <form class="card dialog" @submit.prevent="saveProject">
+        <form class="card dialog" @submit.prevent="saveProject()">
           <h2>New project</h2>
           <div class="grid2">
             <label>Number <input v-model.trim="ar.proj.form.code" maxlength="30" placeholder="2601"></label>
@@ -1286,6 +1286,12 @@
           <label v-if="S.kind === 'invoice'">Customer (optional) <select v-model="ar.proj.form.customerId" @change="ar.proj.form.customerId === NEW_CONTACT && quickAddContact('proj')"><option value="">None</option>
             <option :value="NEW_CONTACT">+ Add new customer…</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
           <label>Site address (optional) <textarea v-model="ar.proj.form.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
+          <div class="similar-box" v-if="ar.proj.similar && !ar.proj.editId" role="alert">
+            <p><strong>This looks like a project you already have:</strong></p>
+            <ul><li v-for="h in ar.proj.similar" :key="h.job.id">{{ jobPickLabel(h.job) }} <span class="muted small">({{ h.why }})</span></li></ul>
+            <p class="muted small">Use that one instead, so the time and costs stay together. A second claim on the same house can be its own project.</p>
+            <button type="button" @click="saveProject(true)">Add it anyway</button> <button type="button" @click="ar.proj.similar = null">Go back</button>
+          </div>
           <button class="primary">Add project</button> <button type="button" @click="closeProjectPopup">Cancel</button>
         </form>
       </div>
@@ -1294,12 +1300,18 @@
         <div class="row"><h2>Projects</h2>
           <button v-if="can('invoices') || can('admin')" @click="ar.proj.show && !ar.proj.editId ? (ar.proj.show = false) : editProject(null)">+ New project</button></div>
         <p class="muted small">The same list your timesheets use for jobs. Name each project on its invoice, and on a bill line for a cost you pass on to the client.</p>
-        <form v-if="ar.proj.show" @submit.prevent="saveProject" class="grid4">
+        <form v-if="ar.proj.show" @submit.prevent="saveProject()" class="grid4">
           <label>Number <input v-model.trim="ar.proj.form.code" maxlength="30" placeholder="2601"></label>
           <label>Name <input v-model.trim="ar.proj.form.name" maxlength="80" required placeholder="2601 Smith Residence"></label>
           <label v-if="S.kind === 'invoice'">Customer (optional) <select v-model="ar.proj.form.customerId" @change="ar.proj.form.customerId === NEW_CONTACT && quickAddContact('proj')"><option value="">None</option>
             <option :value="NEW_CONTACT">+ Add new customer…</option><option v-for="c in ar.contacts" :value="c.id">{{ c.name }}</option></select></label>
           <label>Site address (optional) <textarea v-model="ar.proj.form.address" rows="2" maxlength="300" placeholder="Street&#10;City, State ZIP"></textarea></label>
+          <div class="similar-box span-all" v-if="ar.proj.similar && !ar.proj.editId" role="alert">
+            <p><strong>This looks like a project you already have:</strong></p>
+            <ul><li v-for="h in ar.proj.similar" :key="h.job.id">{{ jobPickLabel(h.job) }} <span class="muted small">({{ h.why }})</span></li></ul>
+            <p class="muted small">Use that one instead, so the time and costs stay together. A second claim on the same house can be its own project.</p>
+            <button type="button" @click="saveProject(true)">Add it anyway</button> <button type="button" @click="ar.proj.similar = null">Go back</button>
+          </div>
           <div><button class="primary">{{ ar.proj.editId ? 'Save project' : 'Add project' }}</button> <button type="button" @click="ar.proj.show = false; ar.proj.editId = null">Cancel</button></div>
         </form>
         <!-- Delete a project (Homer, 2026-11-16): what still uses it, a way to move those, and a last check before deleting. -->
@@ -1324,6 +1336,25 @@
             </template>
           </template>
         </div>
+        <!-- Merge two projects for the same job (Homer, 2026-11-23): pick the one to keep, see what moves, then merge. -->
+        <div class="delete-box" v-if="ar.proj.merge" role="alertdialog" aria-label="Merge project">
+          <h3>Merge {{ jobPickLabel(ar.proj.merge.from) }} into another project</h3>
+          <p class="muted small">Everything on it moves to the project you keep: time, trip shares, purchases, items from the road, invoices and bills. Then this one is deleted (or closed, if void invoices still name it).</p>
+          <label>Keep this project <select v-model="ar.proj.merge.toJobId" class="auto" @change="previewMerge"><option value="">Choose a project…</option>
+            <option v-for="p in jobChoices(null).filter(x => x.id !== ar.proj.merge.from.id)" :value="p.id">{{ jobPickLabel(p) }}</option></select></label>
+          <template v-if="ar.proj.merge.preview">
+            <template v-if="ar.proj.merge.preview.lines.length">
+              <p>This moves to {{ ar.proj.merge.preview.to.name }}:</p>
+              <ul><li v-for="l in ar.proj.merge.preview.lines">{{ l }}</li></ul>
+            </template>
+            <p v-else>Nothing uses {{ ar.proj.merge.from.name }} yet, so merging just deletes it.</p>
+            <p class="muted small" v-if="ar.proj.merge.preview.counts.invoices || ar.proj.merge.preview.counts.bills">An invoice or bill is re-saved the way Edit does it: the old copy is voided and a corrected copy with the same number, date and amounts names {{ ar.proj.merge.preview.to.name }}. Payments move with it. Your totals don't change.</p>
+            <p class="muted small" v-if="ar.proj.merge.preview.keepClosed">The void copies of its invoices or bills keep their history, so {{ ar.proj.merge.from.code || ar.proj.merge.from.name }} is closed instead of deleted: it drops off every pick list.</p>
+            <ul v-if="ar.proj.merge.preview.problems.length"><li v-for="x in ar.proj.merge.preview.problems" class="bad">{{ x }}</li></ul>
+            <button class="danger" :disabled="ar.proj.merge.preview.problems.length > 0" @click="mergeProject">Merge into {{ ar.proj.merge.preview.to.code || ar.proj.merge.preview.to.name }}</button>
+          </template>
+          <button @click="ar.proj.merge = null">Cancel</button>
+        </div>
         <p class="hint" v-if="!ar.jobs.length">No projects yet. Add one above, or paste your project folder names below.</p>
         <table class="data" v-else>
           <thead><tr>
@@ -1336,6 +1367,7 @@
               <td class="actions"><template v-if="can('invoices') || can('admin')">
                 <button class="link" @click="editProject(j)">edit</button>
                 <button class="link" @click="toggleProject(j)">{{ j.isActive ? 'close' : 'reopen' }}</button>
+                <button class="link" @click="startMergeProject(j)">merge</button>
                 <button class="link danger-link" @click="askDeleteProject(j)">delete</button></template></td>
             </tr>
           </tbody>

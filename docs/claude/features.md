@@ -36,6 +36,9 @@ that aren't obvious from the code. Read the entry for a feature before changing 
   A line of numbers only ("26-147, 26-148") = those projects (`typedProjects`/`numberList`), never one new project.
 - Delete a project (desk Sales → Projects → delete): `projectUses` / `moveProjectUses` / `deleteProject` in
   projectService.js; only when nothing uses it; invoices and bills are never moved; 0% trip lines go with it.
+- Merge projects (Homer 2026-11-23): Sales → Projects → merge → `mergeProjects` (projectService.js). Invoices/bills are
+  re-saved as void + corrected copy (never updated); the old project is closed, not deleted, once any void document
+  names it. Duplicate warning before adding a project: `public/projectSimilar.js` (claim number or street), desk + Road.
 - Receipt reading (`src/services/receiptReader.js`, `public/receipt.js`): photo → Claude → vendor/total/date fill empty
   cost boxes, saves nothing. Off until Homer sets `ANTHROPIC_API_KEY` (runbook step 12). Never log the picture.
 - Book file `.zacc` (`src/services/bookFileService.js`): zip of every company table + manifest SHA-256s; QuickBooks

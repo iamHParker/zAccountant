@@ -514,6 +514,24 @@ and asks before anything is deleted:
 - *An invoice or bill names it* (shown in red): those are never moved for you. Edit that invoice or bill to pick the
   right project, then press delete again. Or just **close** the project: it drops off every pick list.
 
+**Two projects for one job? Merge them.** Sometimes the same job ends up on the list twice (say 26-143 and 26-151 for
+one insurance claim), and the trip costs land on one while the office time lands on the other, so neither invoice can
+pull in everything. Press **merge** on the row of the one you *don't* want, and choose the project to **Keep** in the
+box that opens. Before anything changes, the box lists what will move: time entries, trip shares, purchases, items
+waiting from the road, invoices and bills. Press **Merge into …** and it all moves in one step.
+- An invoice or bill is never changed in place, so each one is re-saved the way **Edit** does it: the old copy is
+  voided and a corrected copy with the same number, date, lines and amounts names the project you kept. Payments move
+  with it. Your totals don't change.
+- The empty project is then deleted. If void invoices or bills still name it (including the old copies the merge just
+  voided), it is **closed** instead: it drops off every pick list, and the history still shows what it was.
+- If both projects are on the same trip and part of that trip is already billed, the box says so and won't merge: open
+  the trip, give one of them 0% (or void that invoice), then merge.
+
+**"This looks like a project you already have."** When you add a project whose name has the same claim number
+(like OK007208-01) or whose site address has the same street as one already on the list, zAccountant shows it and asks
+first, at your desk and on the Road page. Press **Go back** to use the one you have, or **Add it anyway** (a second
+claim on the same house can rightly be its own project).
+
 To add many at once from your project folders:
 
 1. In File Explorer, open the folder that holds your project folders and select them (Ctrl+A for all).
