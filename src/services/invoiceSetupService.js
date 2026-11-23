@@ -11,7 +11,7 @@ import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const KINDS = ['service', 'expense'];
+const KINDS = ['service', 'expense', 'per_day'];
 export const MAX_LOGO_BYTES = 1_048_576;
 
 /**
@@ -29,6 +29,7 @@ export const STARTER_ITEMS = [
   { name: 'Lodging (motel)', kind: 'expense' },
   { name: 'Rental car', kind: 'expense' },
   { name: 'Airfare', kind: 'expense' },
+  { name: 'Per diem (meals)', kind: 'per_day' },
 ];
 
 const lockCompany = async (c, companyId) => {
@@ -68,7 +69,7 @@ async function checkItem(c, companyId, input, partial, errors) {
   }
   if (!partial || input.kind !== undefined) {
     out.kind = input.kind ?? 'service';
-    if (!KINDS.includes(out.kind)) errors.push('kind must be service (by the hour) or expense (a cost passed on)');
+    if (!KINDS.includes(out.kind)) errors.push('kind must be service (by the hour), expense (a cost passed on) or per_day (days × a daily rate)');
   }
   if (!partial || input.rate !== undefined) {
     if (input.rate == null || input.rate === '') out.rateCents = null;

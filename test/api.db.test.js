@@ -345,7 +345,7 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     const cust = (await owner.c.call('POST', `${base}/customers`, { name: 'Pool Builder Inc', address: '1 Main St\nIrving, TX 75061', termsDays: 20 })).body;
     const starter = await owner.c.call('POST', `${base}/invoice-items/starter`, { accountId: A['4100'] });
     assert.equal(starter.status, 200, JSON.stringify(starter.body));
-    assert.equal(starter.body.added, 10);
+    assert.equal(starter.body.added, 11); // 10 + "Per diem (meals)" by the day (2026-11-23);
     assert.equal((await owner.c.call('POST', `${base}/invoice-items/starter`, { accountId: A['4100'] })).body.added, 0, 'no duplicates');
     const std = starter.body.items.find((x) => x.name === 'Eng Std Rate');
     const upd = await owner.c.call('PATCH', `${base}/invoice-items/${std.id}`, { rate: '425', taxable: true });
@@ -392,7 +392,7 @@ test('HTTP API', { skip: !hasDb && 'DATABASE_URL not set' }, async (t) => {
     // Staff may pin the tax rate (they write invoices) but not change rates, the letterhead or the logo.
     const staff = await newUser('inv-staff@example.com');
     await owner.c.call('POST', `${base}/members`, { email: 'inv-staff@example.com', role: 'staff' });
-    assert.equal((await staff.c.call('GET', `${base}/invoice-items`)).body.length, 10);
+    assert.equal((await staff.c.call('GET', `${base}/invoice-items`)).body.length, 11);
     assert.equal((await staff.c.call('PUT', `${base}/default-tax-rate`, { rate: '' })).status, 200);
     assert.equal((await staff.c.call('PATCH', `${base}/invoice-items/${std.id}`, { rate: '1' })).status, 403);
     assert.equal((await staff.c.call('PUT', `${base}/letterhead`, { address: 'x' })).status, 403);

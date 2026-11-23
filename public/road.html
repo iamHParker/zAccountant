@@ -490,6 +490,15 @@
               </div>
               <p class="muted small" v-if="mileageText"><span class="amt">{{ mileageText }}</span></p>
             </template>
+            <template v-else-if="costForm.kind === 'per_diem'">
+              <div class="grid2">
+                <label>Days <input v-model.trim="costForm.days" inputmode="decimal" placeholder="3 (or 2.75)" required></label>
+                <label>Rate per day ($) <input v-model.trim="costForm.dayRate" inputmode="decimal" placeholder="e.g. 68.00" required></label>
+              </div>
+              <p class="muted small">Meals for the days away, no receipt. Your own rate, or the city's
+                <a href="https://www.gsa.gov/travel/plan-book/per-diem-rates" target="_blank" rel="noopener">GSA meals rate</a> (75% on the first and last day: 2.75 for three days).</p>
+              <p class="muted small" v-if="perDiemText"><span class="amt">{{ perDiemText }}</span></p>
+            </template>
             <label v-else>Amount ($) <input class="amt" v-model.trim="costForm.amount" inputmode="decimal" placeholder="0.00" required autocomplete="off"></label>
             <label>Paid to (optional) <input v-model="costForm.vendor" maxlength="120" placeholder="Southwest, Avis, NTTA…"></label>
             <label>What it was <input v-model="costForm.description" maxlength="300" :placeholder="kinds[costForm.kind]"></label>
@@ -497,8 +506,8 @@
               <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
               <label class="photo-btn">🖼 Choose photo<input type="file" accept="image/*" multiple @change="addPhotos"></label>
               <button type="button" class="photo-btn" @click="pastePhotos">📋 Paste</button>
-              <button type="button" class="photo-btn" v-if="canRead && costForm.photos.length && costForm.kind !== 'mileage'" :disabled="reading" @click="readReceipt">{{ reading ? 'Reading the receipt…' : '✨ Fill in from the receipt' }}</button></div>
-            <p class="muted small" v-if="canRead && !costForm.photos.length && costForm.kind !== 'mileage'">Take or paste the receipt first: the amount, date and who was paid fill in from it.</p>
+              <button type="button" class="photo-btn" v-if="canRead && costForm.photos.length && !['mileage', 'per_diem'].includes(costForm.kind)" :disabled="reading" @click="readReceipt">{{ reading ? 'Reading the receipt…' : '✨ Fill in from the receipt' }}</button></div>
+            <p class="muted small" v-if="canRead && !costForm.photos.length && !['mileage', 'per_diem'].includes(costForm.kind)">Take or paste the receipt first: the amount, date and who was paid fill in from it.</p>
             <div class="photo-strip" v-if="costForm.photos.length">
               <span v-for="(p, i) in costForm.photos" class="photo-thumb"><img :src="p.dataUrl" alt="Receipt"><button type="button" class="link" v-if="!photoSent(costForm, p)" @click="costForm.photos.splice(i, 1)">remove</button></span>
             </div>

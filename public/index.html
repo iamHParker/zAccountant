@@ -795,6 +795,10 @@
                     <label>Miles <input v-model.trim="road.fix.data.miles" inputmode="decimal"></label>
                     <label>Rate per mile ($) <input v-model.trim="road.fix.data.mileRate" inputmode="decimal"></label>
                   </template>
+                  <template v-else-if="road.fix.data.kind === 'per_diem'">
+                    <label>Days <input v-model.trim="road.fix.data.days" inputmode="decimal"></label>
+                    <label>Rate per day ($) <input v-model.trim="road.fix.data.dayRate" inputmode="decimal"></label>
+                  </template>
                   <label v-else>Amount ($) <input v-model.trim="road.fix.data.amount" inputmode="decimal"></label>
                 </div>
               </template>
@@ -1023,7 +1027,8 @@
                   <option :value="COMMENT_LINE">Comment (text only, no amount)</option>
                   <option v-if="can('admin')" :value="NEW_CONTACT">+ Add new rate…</option>
                   <optgroup label="By the hour"><option v-for="it in items.filter(x => x.kind === 'service')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
-                  <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
+                  <optgroup label="Costs passed on"><option v-for="it in items.filter(x => x.kind === 'expense')" :value="it.id">{{ itemLabel(it) }}</option></optgroup>
+                  <optgroup label="By the day (per diem)"><option v-for="it in items.filter(x => x.kind === 'per_day')" :value="it.id">{{ itemLabel(it) }}</option></optgroup></select></td>
                 <td class="w150"><input type="date" v-model="l.serviceDate" @blur="sortLines"></td>
                 <td><input v-model="l.description" maxlength="300" placeholder="e.g. Report, Site visit">
                   <span v-if="l.from" class="tag" :title="'Billed once: this line is linked to its ' + (l.timeEntryId ? 'time entry' : 'cost')">from {{ l.from }}</span></td>
@@ -1265,8 +1270,8 @@
           <h2>New rate or item</h2>
           <div class="grid2">
             <label>Name <input v-model="inv.item.name" maxlength="80" required placeholder="Eng Std Rate"></label>
-            <label>Billed <select v-model="inv.item.kind"><option value="service">By the hour (hours × rate)</option><option value="expense">Cost passed on (usually 1 × cost)</option></select></label>
-            <label>{{ inv.item.kind === 'service' ? 'Hourly rate' : 'Price (optional)' }} <input v-model="inv.item.rate" inputmode="decimal" class="num" placeholder="0.00"></label>
+            <label>Billed <select v-model="inv.item.kind"><option value="service">By the hour (hours × rate)</option><option value="expense">Cost passed on (usually 1 × cost)</option><option value="per_day">By the day: per diem (days × daily rate)</option></select></label>
+            <label>{{ inv.item.kind === 'service' ? 'Hourly rate' : inv.item.kind === 'per_day' ? 'Rate per day' : 'Price (optional)' }} <input v-model="inv.item.rate" inputmode="decimal" class="num" placeholder="0.00"></label>
             <label>Income account <select v-model="inv.item.accountId" required><option value="">Choose…</option><option v-for="a in incomeAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
           </div>
           <label class="check"><input type="checkbox" v-model="inv.item.taxable"> Charge sales tax on it</label>
@@ -1728,6 +1733,10 @@
                       <label>Miles <input v-model.trim="road.fix.data.miles" inputmode="decimal"></label>
                       <label>Rate per mile ($) <input v-model.trim="road.fix.data.mileRate" inputmode="decimal"></label>
                     </template>
+                    <template v-else-if="road.fix.data.kind === 'per_diem'">
+                      <label>Days <input v-model.trim="road.fix.data.days" inputmode="decimal"></label>
+                      <label>Rate per day ($) <input v-model.trim="road.fix.data.dayRate" inputmode="decimal"></label>
+                    </template>
                     <label v-else>Amount ($) <input v-model.trim="road.fix.data.amount" inputmode="decimal"></label>
                   </div>
                 </template>
@@ -1981,18 +1990,25 @@
             <p class="muted small" v-if="trip.cost.roadItem">Sent from your phone and not in the books yet. Saving puts it in the books with your changes and its photos.</p>
             <p class="muted small" v-if="trip.cost.bookingId">Paying for the booking {{ trip.cost.bookingText }}. Saving puts the cost in the books and marks the booking paid.</p>
             <div class="chips">
-              <button type="button" v-for="(label, k) in { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' }"
+              <button type="button" v-for="(label, k) in COST_KINDS"
                 :class="{ active: (trip.cost.kind || 'other') === k }" @click="pickCostKind(k)">{{ label }}</button>
             </div>
             <div class="grid2">
               <label>Date <input type="date" v-model="trip.cost.date" required></label>
               <label>{{ trip.cost.kind === 'mileage' ? 'Vehicle (optional)' : 'Paid to (optional)' }} <input v-model="trip.cost.vendor" maxlength="120" :placeholder="trip.cost.kind === 'mileage' ? 'my truck' : 'Southwest, Avis, NTTA…'"></label>
-              <label>What it was <input v-model="trip.cost.description" maxlength="300" :placeholder="{ airfare: 'Airfare SAT-DAL', rental_car: 'Rental car', lodging: 'Hotel, 2 nights', tolls: 'Tolls', mileage: 'SAT to site and back' }[trip.cost.kind] || 'Description'"></label>
+              <label>What it was <input v-model="trip.cost.description" maxlength="300" :placeholder="{ airfare: 'Airfare SAT-DAL', rental_car: 'Rental car', lodging: 'Hotel, 2 nights', tolls: 'Tolls', mileage: 'SAT to site and back', per_diem: 'Filled in if left empty' }[trip.cost.kind] || 'Description'"></label>
               <template v-if="trip.cost.kind === 'mileage'">
                 <label>Miles <input v-model="trip.cost.miles" inputmode="decimal" class="num" placeholder="212.4" required></label>
                 <label>Rate per mile ($) <input v-model="trip.cost.mileRate" inputmode="decimal" class="num" placeholder="e.g. 0.70" required>
                   <span class="muted small">The IRS standard mileage rate for the year (irs.gov), or your own.</span></label>
                 <p class="num">= {{ money(mileageCents(trip.cost)) }}</p>
+              </template>
+              <template v-else-if="trip.cost.kind === 'per_diem'">
+                <label>Days <input v-model="trip.cost.days" inputmode="decimal" class="num" placeholder="3 (or 2.75)" required>
+                  <span class="muted small">2.75 for three days at 75% on the first and last day, as GSA does.</span></label>
+                <label>Rate per day ($) <input v-model="trip.cost.dayRate" inputmode="decimal" class="num" placeholder="e.g. 68.00" required>
+                  <span class="muted small">Your own, or the city's <a href="https://www.gsa.gov/travel/plan-book/per-diem-rates" target="_blank" rel="noopener">GSA meals rate</a>.</span></label>
+                <p class="num">= {{ money(perDiemCents(trip.cost)) }}</p>
               </template>
               <label v-else>Amount ($) <input v-model="trip.cost.amount" inputmode="decimal" class="num" placeholder="0.00" required></label>
               <label>Expense account <select v-model="trip.cost.expenseAccountId" required><option value="">Choose…</option>
@@ -2001,12 +2017,12 @@
                 <option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}{{ a.type === 'equity' ? ' (paid personally)' : '' }}</option></select></label>
             </div>
             <div class="photo-pick" @dragover.prevent @drop.prevent="dropTripCostPhotos">
-              <strong>Receipt photos</strong> <span class="muted small">(optional{{ siteFeatures.receiptReading && trip.cost.kind !== 'mileage' ? '; add one first and the amount, date and who was paid fill in from it. You can drag a receipt picture here' : '' }})</span>
+              <strong>Receipt photos</strong> <span class="muted small">(optional{{ siteFeatures.receiptReading && !['mileage', 'per_diem'].includes(trip.cost.kind) ? '; add one first and the amount, date and who was paid fill in from it. You can drag a receipt picture here' : '' }})</span>
               <p class="muted small" v-if="trip.cost.keptPhotos">{{ trip.cost.keptPhotos }} photo{{ trip.cost.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected cost.</p>
               <div class="row wrap">
                 <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addTripCostPhotos"></label>
                 <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addTripCostPhotos"></label> <button type="button" @click="pastePhotos('addTripCostPhotos')">📋 Paste</button>
-                <button type="button" v-if="siteFeatures.receiptReading && trip.cost.photos.length && trip.cost.kind !== 'mileage'" :disabled="trip.cost.reading" @click="readTripReceipt">{{ trip.cost.reading ? 'Reading the receipt…' : '✨ Fill in from the receipt' }}</button>
+                <button type="button" v-if="siteFeatures.receiptReading && trip.cost.photos.length && !['mileage', 'per_diem'].includes(trip.cost.kind)" :disabled="trip.cost.reading" @click="readTripReceipt">{{ trip.cost.reading ? 'Reading the receipt…' : '✨ Fill in from the receipt' }}</button>
                 <span class="muted small" v-if="trip.cost.photoBusy">Preparing photo…</span>
               </div>
               <div class="row wrap" v-if="trip.cost.photos.length">
@@ -3110,7 +3126,7 @@
           Leave the price empty for costs that differ every time.</p>
         <table class="data" v-if="items.length">
           <thead><tr><th>Name</th><th>Billed</th><th class="num">Rate / price</th><th>Taxable</th><th>Income account</th><th></th></tr></thead>
-          <tr v-for="it in items" :class="{ muted: !it.isActive }"><td>{{ it.name }}</td><td>{{ it.kind === 'service' ? 'by the hour' : 'cost passed on' }}</td>
+          <tr v-for="it in items" :class="{ muted: !it.isActive }"><td>{{ it.name }}</td><td>{{ it.kind === 'service' ? 'by the hour' : it.kind === 'per_day' ? 'by the day' : 'cost passed on' }}</td>
             <td class="num">{{ it.rateCents == null ? 'type on invoice' : money(it.rateCents) }}</td><td>{{ it.taxable ? 'yes' : '' }}</td>
             <td>{{ it.accountCode }} · {{ it.accountName }}</td>
             <td class="actions"><button class="link" @click="editItem(it)">edit</button> <button class="link" @click="toggleItem(it)">{{ it.isActive ? 'hide' : 'show' }}</button></td></tr>
@@ -3121,8 +3137,8 @@
           <h3>{{ inv.editId ? 'Change ' + inv.item.name : 'Add a rate or item' }}</h3>
           <div class="grid4">
             <label>Name <input v-model="inv.item.name" maxlength="80" required></label>
-            <label>Billed <select v-model="inv.item.kind"><option value="service">By the hour (hours × rate)</option><option value="expense">Cost passed on (usually 1 × cost)</option></select></label>
-            <label>{{ inv.item.kind === 'service' ? 'Hourly rate' : 'Price (optional)' }} <input v-model="inv.item.rate" inputmode="decimal" class="num" placeholder="0.00"></label>
+            <label>Billed <select v-model="inv.item.kind"><option value="service">By the hour (hours × rate)</option><option value="expense">Cost passed on (usually 1 × cost)</option><option value="per_day">By the day: per diem (days × daily rate)</option></select></label>
+            <label>{{ inv.item.kind === 'service' ? 'Hourly rate' : inv.item.kind === 'per_day' ? 'Rate per day' : 'Price (optional)' }} <input v-model="inv.item.rate" inputmode="decimal" class="num" placeholder="0.00"></label>
             <label>Income account <select v-model="inv.item.accountId" required><option value="">Choose…</option><option v-for="a in incomeAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
           </div>
           <label class="check"><input type="checkbox" v-model="inv.item.taxable"> Charge sales tax on it</label>

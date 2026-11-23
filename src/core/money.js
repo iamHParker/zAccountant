@@ -129,3 +129,20 @@ export function mileageAmount(miles, rate) {
   const rc = Number(r4) / 100; // cents per mile, e.g. 72.5
   return { miles: `${m[1] || 0}${m[2] ? `.${m[2]}` : ''}`, rateCentsText: String(Number(rc.toFixed(2))), amountCents: cents };
 }
+
+/**
+ * Per diem: days (up to 2 decimals, e.g. "3" or "2.75" for 75% first and last days) × a daily rate in dollars
+ * ("59" or "59.00"). Returns { days, dayRateCents, amountCents } or null if either isn't a number or is zero.
+ * Exact, rounded half-up once: 2.75 days × $59.00 = $162.25 (275 × 5900 / 100 = 16225).
+ */
+export function perDiemAmount(days, rate) {
+  const d = /^\s*(\d{0,3})(?:\.(\d{1,2}))?\s*$/.exec(String(days ?? ''));
+  if (!d || (!d[1] && !d[2])) return null;
+  let rateCents;
+  try { rateCents = toCents(String(rate ?? '').trim().replace(/^\$/, '')); } catch { return null; }
+  const d100 = BigInt(d[1] || 0) * 100n + BigInt((d[2] ?? '').padEnd(2, '0'));
+  if (d100 <= 0n || rateCents <= 0 || rateCents > 10_000_000) return null;
+  const amountCents = Number(divRoundHalfUp(d100 * BigInt(rateCents), 100n));
+  const dayText = `${Number(d[1] || 0)}${d[2] && Number(d[2]) ? `.${d[2].replace(/0+$/, '')}` : ''}`;
+  return { days: dayText, dayRateCents: rateCents, amountCents };
+}

@@ -69,6 +69,17 @@ function mileageCents(miles, rate) {
   const n = hundredthsMiles * tenThousandthsDollars; // in 1/10000 of a cent
   return Number((n + 5000n) / 10000n);
 }
+/** Per diem: days × the daily rate, exactly as the server does it (half-up once, in cents). 2.75 × $59.00 = $162.25. */
+function perDiemCents(days, rate) {
+  const d = /^(\d{0,3})(?:\.(\d{1,2}))?$/.exec(String(days ?? '').trim());
+  const r = /^\$?(\d{0,5})(?:\.(\d{1,2}))?$/.exec(String(rate ?? '').trim());
+  if (!d || !r || (!d[1] && !d[2]) || (!r[1] && !r[2])) return null;
+  const hundredthsDays = BigInt(d[1] || 0) * 100n + BigInt((d[2] ?? '').padEnd(2, '0'));
+  const rateCents = BigInt(r[1] || 0) * 100n + BigInt((r[2] ?? '').padEnd(2, '0'));
+  if (hundredthsDays === 0n || rateCents === 0n) return null;
+  return Number((hundredthsDays * rateCents + 50n) / 100n);
+}
+const lastDayRate = () => getLocal('zacc.dayRate') ?? '';
 const money = (c) => (c == null ? '' : `$${(c / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`);
 // The screens behind the four home buttons: title and icon colour (classes in styles.css, .road-icon.c-*).
 const SCREENS = {
@@ -89,7 +100,7 @@ const NEW_PROJECT = '+newproject';
 const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
 const BLOCK_ICON = { travel: '🚗', site: '🏗️', office: '📐' };
 const keyRef = (k) => (k?.startsWith('c:') ? { clientId: k.slice(2) } : k?.startsWith('s:') ? { id: k.slice(2) } : null);
-const KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
+const KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', per_diem: 'Per diem', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
 // Bookings on a trip planned ahead (Homer, 2026-11-06): the reservation, not money. The words for its two dates.
 const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
 const BOOKING_ICON = { airfare: '✈', lodging: '🏨', rental_car: '🚗', other: '📌' };
@@ -262,6 +273,10 @@ createApp({
       const c = mileageCents(this.costForm?.miles, this.costForm?.mileRate);
       return c == null ? '' : `${this.costForm.miles} mi × $${this.costForm.mileRate} = ${money(c)}`;
     },
+    perDiemText() {
+      const c = perDiemCents(this.costForm?.days, this.costForm?.dayRate);
+      return c == null ? '' : `${this.costForm.days} day${this.costForm.days === '1' ? '' : 's'} × $${this.costForm.dayRate} = ${money(c)}`;
+    },
   },
   watch: {
     hide: { immediate: true, handler(v) { document.body.classList.toggle('hush', v); } },
@@ -358,6 +373,7 @@ createApp({
         this.projectSearch = '';
       } else if (i.kind === 'cost') {
         this.costForm = { ...base, kind: d.kind, date: d.date, amount: d.amount ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? lastMileRate(),
+          days: d.days ?? '', dayRate: d.dayRate ?? lastDayRate(),
           vendor: d.vendor ?? '', description: d.description === KINDS[d.kind] ? '' : (d.description ?? ''), photos: [...(i.photos ?? [])], booking: d.booking ?? null };
       } else if (i.kind === 'booking') {
         this.bookingForm = { ...base, kind: d.kind, vendor: d.vendor ?? '', confirmation: d.confirmation ?? '', startsOn: d.startsOn, startTime: d.startTime ?? '',
@@ -410,7 +426,7 @@ createApp({
     },
     // A new cost or day of travel starts on today's date (it used to copy the last item's date, which was easy to miss:
     // Homer, 2026-10-28). For the days after, "Save, then next day".
-    newCost() { this.timeForm = null; this.bookingForm = null; this.costForm = { kind: 'other', date: today(), dateDefault: today(), amount: '', miles: '', mileRate: lastMileRate(), vendor: '', description: '', photos: [], booking: null }; },
+    newCost() { this.timeForm = null; this.bookingForm = null; this.costForm = { kind: 'other', date: today(), dateDefault: today(), amount: '', miles: '', mileRate: lastMileRate(), days: '', dayRate: lastDayRate(), vendor: '', description: '', photos: [], booking: null }; },
     // ---- Bookings: the flight, hotel and rental car for a trip planned ahead. Not money until paid.
     newBooking() {
       this.costForm = null; this.timeForm = null;
@@ -430,7 +446,7 @@ createApp({
     payBooking(x) {
       this.timeForm = null; this.bookingForm = null;
       const b = x.b;
-      this.costForm = { kind: b.kind, date: today(), dateDefault: today(), amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : (b.amount ?? ''), miles: '', mileRate: lastMileRate(),
+      this.costForm = { kind: b.kind, date: today(), dateDefault: today(), amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : (b.amount ?? ''), miles: '', mileRate: lastMileRate(), days: '', dayRate: lastDayRate(),
         vendor: b.vendor ?? '', description: b.confirmation ? `${KINDS[b.kind]}, confirmation ${b.confirmation}` : '', photos: [], booking: x.ref };
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
@@ -716,9 +732,13 @@ createApp({
       if (f.kind === 'mileage') {
         if (mileageCents(f.miles, f.mileRate) == null) { this.flash('Enter the miles (like 212.4) and the rate per mile (like 0.70).', 'bad'); return; }
         setLocal('zacc.mileRate', f.mileRate);
+      } else if (f.kind === 'per_diem') {
+        if (perDiemCents(f.days, f.dayRate) == null) { this.flash('Enter the days (like 3, or 2.75) and the rate per day (like 59.00).', 'bad'); return; }
+        setLocal('zacc.dayRate', f.dayRate);
       } else if (!/^\$?\d{1,3}(,?\d{3})*(\.\d{1,2})?$|^\$?\d+(\.\d{1,2})?$/.test(f.amount)) { this.flash('Enter the amount like 412.30', 'bad'); return; }
       const data = { trip: this.tripRef, date: f.date, kind: f.kind, vendor: f.vendor.trim() || null, description: f.description.trim() || KINDS[f.kind] };
       if (f.kind === 'mileage') Object.assign(data, { miles: f.miles, mileRate: f.mileRate });
+      else if (f.kind === 'per_diem') Object.assign(data, { days: f.days, dayRate: f.dayRate });
       else data.amount = f.amount.replace(/[$,]/g, '');
       if (f.booking) data.booking = f.booking;
       if (await this.saveItem('cost', f, data, f.photos)) { this.costForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
@@ -759,6 +779,7 @@ createApp({
     },
     /** The money part of an item, shown on its own so the privacy switch can blur it (empty for trips and time). */
     itemAmount(i) {
+      if (i.kind === 'cost' && i.data.kind === 'per_diem') return `${i.data.days} d × $${i.data.dayRate} = ${money(perDiemCents(i.data.days, i.data.dayRate))}`;
       if (i.kind === 'cost' && i.data.kind === 'mileage') return `${i.data.miles} mi × $${i.data.mileRate} = ${money(mileageCents(i.data.miles, i.data.mileRate))}`;
       if (i.kind === 'cost' || i.kind === 'check' || i.kind === 'purchase') return money(Math.round(Number(i.data.amount) * 100));
       return '';

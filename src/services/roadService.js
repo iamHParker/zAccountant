@@ -22,7 +22,7 @@ import { createContact, updateContact } from './arapService.js';
 import { PROJECT_PERMISSIONS, CUSTOMER_PERMISSIONS } from '../core/permissions.js';
 import { receiptReadingOn } from './receiptReader.js';
 import { addPurchase, PURCHASE_CATEGORIES } from './purchaseService.js';
-import { createTrip, addTripCost, addBooking, listBookings, cleanBooking, COST_KINDS, BOOKING_KINDS, mileageAmount, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_COST } from './tripService.js';
+import { createTrip, addTripCost, addBooking, listBookings, cleanBooking, COST_KINDS, BOOKING_KINDS, mileageAmount, perDiemAmount, perDiemText, autoPerDiemText, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_COST } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
@@ -310,7 +310,15 @@ async function cleanItem(db, key, kind, d) {
       const booking = await bookingRef(db, key, d.booking);
       if (booking) out.booking = booking;
       if (!out.description) errors.push('say what it was');
-      if (out.kind === 'mileage') {
+      if (out.kind === 'per_diem') {
+        // Per diem: days × the daily rate, no receipt (Homer, 2026-11-23).
+        const p = perDiemAmount(d.days, d.dayRate);
+        if (!p) errors.push('enter the days (like 3, or 2.75) and the rate per day (like 59.00)');
+        else {
+          Object.assign(out, { days: p.days, dayRate: (p.dayRateCents / 100).toFixed(2), amountCents: p.amountCents });
+          if (autoPerDiemText(text(d.description, 300))) out.description = perDiemText(p);
+        }
+      } else if (out.kind === 'mileage') {
         const m = mileageAmount(d.miles, d.mileRate);
         if (!m) errors.push('enter the miles (like 212.4) and the rate per mile (like 0.70)');
         else Object.assign(out, { miles: String(d.miles).trim(), mileRate: String(d.mileRate).trim(), amountCents: m.amountCents });
@@ -699,7 +707,7 @@ export async function acceptRoadItem(db, companyId, viewer, itemId, input = {}, 
     if (item.kind === 'cost') {
       const bookingId = await paidBooking(c, companyId, item, tripId);
       const r = await addTripCost(c, companyId, tripId, {
-        date: d.date, kind: d.kind, vendor: d.vendor, description: d.description, miles: d.miles, mileRate: d.mileRate,
+        date: d.date, kind: d.kind, vendor: d.vendor, description: d.description, miles: d.miles, mileRate: d.mileRate, days: d.days, dayRate: d.dayRate,
         amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : undefined,
         expenseAccountId: input.expenseAccountId, paidFromAccountId: input.paidFromAccountId, bookingId,
       }, { actor, idempotencyKey: `road-${item.id}` });

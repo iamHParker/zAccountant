@@ -159,7 +159,13 @@ A trip
 lists projects with a share in hundredths of a percent (`share_bp`, total ≤ 100%; the rest is not billed). A trip
 cost posts its own entry (source `trip`: Dr expense, Cr bank / credit card / owner equity "paid personally") and is
 edited by void + corrected copy (`replaced_by_id`, photos copied). Kinds: airfare, rental car, lodging, meals,
-tolls, mileage, other; mileage = miles × a typed rate per mile (`mileageAmount`, never a built-in IRS number).
+per diem, tolls, mileage, other; mileage = miles × a typed rate per mile (`mileageAmount`, never a built-in IRS number).
+Per diem (Homer 2026-11-23, migration 044): `days` (text, 2 decimals, so 2.75 for GSA's 75% travel days) ×
+`day_rate_cents` = amount, half-up once (`perDiemAmount` in `core/money.js`; the browser's `perDiemCents` and the
+Road page's copy do the same sum). No description typed (or one `perDiemText` wrote earlier, `autoPerDiemText`) →
+"Meals per diem, 3 days × $68.00", rewritten when a correction changes the days. Its project share is the "rest"
+column. On the invoice pull a per diem uses the saved `per_day` rate if there is one, and at a 100% share the line
+reads days × daily rate instead of 1 × total. Saved invoice rates have a third kind `per_day` (quantity = days).
 Travel time is a time entry with `trip_id` (no job). `listUnbilled` returns `tripCosts` (quantity = share,
 `bpToQuantity`: 80% → 0.8, × the full cost) and trip time rows (hours × share to 2 decimals, `sharedHoursQuantity`). Those invoice
 lines carry `job_id`; billed once per (source, project). Typing another quantity on the invoice overrides a share.
