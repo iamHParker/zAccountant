@@ -34,3 +34,14 @@ test('off-site settings: off when none are set, an error when half set or the ke
   assert.throws(() => offsiteConfig({ ...all, BACKUP_ENCRYPTION_KEY: 'short' }), /at least 32/);
   assert.throws(() => offsiteConfig({ ...all, BACKUP_S3_ENDPOINT: 'http://example.com' }), /https/);
 });
+
+// The command line (`npm run backup:offsite`) once imported booksCheck.js, which imports this file: a circle with a
+// top-level await never settles, so Node quit with code 13 and no backup (found on Railway, 2026-11-23).
+test('the backup command runs to the end (no import circle)', async () => {
+  const { execFile } = await import('node:child_process');
+  const env = { PATH: process.env.PATH, DATABASE_URL: 'postgres://nobody@127.0.0.1:1/none' };
+  const out = await new Promise((resolve, reject) =>
+    execFile(process.execPath, ['src/jobs/offsiteBackup.js'], { env }, (e, stdout, stderr) =>
+      e ? reject(new Error(`exit ${e.code}: ${stderr}`)) : resolve(stdout)));
+  assert.deepEqual(JSON.parse(out.trim()), { skipped: 'not set up' });
+});
