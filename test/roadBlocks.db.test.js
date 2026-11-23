@@ -99,4 +99,33 @@ test('Road time blocks: one entry per block, split travel in halves, travel on a
     [null, false, 90, null, null, 'Office / drafting: Drafting'],
   ]);
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
+
+  // Homer, 2026-11-23: blocks whose end came in before their start (20:28–11:15 counts as 14:47 past midnight) can't all
+  // go in. Accept all says which one stopped it; fixing it at the desk ("Save and accept") puts it in with the change.
+  await send('fix-travel-0001', { date: '2026-11-11', type: 'travel', start: '20:28', end: '11:15', jobId: J['2601'] });
+  await send('fix-site-00001', { date: '2026-11-11', type: 'site', start: '11:15', end: '10:48', jobId: J['2601'] });
+  const two = ok(await desk.call('GET', `${b}/road-items`));
+  const tid = two.find((i) => i.clientId === 'fix-travel-0001').id, sid = two.find((i) => i.clientId === 'fix-site-00001').id;
+  const all = await desk.call('POST', `${b}/road-items/accept-all`, { itemIds: [tid, sid] });
+  assert.equal(all.status, 400);
+  assert.equal(all.body.itemId, sid, 'the second block is the one that tips the day past 24 hours');
+  // 887 minutes accepted in that (rolled back) step, and the site block adds 1413: the message says both.
+  assert.match(all.body.error, /more than 24 hours on 2026-11-11: the day already has 14:47 h and this adds 23:33 h/);
+  assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 2, 'all or nothing: neither went in');
+  // Fix: 8:28 AM, not PM; save the change and keep it waiting, then save the other one straight into the books.
+  const kept = ok(await desk.call('PATCH', `${b}/road-items/${tid}`, { data: { start: '08:28', end: '11:15', hours: '' } }));
+  assert.equal(kept.data.minutes, 167);
+  const fixed = ok(await desk.call('POST', `${b}/road-items/${sid}/accept`, { data: { start: '11:15', end: '12:48', hours: '', notes: 'Framing' } }));
+  assert.equal(fixed.timeEntryIds.length, 1);
+  ok(await desk.call('POST', `${b}/road-items/${tid}/accept`, {}));
+  const { rows: day } = await db.pool.query(
+    `SELECT t.minutes, to_char(t.start_time, 'HH24:MI') AS s, to_char(t.end_time, 'HH24:MI') AS e, t.notes FROM time_entries t
+      WHERE t.company_id = $1 AND t.work_date = '2026-11-11' ORDER BY t.start_time`, [co.id]);
+  assert.deepEqual(day.map((r) => [r.minutes, r.s, r.e, r.notes]), [[167, '08:28', '11:15', 'Travel'], [93, '11:15', '12:48', 'Site: Framing']]);
+  // Hours instead of times: the start and end are dropped.
+  await send('fix-office-0001', { date: '2026-11-12', type: 'office', start: '22:00', end: '06:00' });
+  const off = ok(await desk.call('GET', `${b}/road-items`))[0];
+  const asHours = ok(await desk.call('PATCH', `${b}/road-items/${off.id}`, { data: { start: '', end: '', hours: '2:15' } }));
+  assert.equal(asHours.data.minutes, 135);
+  assert.equal(asHours.data.start, undefined);
 });

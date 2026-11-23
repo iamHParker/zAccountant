@@ -885,7 +885,7 @@ export function createApp(pool, { log } = {}) {
     if (err instanceof AuthError || err instanceof ReceiptError) return res.status(err.status).json({ error: err.message });
     if (err instanceof LedgerError || err instanceof PayrollError) {
       const status = /not found/i.test(err.message) ? 404 : 400;
-      return res.status(status).json({ error: err.message, details: err.details ?? [] });
+      return res.status(status).json({ error: err.message, details: err.details ?? [], ...(err.itemId ? { itemId: err.itemId } : {}) });
     }
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Request body is not valid JSON' });
     if (err.type === 'entity.too.large') {

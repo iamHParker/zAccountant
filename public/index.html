@@ -743,8 +743,102 @@
             </div>
             <div class="row wrap" v-if="can('bills')">
               <span class="muted small">from {{ i.keyName }}</span>
-              <span><button class="primary small" :disabled="ar.buyBusy" @click="acceptBuy(i)">Accept</button> <button class="small" @click="dismissBuy(i)">Dismiss</button></span>
+              <span><button class="primary small" :disabled="ar.buyBusy" @click="acceptBuy(i)">Accept</button>
+                <button class="small" @click="road.fix?.id === i.id ? road.fix = null : fixRoad(i)">Fix</button>
+                <button class="small" @click="dismissBuy(i)">Dismiss</button></span>
             </div>
+            <!-- Fix before it goes in (Homer, 2026-11-23): change what the phone sent, then save it to the books. -->
+            <form class="road-fix" v-if="road.fix?.id === i.id" @submit.prevent="saveRoadFix(true)">
+              <h3>Fix this before it goes in</h3>
+              <p class="bad" v-if="road.fix.error">{{ road.fix.error }}</p>
+              <p class="muted small">Nothing is in the books yet. Your changes replace what the phone sent (the audit trail keeps both).</p>
+              <template v-if="i.kind === 'block'">
+                <div class="chips"><button type="button" v-for="(label, k) in BLOCK_TYPES" :class="{ active: road.fix.data.type === k }" @click="road.fix.data.type = k">{{ label }}</button></div>
+                <div class="grid2">
+                  <label>Date <input type="date" v-model="road.fix.data.date" required></label>
+                  <label v-if="!(road.fix.data.start && road.fix.data.end)">Hours (or start and end) <input v-model.trim="road.fix.data.hours" placeholder="1.5 or 1:30"></label>
+                  <label v-else>Hours <input :value="roadFixHours()" readonly></label>
+                  <label>Start <input type="time" v-model="road.fix.data.start"></label>
+                  <label>End <input type="time" v-model="road.fix.data.end"></label>
+                </div>
+                <template v-if="!i.trip">
+                  <div class="grid2">
+                    <label>Project{{ road.fix.data.type === 'office' ? ' (optional)' : '' }}
+                      <select v-model="road.fix.data.jobId"><option value="">{{ road.fix.data.type === 'office' ? 'General office' : 'Choose…' }}</option>
+                        <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === road.fix.data.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></label>
+                    <label v-if="road.fix.data.type === 'travel' && road.fix.data.jobId">Split with
+                      <select v-model="road.fix.data.splitJobId"><option value="">Not split</option>
+                        <option v-for="j in ar.jobs.filter(j => (j.isActive || j.id === road.fix.data.splitJobId) && j.id !== road.fix.data.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></label>
+                    <label v-if="road.fix.data.type === 'travel' && road.fix.data.splitJobId">First project's share (%) <input type="number" v-model.number="road.fix.data.splitPercent" min="1" max="99" step="1"></label>
+                  </div>
+                </template>
+                <label>Notes <input v-model="road.fix.data.notes" maxlength="300"></label>
+              </template>
+              <template v-else-if="i.kind === 'time'">
+                <div class="grid2">
+                  <label>Date <input type="date" v-model="road.fix.data.date" required></label>
+                  <label v-if="!(road.fix.data.start && road.fix.data.end)">Hours (or start and end) <input v-model.trim="road.fix.data.hours" placeholder="1.5 or 1:30"></label>
+                  <label v-else>Hours <input :value="roadFixHours()" readonly></label>
+                  <label>Start <input type="time" v-model="road.fix.data.start"></label>
+                  <label>End <input type="time" v-model="road.fix.data.end"></label>
+                  <label v-if="road.fix.data.start && road.fix.data.end">Breaks <input v-model.trim="road.fix.data.breaks" placeholder="0:45"></label>
+                </div>
+                <label>Notes <input v-model="road.fix.data.notes" maxlength="300"></label>
+              </template>
+              <template v-else-if="i.kind === 'cost'">
+                <div class="chips"><button type="button" v-for="(label, k) in COST_KINDS" :class="{ active: road.fix.data.kind === k }" @click="road.fix.data.kind = k">{{ label }}</button></div>
+                <div class="grid2">
+                  <label>Date <input type="date" v-model="road.fix.data.date" required></label>
+                  <label>{{ road.fix.data.kind === 'mileage' ? 'Vehicle (optional)' : 'Paid to (optional)' }} <input v-model="road.fix.data.vendor" maxlength="120"></label>
+                  <label>What it was <input v-model="road.fix.data.description" maxlength="300"></label>
+                  <template v-if="road.fix.data.kind === 'mileage'">
+                    <label>Miles <input v-model.trim="road.fix.data.miles" inputmode="decimal"></label>
+                    <label>Rate per mile ($) <input v-model.trim="road.fix.data.mileRate" inputmode="decimal"></label>
+                  </template>
+                  <label v-else>Amount ($) <input v-model.trim="road.fix.data.amount" inputmode="decimal"></label>
+                </div>
+              </template>
+              <template v-else-if="i.kind === 'trip'">
+                <div class="grid2">
+                  <label>Trip name <input v-model="road.fix.data.name" maxlength="120" required></label>
+                  <label>First day <input type="date" v-model="road.fix.data.startDate" required></label>
+                  <label>Last day (optional) <input type="date" v-model="road.fix.data.endDate"></label>
+                </div>
+                <label>Notes <input v-model="road.fix.data.notes" maxlength="500"></label>
+                <p class="muted small">Its projects: change them on the trip once it is accepted.</p>
+              </template>
+              <template v-else-if="i.kind === 'booking'">
+                <div class="chips"><button type="button" v-for="(label, k) in BOOKING_KINDS" :class="{ active: road.fix.data.kind === k }" @click="road.fix.data.kind = k">{{ label }}</button></div>
+                <div class="grid2">
+                  <label>With <input v-model="road.fix.data.vendor" maxlength="120"></label>
+                  <label>Confirmation <input v-model="road.fix.data.confirmation" maxlength="40"></label>
+                  <label>{{ BOOKING_DATES[road.fix.data.kind]?.[0] ?? 'First' }} date <input type="date" v-model="road.fix.data.startsOn" required></label>
+                  <label>Time (optional) <input type="time" v-model="road.fix.data.startTime"></label>
+                  <label>{{ BOOKING_DATES[road.fix.data.kind]?.[1] ?? 'Last' }} date (optional) <input type="date" v-model="road.fix.data.endsOn"></label>
+                  <label>Time (optional) <input type="time" v-model="road.fix.data.endTime"></label>
+                  <label>Price ($, optional) <input v-model.trim="road.fix.data.amount" inputmode="decimal"></label>
+                </div>
+                <label>Details <input v-model="road.fix.data.details" maxlength="500"></label>
+              </template>
+              <template v-else-if="i.kind === 'purchase'">
+                <div class="chips"><button type="button" v-for="(label, k) in { equipment: 'Equipment', supplies: 'Supplies' }" :class="{ active: road.fix.data.category === k }" @click="road.fix.data.category = k">{{ label }}</button></div>
+                <div class="grid2">
+                  <label>Date <input type="date" v-model="road.fix.data.date" required></label>
+                  <label>What it was <input v-model="road.fix.data.description" maxlength="300"></label>
+                  <label>Bought from (optional) <input v-model="road.fix.data.vendor" maxlength="120"></label>
+                  <label>Amount ($) <input v-model.trim="road.fix.data.amount" inputmode="decimal"></label>
+                  <label v-if="road.fix.data.category === 'equipment'">Serial number (optional) <input v-model="road.fix.data.serialNumber" maxlength="60"></label>
+                  <label>Project (optional)
+                    <select v-model="road.fix.data.jobId"><option value="">None</option>
+                      <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === road.fix.data.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></label>
+                </div>
+              </template>
+              <div class="row wrap">
+                <span><button class="primary" :disabled="road.fix.busy">Save and accept</button>
+                  <button type="button" :disabled="road.fix.busy" @click="saveRoadFix(false)">Save, accept later</button>
+                  <button type="button" @click="road.fix = null">Cancel</button></span>
+              </div>
+            </form>
           </div>
         </template>
         <div class="seg">
@@ -1540,6 +1634,7 @@
                 <span><span class="muted small">{{ usDate(i.kind === 'trip' ? i.data.startDate : i.data.date) }}</span> {{ roadLabel(i) }}</span>
                 <strong class="num" v-if="i.kind === 'cost'">{{ money(i.data.amountCents) }}</strong>
               </div>
+              <p class="small bad" v-if="roadTimeWarning(i)">⚠ {{ roadTimeWarning(i) }}</p>
               <div class="photo-strip" v-if="i.photos.length">
                 <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
               </div>
@@ -1550,8 +1645,101 @@
               <div class="row wrap" v-if="can('bills')">
                 <span class="muted small">from {{ i.keyName }}</span>
                 <span><button class="primary small" :disabled="road.busy" @click="acceptRoad(i)">Accept</button>
+                  <button class="small" @click="road.fix?.id === i.id ? road.fix = null : fixRoad(i)">Fix</button>
                   <button class="small" @click="dismissRoad(i)">Dismiss</button></span>
               </div>
+              <!-- Fix before it goes in (Homer, 2026-11-23): change what the phone sent, then save it to the books. -->
+              <form class="road-fix" v-if="road.fix?.id === i.id" @submit.prevent="saveRoadFix(true)">
+                <h3>Fix this before it goes in</h3>
+                <p class="bad" v-if="road.fix.error">{{ road.fix.error }}</p>
+                <p class="muted small">Nothing is in the books yet. Your changes replace what the phone sent (the audit trail keeps both).</p>
+                <template v-if="i.kind === 'block'">
+                  <div class="chips"><button type="button" v-for="(label, k) in BLOCK_TYPES" :class="{ active: road.fix.data.type === k }" @click="road.fix.data.type = k">{{ label }}</button></div>
+                  <div class="grid2">
+                    <label>Date <input type="date" v-model="road.fix.data.date" required></label>
+                    <label v-if="!(road.fix.data.start && road.fix.data.end)">Hours (or start and end) <input v-model.trim="road.fix.data.hours" placeholder="1.5 or 1:30"></label>
+                    <label v-else>Hours <input :value="roadFixHours()" readonly></label>
+                    <label>Start <input type="time" v-model="road.fix.data.start"></label>
+                    <label>End <input type="time" v-model="road.fix.data.end"></label>
+                  </div>
+                  <template v-if="!i.trip">
+                    <div class="grid2">
+                      <label>Project{{ road.fix.data.type === 'office' ? ' (optional)' : '' }}
+                        <select v-model="road.fix.data.jobId"><option value="">{{ road.fix.data.type === 'office' ? 'General office' : 'Choose…' }}</option>
+                          <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === road.fix.data.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></label>
+                      <label v-if="road.fix.data.type === 'travel' && road.fix.data.jobId">Split with
+                        <select v-model="road.fix.data.splitJobId"><option value="">Not split</option>
+                          <option v-for="j in ar.jobs.filter(j => (j.isActive || j.id === road.fix.data.splitJobId) && j.id !== road.fix.data.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></label>
+                      <label v-if="road.fix.data.type === 'travel' && road.fix.data.splitJobId">First project's share (%) <input type="number" v-model.number="road.fix.data.splitPercent" min="1" max="99" step="1"></label>
+                    </div>
+                  </template>
+                  <label>Notes <input v-model="road.fix.data.notes" maxlength="300"></label>
+                </template>
+                <template v-else-if="i.kind === 'time'">
+                  <div class="grid2">
+                    <label>Date <input type="date" v-model="road.fix.data.date" required></label>
+                    <label v-if="!(road.fix.data.start && road.fix.data.end)">Hours (or start and end) <input v-model.trim="road.fix.data.hours" placeholder="1.5 or 1:30"></label>
+                    <label v-else>Hours <input :value="roadFixHours()" readonly></label>
+                    <label>Start <input type="time" v-model="road.fix.data.start"></label>
+                    <label>End <input type="time" v-model="road.fix.data.end"></label>
+                    <label v-if="road.fix.data.start && road.fix.data.end">Breaks <input v-model.trim="road.fix.data.breaks" placeholder="0:45"></label>
+                  </div>
+                  <label>Notes <input v-model="road.fix.data.notes" maxlength="300"></label>
+                </template>
+                <template v-else-if="i.kind === 'cost'">
+                  <div class="chips"><button type="button" v-for="(label, k) in COST_KINDS" :class="{ active: road.fix.data.kind === k }" @click="road.fix.data.kind = k">{{ label }}</button></div>
+                  <div class="grid2">
+                    <label>Date <input type="date" v-model="road.fix.data.date" required></label>
+                    <label>{{ road.fix.data.kind === 'mileage' ? 'Vehicle (optional)' : 'Paid to (optional)' }} <input v-model="road.fix.data.vendor" maxlength="120"></label>
+                    <label>What it was <input v-model="road.fix.data.description" maxlength="300"></label>
+                    <template v-if="road.fix.data.kind === 'mileage'">
+                      <label>Miles <input v-model.trim="road.fix.data.miles" inputmode="decimal"></label>
+                      <label>Rate per mile ($) <input v-model.trim="road.fix.data.mileRate" inputmode="decimal"></label>
+                    </template>
+                    <label v-else>Amount ($) <input v-model.trim="road.fix.data.amount" inputmode="decimal"></label>
+                  </div>
+                </template>
+                <template v-else-if="i.kind === 'trip'">
+                  <div class="grid2">
+                    <label>Trip name <input v-model="road.fix.data.name" maxlength="120" required></label>
+                    <label>First day <input type="date" v-model="road.fix.data.startDate" required></label>
+                    <label>Last day (optional) <input type="date" v-model="road.fix.data.endDate"></label>
+                  </div>
+                  <label>Notes <input v-model="road.fix.data.notes" maxlength="500"></label>
+                  <p class="muted small">Its projects: change them on the trip once it is accepted.</p>
+                </template>
+                <template v-else-if="i.kind === 'booking'">
+                  <div class="chips"><button type="button" v-for="(label, k) in BOOKING_KINDS" :class="{ active: road.fix.data.kind === k }" @click="road.fix.data.kind = k">{{ label }}</button></div>
+                  <div class="grid2">
+                    <label>With <input v-model="road.fix.data.vendor" maxlength="120"></label>
+                    <label>Confirmation <input v-model="road.fix.data.confirmation" maxlength="40"></label>
+                    <label>{{ BOOKING_DATES[road.fix.data.kind]?.[0] ?? 'First' }} date <input type="date" v-model="road.fix.data.startsOn" required></label>
+                    <label>Time (optional) <input type="time" v-model="road.fix.data.startTime"></label>
+                    <label>{{ BOOKING_DATES[road.fix.data.kind]?.[1] ?? 'Last' }} date (optional) <input type="date" v-model="road.fix.data.endsOn"></label>
+                    <label>Time (optional) <input type="time" v-model="road.fix.data.endTime"></label>
+                    <label>Price ($, optional) <input v-model.trim="road.fix.data.amount" inputmode="decimal"></label>
+                  </div>
+                  <label>Details <input v-model="road.fix.data.details" maxlength="500"></label>
+                </template>
+                <template v-else-if="i.kind === 'purchase'">
+                  <div class="chips"><button type="button" v-for="(label, k) in { equipment: 'Equipment', supplies: 'Supplies' }" :class="{ active: road.fix.data.category === k }" @click="road.fix.data.category = k">{{ label }}</button></div>
+                  <div class="grid2">
+                    <label>Date <input type="date" v-model="road.fix.data.date" required></label>
+                    <label>What it was <input v-model="road.fix.data.description" maxlength="300"></label>
+                    <label>Bought from (optional) <input v-model="road.fix.data.vendor" maxlength="120"></label>
+                    <label>Amount ($) <input v-model.trim="road.fix.data.amount" inputmode="decimal"></label>
+                    <label v-if="road.fix.data.category === 'equipment'">Serial number (optional) <input v-model="road.fix.data.serialNumber" maxlength="60"></label>
+                    <label>Project (optional)
+                      <select v-model="road.fix.data.jobId"><option value="">None</option>
+                        <option v-for="j in ar.jobs.filter(j => j.isActive || j.id === road.fix.data.jobId)" :value="j.id">{{ jobLabel(j) }}</option></select></label>
+                  </div>
+                </template>
+                <div class="row wrap">
+                  <span><button class="primary" :disabled="road.fix.busy">Save and accept</button>
+                    <button type="button" :disabled="road.fix.busy" @click="saveRoadFix(false)">Save, accept later</button>
+                    <button type="button" @click="road.fix = null">Cancel</button></span>
+                </div>
+              </form>
             </div>
           </template>
         </div>

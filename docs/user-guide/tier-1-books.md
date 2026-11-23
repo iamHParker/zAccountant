@@ -379,6 +379,16 @@ may have no project (general office). Travel for a trip can go on the trip inste
 and the **Day total**. At your desk, **Trips → From the road** lists them under *Time on projects*; **Accept** makes
 each block a time entry on its project (a split block makes two), ready for the timesheet and payroll.
 
+**Fixing something before it goes in.** Every item in *From the road* (and in *Bought on the road* on Bills) has a
+**Fix** button beside Accept and Dismiss. It opens the item as the phone sent it: date, start and end times or hours,
+project, kind, notes, amount. **Save and accept** puts it in the books with your changes; **Save, accept later** keeps
+it waiting with them. If **Accept** or **Accept all** is refused (for example *more than 24 hours on* a day), the item
+that caused it opens in Fix by itself with the reason in red, and nothing goes in until it is right. A time block
+whose end is earlier than its start (8:28 PM to 11:15 AM) is flagged in red: it counts as running past midnight, which
+is nearly always AM and PM mixed up. The phone now asks before saving one of those (tick *Yes, it ran past midnight*)
+and warns when a block overlaps another the same day. On an iPhone an empty time box fills in the time it is now, so
+check both times before saving.
+
 **Projects from the field.** Tap **Projects**. Projects are listed by number, highest first (26-148 above
 26-147), so the numbers already taken are easy to see; type in **Find a project** to search
 by number, name, customer or street (*2601*, *smith*, *buda* all work, and it works with no signal, from the phone's
