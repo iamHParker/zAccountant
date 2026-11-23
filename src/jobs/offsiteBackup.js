@@ -177,7 +177,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     }
   } else {
     const { createPool } = await import('../db/pool.js');
-    const { centralToday } = await import('./booksCheck.js');
+    // Today in Central time, worked out here: importing booksCheck.js would be a circle (it imports this file), and a
+    // circle with a top-level await never finishes, so the command exited silently (2026-11-23).
+    const centralToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(new Date());
     const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
     const pool = createPool(url);
     runOffsiteBackup(pool, { url, asOf: centralToday() })
