@@ -15,7 +15,8 @@ that aren't obvious from the code. Read the entry for a feature before changing 
 - Project drop-downs (invoice, bill lines, trip shares, Road time) all use `public/projectPick.js`: newest number first
   (the code, or the number at the front of an imported name), label `number · project · customer` (Homer 2026-11-23).
 - Trips (024, `tripService.js`): projects with % shares; costs post their own entry (void + copy to edit); travel time =
-  time entry with `trip_id`; billed once per project. Bookings (040, flight/hotel/car) are a plan, not money; Paid → linked cost.
+  time entry with `trip_id`; billed once per project. Per diem (044): trip cost kind `per_diem` = days × rate, and
+  invoice rate kind `per_day`; untaxed by default; desk, Road and the inbox fix forms all carry days + rate. Bookings (040, flight/hotel/car) are a plan, not money; Paid → linked cost.
 - Passkeys (migration 025, `src/security/webauthn.js`): Face ID / Windows Hello sign-in = both steps; adding one needs a
   fresh authenticator code. Settings card + sign-in button.
 - Road page `/road` (migration 026, `src/services/roadService.js`, `public/road.*`): phone key (Bearer, hash only,

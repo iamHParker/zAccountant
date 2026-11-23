@@ -150,7 +150,7 @@ export async function listUnbilled(db, companyId, { jobId = null, customerId = n
         AND ${notBilledFor('time_entry_id', 't.id')}
       ORDER BY t.work_date, j.name LIMIT 1000`, params);
   const { rows: tripCosts } = await db.query(
-    `SELECT tc.id, to_char(tc.cost_date, 'YYYY-MM-DD') AS date, tc.description, tc.vendor AS "vendorName", tc.amount_cents AS "amountCents",
+    `SELECT tc.id, to_char(tc.cost_date, 'YYYY-MM-DD') AS date, tc.description, tc.vendor AS "vendorName", tc.amount_cents AS "amountCents", tc.kind, tc.days, tc.day_rate_cents::int AS "dayRateCents",
             j.id AS "jobId", j.name AS "jobName", j.code AS "jobCode", tr.name AS "tripName", ${COST_SHARE_SQL} AS "shareBp"
        FROM trip_costs tc JOIN trips tr ON tr.id = tc.trip_id JOIN trip_jobs tj ON tj.trip_id = tr.id JOIN jobs j ON j.id = tj.job_id
       WHERE tc.company_id = $1 AND ${jobMatch} AND ${COST_SHARE_SQL} > 0 AND tc.status = 'posted'

@@ -5,7 +5,7 @@
 // A saved cost is never changed: Edit voids it (entry reversed) and posts the corrected copy, photos and all.
 import { withTransaction } from '../db/pool.js';
 import { LedgerError, isIsoDate, validateEntry } from '../core/ledger.js';
-import { toCents, divRoundHalfUp, mileageAmount } from '../core/money.js';
+import { toCents, divRoundHalfUp, mileageAmount, perDiemAmount } from '../core/money.js';
 import { insertEntry, reverseEntry, cleanIdempotencyKey } from './ledgerService.js';
 import { appendAudit } from './audit.js';
 import { readPicture } from './feedbackService.js';
@@ -18,8 +18,8 @@ const text = (v, max) => (v == null || v === '' ? null : String(v).replace(/[\u0
 export const MAX_PHOTO_BYTES = 3_145_728;
 export const MAX_PHOTOS_PER_COST = 6;
 const MAX_TRIP_JOBS = 50;
-export { mileageAmount }; // lives in core/money.js (the MileIQ reader uses it too)
-export const COST_KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
+export { mileageAmount, perDiemAmount }; // lives in core/money.js (the MileIQ reader uses it too)
+export const COST_KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', per_diem: 'Per diem', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
 
 /** "60", "33.33", "12.5%" → hundredths of a percent (6000, 3333, 1250); null if not a percent from 0 to 100. */
 export function percentToBp(v) {
@@ -34,6 +34,10 @@ export const SHARE_GROUPS = ['air', 'hotel', 'car', 'rest'];
 /** SQL: the share (hundredths of a percent) of trip_jobs tj for a trip cost tc, by the cost's kind. */
 export const COST_SHARE_SQL = `CASE tc.kind WHEN 'airfare' THEN coalesce(tj.air_bp, tj.share_bp) WHEN 'lodging' THEN coalesce(tj.hotel_bp, tj.share_bp)
   WHEN 'rental_car' THEN coalesce(tj.car_bp, tj.share_bp) ELSE coalesce(tj.rest_bp, tj.share_bp) END`;
+/** The words for a per diem with no description typed: "Meals per diem, 3 days × $59.00". */
+export const perDiemText = (pd) => `Meals per diem, ${pd.days} day${pd.days === '1' ? '' : 's'} × $${(pd.dayRateCents / 100).toFixed(2)}`;
+/** True for words perDiemText wrote: they are written again when the days or rate change (an edit). */
+export const autoPerDiemText = (t) => t == null || String(t).trim() === 'Per diem' || /^Meals per diem, \d+(\.\d+)? days? × \$\d+\.\d\d$/.test(String(t).trim());
 export const bpToPercent = (bp) => (bp / 100).toFixed(2).replace(/\.?0+$/, '');
 /** A share as an invoice quantity: 6000 → "0.6", 3333 → "0.3333", 10000 → "1". */
 export function bpToQuantity(bp) {
@@ -196,7 +200,7 @@ export async function getTrip(db, companyId, tripId) {
       WHERE tj.trip_id = $1 ORDER BY tj.share_bp DESC, lower(j.name)`, [t.id]);
   const { rows: costs } = await db.query(
     `SELECT tc.id, to_char(tc.cost_date, 'YYYY-MM-DD') AS date, tc.vendor, tc.description, tc.amount_cents AS "amountCents", tc.kind, tc.miles,
-            tc.mile_rate_cents AS "mileRateCents",
+            tc.mile_rate_cents AS "mileRateCents", tc.days, tc.day_rate_cents::int AS "dayRateCents",
             tc.expense_account_id AS "expenseAccountId", ea.name AS "expenseAccountName", tc.paid_from_account_id AS "paidFromAccountId", pa.name AS "paidFromName",
             tc.status, tc.replaced_by_id AS "replacedById", e.entry_number AS "entryNumber",
             (SELECT count(*) FROM trip_cost_photos p WHERE p.trip_cost_id = tc.id)::int AS "photoCount",
@@ -247,11 +251,19 @@ export async function addTripCost(pool, companyId, tripId, input, { actor = null
     if (!isIsoDate(date)) errors.push('the date must be a real date');
     const kind = input?.kind ? String(input.kind) : 'other';
     if (!COST_KINDS[kind]) errors.push('choose what it was (airfare, rental car, mileage…)');
-    const description = text(input?.description, 300) ?? (kind !== 'other' ? COST_KINDS[kind] ?? null : null);
+    let description = text(input?.description, 300) ?? (kind !== 'other' ? COST_KINDS[kind] ?? null : null);
     if (!description) errors.push('say what it was (airfare, rental car, tolls…)');
     const vendor = text(input?.vendor, 120);
-    let amount = null; let mileage = null;
-    if (kind === 'mileage') {
+    let amount = null; let mileage = null; let perDiem = null;
+    if (kind === 'per_diem') {
+      // Per diem: days × the daily rate (the GSA meals rate for the city, or the firm's own), no receipt needed.
+      perDiem = perDiemAmount(input?.days, input?.dayRate);
+      if (!perDiem) errors.push('enter the days (like 3, or 2.75 with 75% travel days) and the rate per day (like 59.00)');
+      else {
+        amount = perDiem.amountCents;
+        if (autoPerDiemText(text(input?.description, 300))) description = perDiemText(perDiem);
+      }
+    } else if (kind === 'mileage') {
       mileage = mileageAmount(input?.miles, input?.mileRate);
       if (!mileage) errors.push('enter the miles (like 212.4) and the rate per mile (like 0.70)');
       else amount = Number.isSafeInteger(mileageCents) ? mileageCents : mileage.amountCents;
@@ -275,11 +287,12 @@ export async function addTripCost(pool, companyId, tripId, input, { actor = null
     const je = await insertEntry(c, companyId, entry, { source: 'trip', sourceRef: id, actor });
     await c.query(
       `INSERT INTO trip_costs (id, company_id, trip_id, cost_date, vendor, description, amount_cents, expense_account_id, paid_from_account_id, journal_entry_id, idempotency_key, created_by,
-                               kind, miles, mile_rate_cents)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [id, companyId, trip.id, date, vendor, description, amount, exp.id, from.id, je.id, idempotencyKey, actor, kind, mileage?.miles ?? null, mileage?.rateCentsText ?? null]);
+                               kind, miles, mile_rate_cents, days, day_rate_cents)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+      [id, companyId, trip.id, date, vendor, description, amount, exp.id, from.id, je.id, idempotencyKey, actor, kind, mileage?.miles ?? null, mileage?.rateCentsText ?? null,
+       perDiem?.days ?? null, perDiem?.dayRateCents ?? null]);
     await appendAudit(c, companyId, { action: replacesId ? 'replace' : 'create', entity: 'trip_cost', entityId: id, actor,
-      payload: { ...(replacesId ? { replacesId } : {}), tripId: trip.id, date, kind, vendor, description, amountCents: amount, ...(mileage ? { miles: mileage.miles, mileRateCents: mileage.rateCentsText } : {}), entryId: je.id } });
+      payload: { ...(replacesId ? { replacesId } : {}), tripId: trip.id, date, kind, vendor, description, amountCents: amount, ...(mileage ? { miles: mileage.miles, mileRateCents: mileage.rateCentsText } : {}), ...(perDiem ? { days: perDiem.days, dayRateCents: perDiem.dayRateCents } : {}), entryId: je.id } });
     // Paying for a booking ("Paid: record the cost"): the booking points at this cost from now on.
     if (input?.bookingId) await linkBookingCost(c, companyId, trip.id, input.bookingId, id, actor);
     return { ...(await getTrip(c, companyId, trip.id)), costId: id };

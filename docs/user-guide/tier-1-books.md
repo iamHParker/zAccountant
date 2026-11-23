@@ -81,8 +81,11 @@ change anything yet.
   - Add a note for every invoice, such as your **tax ID** and **state engineering firm number**.
   - Add a closing line ("Thank you for using us for your Engineering Consulting Services").
 - **Invoice rates and items:**
-  - These are your hourly rates (Eng Std Rate, Eng Overtime Rate, Drafting…) and the costs you pass on
-    (equipment rental, lodging, rental car, airfare).
+  - These are your hourly rates (Eng Std Rate, Eng Overtime Rate, Drafting…), the costs you pass on
+    (equipment rental, lodging, rental car, airfare), and **by the day** rates such as **Per diem (meals)**: on the
+    invoice line, type the number of days in Hours / qty and the daily rate is the price (3 × $68.00). By-the-day
+    rates are not taxed unless you tick **Charge sales tax on it**; treat a per diem like your other travel costs.
+    (No saved rate yet? On an invoice line pick **+ Add new rate…**, choose **By the day: per diem** and save.)
   - **Start with an engineering firm's list** adds the usual names. Then press **edit** on each one and type your
     price, whether it is taxable, and the income account it goes to.
   - Leave the price empty for costs that change every time.
@@ -289,10 +292,14 @@ is already on an invoice can't be edited or voided until that invoice is.
    project and type its share in percent: a major client might carry 80% and a smaller job 10%. **Split evenly** fills
    in equal shares. The shares can add up to less than 100%; the rest isn't billed to anyone. Once a project has billed
    part of the trip, its share is fixed (so the trip never bills more or less than its shares); the others can change.
-2. **+ Add cost** for each expense: pick what it was (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other), the
+2. **+ Add cost** for each expense: pick what it was (Airfare, Rental car, Lodging, Meals, Per diem, Tolls, Mileage, Other), the
    date, who was paid, the amount, the expense account, and what you paid with (bank, credit card, or an owner account
    when you paid personally). For **Mileage**, type the miles and the rate per mile (the IRS standard mileage rate for
-   the year, from irs.gov, or your own); the amount is worked out. **📷 Take photo** keeps the receipt with the cost;
+   the year, from irs.gov, or your own); the amount is worked out. For **Per diem** (meals, no receipt), type the
+   **Days** and the **Rate per day** (your own, or the city's GSA meals rate from gsa.gov; GSA pays 75% on the first and
+   last travel day, so three days is 2.75); the amount is worked out and, if you leave "What it was" empty, it reads
+   *Meals per diem, 2.75 days × $68.00*. Each project's invoice pulls in its share like any other trip cost.
+   Forgot to send a cost from the road? Add it here at the desk the same way. **📷 Take photo** keeps the receipt with the cost;
    **🖼 Choose photo** picks one already taken (or a screenshot) from Photos; **📋 Paste** adds a picture you copied
    (see below). Saving records the expense in your books.
 3. **+ Add travel time**: one entry per day. Type the hours, or the **Start** and **End** times and the **Breaks**
@@ -351,8 +358,8 @@ while you travel, even with no signal, without signing in to your books on the p
    Screen** so it opens like an app. (No camera handy? **Copy link**, send it to yourself, and paste it into the Road
    page's box.)
 2. On the road: **+ New trip** (name, dates, the projects it's for; type new project numbers like *2610 Garcia Barn*
-   one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Tolls, Mileage, Other; the amount or
-   the miles and rate; receipt photos: **📷 Take photo**, **🖼 Choose photo** from Photos, or **📋 Paste**) and **+ Travel time** (one per day: hours, or start, end and breaks; **Save, then next day**). Everything is saved on the phone first and sent when
+   one per line), then **+ Cost or receipt** (Airfare, Rental car, Lodging, Meals, Per diem, Tolls, Mileage, Other; the amount,
+   the miles and rate, or the days and rate per day; receipt photos: **📷 Take photo**, **🖼 Choose photo** from Photos, or **📋 Paste**) and **+ Travel time** (one per day: hours, or start, end and breaks; **Save, then next day**). Everything is saved on the phone first and sent when
    there is signal. The top of the page says how many are waiting; **Send now** sends them at once.
    **Planning a trip ahead:** make the trip with its future dates, then **+ Booking** for the flight, hotel and rental
    car (who, confirmation number, dates and times, price if known, details). The **Trip** pull-down lists trips under

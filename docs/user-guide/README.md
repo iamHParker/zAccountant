@@ -63,6 +63,8 @@ Find the task, follow the link.
 - [merge two projects that are really one job (time, trips, invoices and bills all move)](tier-1-books.md#projects)
 - [see why zAccountant says "this looks like a project you already have"](tier-1-books.md#projects)
 - [track a trip's costs, mileage and travel time, shared by projects](tier-1-books.md#trips)
+- [bill a meals per diem (days × daily rate), on an invoice or on a trip](tier-1-books.md#trips)
+- [add a trip cost I forgot to send from the road](tier-1-books.md#trips)
 - [jot down costs, receipts and checks on my phone (Road page)](tier-1-books.md#your-phone-on-the-road)
 - [bring back a check or cost from the road that I dismissed by mistake](tier-1-books.md#your-phone-on-the-road)
 - [record equipment or supplies I bought on the road, and see my equipment list](tier-1-books.md#your-phone-on-the-road)

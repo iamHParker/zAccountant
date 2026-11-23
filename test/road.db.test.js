@@ -140,6 +140,16 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.deepEqual(after.costs.map((c) => c.amountCents).sort((x, y) => x - y), [10500, 41230]);
   assert.deepEqual(after.time.map((x) => [x.date, x.minutes, x.start, x.end]), [['2026-10-04', 360, null, null], ['2026-10-05', 540, '07:30', '17:45']]);
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
+  // A meals per diem from the phone (Homer, 2026-11-23): 2.75 days × $68.00 = $187.00, the words filled in.
+  assert.equal((await phone.call('POST', '/api/road/items', { clientId: 'cost-pd-bad1', kind: 'cost',
+    data: { trip: ref, date: '2026-10-06', kind: 'per_diem', days: 'three', dayRate: '68' } })).status, 400);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'cost-perdiem1', kind: 'cost',
+    data: { trip: ref, date: '2026-10-06', kind: 'per_diem', days: '2.75', dayRate: '68', description: 'Per diem' } }), 201);
+  const [pd] = ok(await desk.call('GET', `${b}/road-items`));
+  assert.deepEqual([pd.data.days, pd.data.dayRate, pd.data.amountCents, pd.data.description], ['2.75', '68.00', 18700, 'Meals per diem, 2.75 days × $68.00']);
+  const pdc = ok(await desk.call('POST', `${b}/road-items/${pd.id}/accept`, accounts));
+  const pdTrip = ok(await desk.call('GET', `${b}/trips/${tr.tripId}`));
+  assert.deepEqual(pdTrip.costs.filter((c) => c.id === pdc.costId).map((c) => [c.kind, c.days, c.dayRateCents, c.amountCents]), [['per_diem', '2.75', 6800, 18700]]);
   // Accepting twice is refused; a photo for a reviewed cost is refused.
   assert.equal((await desk.call('POST', `${b}/road-items/${air.id}/accept`, accounts)).status, 400);
   assert.equal((await phone.call('POST', '/api/road/items/cost-air-01/photos', { clientId: 'photo-air-02', picture: PNG })).status, 400);
@@ -232,7 +242,7 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   const t2 = ok(await desk.call('GET', `${b}/trips/${tr.tripId}`));
   assert.equal(t2.costs.find((x) => x.amountCents === 47820).paidFromAccountId, travelCard.id);
   assert.equal(t2.costs.find((x) => x.amountCents === 2138).paidFromAccountId, A['2100']);
-  assert.deepEqual(t2.costs.map((c) => c.amountCents).sort((x, y) => x - y), [2138, 10500, 41230, 47820]);
+  assert.deepEqual(t2.costs.map((c) => c.amountCents).sort((x, y) => x - y), [2138, 10500, 18700, 41230, 47820]);
   assert.equal(t2.time.find((x) => x.date === '2026-10-06').minutes, 150);
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
 

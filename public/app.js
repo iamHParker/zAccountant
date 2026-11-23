@@ -119,7 +119,7 @@ const blankLine = () => ({ itemId: '', serviceDate: '', accountId: '', descripti
   jobId: '', billable: false, timeEntryId: '', billedLineId: '', tripCostId: '', from: '', comment: false, row: ++lineRow });
 const blankProject = () => ({ name: '', code: '', customerId: '', address: '' });
 const blankTrip = () => ({ name: '', startDate: today(), endDate: '', notes: '', jobs: [{ jobId: '', share: '' }] });
-const blankTripCost = (date = today()) => ({ date, dateDefault: date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '',
+const blankTripCost = (date = today()) => ({ date, dateDefault: date, kind: 'other', vendor: '', description: '', amount: '', miles: '', mileRate: '', days: '', dayRate: '',
   expenseAccountId: '', paidFromAccountId: '', photos: [], photoBusy: false, reading: false, key: newKey() });
 // The rate per mile last used on this computer or phone, offered on the next mileage cost (never a built-in number).
 // Zoom (the status bar's slider, like Word's): this browser's choice, kept between visits. 100 = normal size.
@@ -151,6 +151,9 @@ const lastPrefs = () => { try { return { ...PREF_DEFAULTS, ...JSON.parse(localSt
 const keepPrefs = (p) => { try { localStorage.setItem('zacc.prefs', JSON.stringify(p)); } catch { /* private window: not kept */ } };
 const lastMileRate = () => { try { return localStorage.getItem('zacc.mileRate') ?? ''; } catch { return ''; } };
 const keepMileRate = (r) => { try { localStorage.setItem('zacc.mileRate', r); } catch { /* private window: not kept */ } };
+// The per diem rate per day last used here, offered on the next per diem (Homer's own rate or a GSA rate he looked up).
+const lastDayRate = () => { try { return localStorage.getItem('zacc.dayRate') ?? ''; } catch { return ''; } };
+const keepDayRate = (r) => { try { localStorage.setItem('zacc.dayRate', r); } catch { /* private window: not kept */ } };
 // The accounts last used for costs that came in from the Road page.
 const lastRoadAccounts = () => { try { return JSON.parse(localStorage.getItem('zacc.roadAccounts') ?? '{}') ?? {}; } catch { return {}; } };
 const keepRoadAccounts = (v) => { try { localStorage.setItem('zacc.roadAccounts', JSON.stringify(v)); } catch { /* not kept */ } };
@@ -236,7 +239,7 @@ const ROAD_TRIP_KINDS = ['trip', 'cost', 'time', 'block', 'booking'];
 const BOOKING_KINDS = { airfare: 'Flight', lodging: 'Hotel', rental_car: 'Rental car', other: 'Other' };
 // Time blocks from the Road page (migration 042).
 const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
-const COST_KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
+const COST_KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', per_diem: 'Per diem', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
 const BOOKING_DATES = { airfare: ['Depart', 'Return'], lodging: ['Check in', 'Check out'], rental_car: ['Pick up', 'Drop off'], other: ['From', 'To'] };
 const COST_LABEL = { airfare: 'Airfare', lodging: 'Lodging', rental_car: 'Rental car', other: 'Other' };
 const SHARE_COLS = [{ key: 'air', label: 'Air' }, { key: 'hotel', label: 'Hotel' }, { key: 'car', label: 'Rental car' }, { key: 'rest', label: 'Rest' }, { key: 'share', label: 'Travel time' }];
@@ -1789,6 +1792,7 @@ createApp({
       }
       if (i.kind === 'booking') return `Booking: ${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''} · ${this.bookingWhen(i.data)}`;
       const what = i.data.kind === 'mileage' ? `${i.data.description} · ${i.data.miles} mi × $${i.data.mileRate}` : i.data.description;
+      // (a per diem's description already says "3 days × $68.00")
       return `${what}${i.data.vendor ? ' · ' + i.data.vendor : ''}`;
     },
     /** A cost or travel time whose trip isn't in the books yet (or was dismissed) needs a trip chosen here. */
@@ -1853,7 +1857,7 @@ createApp({
         jobId: d.jobId ?? '', splitJobId: d.splitJobId ?? '', splitPercent: d.splitPercent ?? 50, notes: d.notes ?? '' }
         : i.kind === 'time' ? { date: d.date, start: d.start ?? '', end: d.end ?? '', breaks: d.breakMinutes ? hm(d.breakMinutes) : '', hours: d.start ? '' : hm(d.minutes), notes: d.notes ?? '' }
           : i.kind === 'cost' ? { date: d.date, kind: d.kind ?? 'other', vendor: d.vendor ?? '', description: d.description ?? '', amount: dollars(d.amountCents),
-            miles: d.miles ?? '', mileRate: d.mileRate ?? '' }
+            miles: d.miles ?? '', mileRate: d.mileRate ?? '', days: d.days ?? '', dayRate: d.dayRate ?? '' }
             : i.kind === 'trip' ? { name: d.name ?? '', startDate: d.startDate, endDate: d.endDate ?? '', notes: d.notes ?? '' }
               : i.kind === 'booking' ? { kind: d.kind, vendor: d.vendor ?? '', confirmation: d.confirmation ?? '', startsOn: d.startsOn, startTime: d.startTime ?? '',
                 endsOn: d.endsOn ?? '', endTime: d.endTime ?? '', amount: dollars(d.amountCents), details: d.details ?? '' }
@@ -2096,7 +2100,7 @@ createApp({
       if (i.kind === 'cost') {
         const r = this.road;
         Object.assign(this.trip, { editCostId: null, travel: null, cost: { ...blankTripCost(d.date), roadItem: i, kind: d.kind ?? 'other', vendor: d.vendor ?? '',
-          description: d.description ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? '', amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : '',
+          description: d.description ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? '', days: d.days ?? '', dayRate: d.dayRate ?? '', amount: d.amountCents != null ? (d.amountCents / 100).toFixed(2) : '',
           expenseAccountId: r.expenseId || this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id || '',
           paidFromAccountId: this.roadCard(i) || this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id || '', keptPhotos: i.photos.length } });
       } else {
@@ -2227,6 +2231,13 @@ createApp({
       const n = (BigInt(m[1] || 0) * 100n + BigInt((m[2] ?? '').padEnd(2, '0'))) * (BigInt(r[1] || 0) * 10000n + BigInt((r[2] ?? '').padEnd(4, '0')));
       return Number((n * 2n + 10000n) / 20000n);
     },
+    /** Days × rate per day → cents, half-up, exactly like the server (BigInt). 2.75 × $68.00 = $187.00. */
+    perDiemCents(c) {
+      const d = /^\s*(\d{0,3})(?:\.(\d{1,2}))?\s*$/.exec(c.days ?? ''); const r = /^\s*\$?(\d{0,5})(?:\.(\d{1,2}))?\s*$/.exec(c.dayRate ?? '');
+      if (!d || !r || (!d[1] && !d[2]) || (!r[1] && !r[2])) return null;
+      const n = (BigInt(d[1] || 0) * 100n + BigInt((d[2] ?? '').padEnd(2, '0'))) * (BigInt(r[1] || 0) * 100n + BigInt((r[2] ?? '').padEnd(2, '0')));
+      return n > 0n ? Number((n + 50n) / 100n) : null;
+    },
     tripPaidFromAccounts() { return this.accounts.filter((a) => a.isActive && (a.cashFlow === 'cash' || a.subtype === 'credit_card' || (a.type === 'equity' && a.key !== 'retained_earnings'))); },
     tripExpenseAccounts() { return this.accounts.filter((a) => a.isActive && a.type === 'expense'); },
     newTripCost() {
@@ -2235,12 +2246,13 @@ createApp({
       const c = blankTripCost(last?.date ?? this.trip.cur.startDate);
       c.expenseAccountId = last?.expenseAccountId ?? this.tripExpenseAccounts().find((a) => /travel/i.test(a.name))?.id ?? '';
       c.paidFromAccountId = last?.paidFromAccountId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? '';
-      c.mileRate = lastMileRate();
+      c.mileRate = lastMileRate(); c.dayRate = lastDayRate();
       Object.assign(this.trip, { cost: c, editCostId: null, travel: null });
     },
     editTripCost(x) {
       Object.assign(this.trip, { editCostId: x.id, travel: null, cost: { ...blankTripCost(x.date), kind: x.kind, vendor: x.vendor ?? '', description: x.description,
         miles: x.miles ?? '', mileRate: x.mileRateCents != null ? String(Number(x.mileRateCents) / 100) : '',
+        days: x.days ?? '', dayRate: x.dayRateCents != null ? (x.dayRateCents / 100).toFixed(2) : '',
         amount: (x.amountCents / 100).toFixed(2), expenseAccountId: x.expenseAccountId, paidFromAccountId: x.paidFromAccountId, keptPhotos: x.photoCount } });
     },
     async addTripCostPhotos(e) {
@@ -2276,13 +2288,14 @@ createApp({
     },
     async saveTripCost() {
       const tr = this.trip; const c = tr.cost;
-      const body = { date: c.date, kind: c.kind, vendor: c.vendor, description: c.description, amount: c.amount, miles: c.miles, mileRate: c.mileRate,
+      const body = { date: c.date, kind: c.kind, vendor: c.vendor, description: c.description, amount: c.amount, miles: c.miles, mileRate: c.mileRate, days: c.days, dayRate: c.dayRate,
         expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId, ...(c.bookingId && !tr.editCostId ? { bookingId: c.bookingId } : {}) };
       if (c.kind === 'mileage') keepMileRate(c.mileRate);
+      if (c.kind === 'per_diem') keepDayRate(c.dayRate);
       if (!c.roadItem) keepCardFor(c.kind, c.paidFromAccountId);
       if (c.roadItem) {
-        const { date, kind, vendor, description, amount, miles, mileRate } = body;
-        const done = await this.saveRoadEdit(c.roadItem, { date, kind, vendor, description, amount, miles, mileRate },
+        const { date, kind, vendor, description, amount, miles, mileRate, days, dayRate } = body;
+        const done = await this.saveRoadEdit(c.roadItem, { date, kind, vendor, description, amount, miles, mileRate, days, dayRate },
           { expenseAccountId: c.expenseAccountId, paidFromAccountId: c.paidFromAccountId });
         if (!done) return;
         keepRoadAccounts({ expenseId: c.expenseAccountId, paidFromId: this.road.paidFromId || c.paidFromAccountId });
@@ -2393,6 +2406,7 @@ createApp({
     addPulled() {
       const d = this.ar.doc; const pl = this.ar.pull;
       const svc = this.items.find((x) => x.id === pl.serviceItemId); const exp = this.items.find((x) => x.id === pl.expenseItemId);
+      const perDay = this.items.find((x) => x.kind === 'per_day' && x.isActive !== false);
       const people = new Set(pl.time.filter((x) => pl.pick[this.pullKey('t', x)]).map((x) => x.userName));
       const manyJobs = !d.jobId;
       const tag = (x) => (manyJobs && x.jobCode ? ` (${x.jobCode})` : '');
@@ -2403,10 +2417,17 @@ createApp({
           unitPrice: svc?.rateCents != null ? (svc.rateCents / 100).toFixed(2) : '', taxable: !!svc?.taxable, accountId: svc?.accountId ?? pl.accountId,
           timeEntryId: x.id, jobId: x.lineJobId || '', from: x.tripName ? `trip ${x.tripName}, ${x.share}%` : `timesheet, ${x.hours} h` })),
         // A trip cost: the full cost as the price, the project's share as the quantity (type a different share to override).
-        ...pl.tripCosts.filter((x) => pl.pick[this.pullKey('p', x)]).map((x) => ({ ...blankLine(), itemId: exp?.id ?? '', serviceDate: x.date,
-          description: `${x.description} (${x.share}% of trip ${x.tripName})${tag(x)}`.slice(0, 300), quantity: x.quantity, qtyTyped: true,
-          unitPrice: (x.amountCents / 100).toFixed(2), taxable: !!exp?.taxable, accountId: exp?.accountId ?? pl.accountId,
-          tripCostId: x.id, jobId: x.jobId, from: `trip ${x.tripName}, ${x.share}%` })),
+        // A per diem goes on the saved "per day" rate if there is one; when one project carries all of it, the line reads
+        // days × daily rate (3 × $68.00), the same amount.
+        ...pl.tripCosts.filter((x) => pl.pick[this.pullKey('p', x)]).map((x) => {
+          const it = (x.kind === 'per_diem' && perDay) || exp;
+          const byDay = x.kind === 'per_diem' && x.share === '100' && x.days && x.dayRateCents;
+          return { ...blankLine(), itemId: it?.id ?? '', serviceDate: x.date,
+            description: `${x.description}${byDay ? ` (trip ${x.tripName})` : ` (${x.share}% of trip ${x.tripName})`}${tag(x)}`.slice(0, 300),
+            quantity: byDay ? x.days : x.quantity, qtyTyped: true,
+            unitPrice: ((byDay ? x.dayRateCents : x.amountCents) / 100).toFixed(2), taxable: !!it?.taxable, accountId: it?.accountId ?? pl.accountId,
+            tripCostId: x.id, jobId: x.jobId, from: `trip ${x.tripName}, ${x.share}%` };
+        }),
         ...pl.costs.filter((x) => pl.pick[`c${x.id}`]).map((x) => ({ ...blankLine(), itemId: exp?.id ?? '', serviceDate: x.date,
           description: `${x.description || x.vendorName}${tag(x)}`.slice(0, 300), quantity: '1', qtyTyped: true, unitPrice: (x.amountCents / 100).toFixed(2),
           taxable: !!exp?.taxable, accountId: exp?.accountId ?? pl.accountId, billedLineId: x.id, from: `bill ${x.billNumber} · ${x.vendorName}` })),
@@ -2577,7 +2598,7 @@ createApp({
       // A quantity typed by hand on a line is the user's override: leave it alone.
       for (const l of this.ar.doc.lines) if (!l.qtyTyped && this.items.find((x) => x.id === l.itemId)?.kind === 'expense') l.quantity = q;
     },
-    itemLabel(it) { return `${it.name}${it.rateCents != null ? ` · ${this.money(it.rateCents)}${it.kind === 'service' ? '/hr' : ''}` : ''}`; },
+    itemLabel(it) { return `${it.name}${it.rateCents != null ? ` · ${this.money(it.rateCents)}${it.kind === 'service' ? '/hr' : it.kind === 'per_day' ? '/day' : ''}` : ''}`; },
     async pinTaxRate() {
       const rate = String(this.ar.doc.taxRate ?? '').trim();
       const r = await this.run(() => api('PUT', `/companies/${this.companyId}/default-tax-rate`, { rate }),
