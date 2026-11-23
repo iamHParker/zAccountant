@@ -204,9 +204,12 @@ async function api(method, url, body, headers = {}) {
   const data = await res.json().catch(() => (res.ok ? {} : { error: res.status >= 500
     ? `zAccountant is restarting or briefly unavailable (error ${res.status}). Wait a minute and try again.`
     : `The request was refused (error ${res.status}).` }));
-  if (res.status === 401 && !url.startsWith('/auth/') && !url.includes('/lock')) onSignInNeeded(data.next);
+  // ℹ️ Signed out (30 minutes without use, src/services/authService.js): the sign-in screen says why, so the error
+  // is marked and run() doesn't also show it as a red message that would stay on screen after signing in again.
+  const signedOut = res.status === 401 && !url.startsWith('/auth/') && !url.includes('/lock');
+  if (signedOut) onSignInNeeded(data.next);
   if (!res.ok && res.status !== 401) noteError('server', `${where} → ${res.status}: ${data.error ?? ''}`, res.headers.get('x-request-id'));
-  if (!res.ok) throw Object.assign(new Error(data.error ?? `Request failed (${res.status})`), { details: data.details ?? [] });
+  if (!res.ok) throw Object.assign(new Error(data.error ?? `Request failed (${res.status})`), { details: data.details ?? [], signedOut });
   return data;
 }
 
@@ -306,7 +309,7 @@ createApp({
   data() {
     return {
       SHARE_COLS, BOOKING_KINDS, ROAD_TRIP_KINDS, BOOKING_DATES, companies: [], companyId: null, company: null, tab: 'home', message: null,
-      auth: { screen: 'loading', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
+      auth: { screen: 'loading', notice: '', user: null, email: '', password: '', name: '', code: '', setup: null, recoveryCodes: null, useRecovery: false },
       passkeys: { list: [], name: '', code: '', busy: false, supported: canPasskey() },
       members: [], newMember: { email: '', role: 'bookkeeper', departmentId: '' },
       roleLabels: { owner: 'Owner', accountant: 'Accountant', bookkeeper: 'Bookkeeper', viewer: 'Viewer (read only)' },
@@ -473,7 +476,12 @@ createApp({
       this.refreshItems();
     });
     startRecorder();
-    onSignInNeeded = (next) => this.goAuth(next ?? 'signin');
+    onSignInNeeded = (next) => {
+      if (this.auth.screen) return; // already on a sign-in screen
+      if (this.message?.kind === 'bad') this.message = null;
+      if (!next) this.auth.notice = 'You were signed out after 30 minutes without use. Sign in again to carry on.';
+      this.goAuth(next ?? 'signin');
+    };
     api('GET', '/public/features').then((f) => { this.siteFeatures = f; }).catch(() => {}); // e.g. receipt reading on or off
     try {
       const me = await api('GET', '/auth/me');
@@ -502,7 +510,8 @@ createApp({
       }
     },
     async enterApp() {
-      this.auth.screen = null;
+      this.auth.screen = null; this.auth.notice = '';
+      if (this.message?.kind === 'bad') this.message = null; // a red message from before signing in no longer applies
       this.companies = await api('GET', '/companies');
       this.companyId = this.companies[0]?.id ?? null;
       if (!this.companyId) this.company = null;
@@ -779,7 +788,7 @@ createApp({
     },
     flash(text, kind = 'ok') { this.message = { text, kind }; if (kind === 'ok') setTimeout(() => { if (this.message?.text === text) this.message = null; }, 4000); },
     async run(fn, success) {
-      try { const r = await fn(); if (success) this.flash(success); return r; } catch (e) { this.flash(e.message, 'bad'); return undefined; }
+      try { const r = await fn(); if (success) this.flash(success); return r; } catch (e) { if (!e.signedOut) this.flash(e.message, 'bad'); return undefined; }
     },
     async loadCompany() {
       if (!this.companyId) { this.company = null; return; }

@@ -64,6 +64,7 @@
     <section v-if="auth.screen === 'loading'" class="card narrow"><p class="hint">Loading…</p></section>
     <section v-else-if="auth.screen === 'signin'" class="card narrow">
       <h1>Sign in</h1>
+      <p v-if="auth.notice" class="alpha-note">{{ auth.notice }}</p>
       <p class="alpha-note"><strong>Alpha testing.</strong> zAccountant is still being tested. Keep your own backup:
         download a copy of your books regularly from <strong>Settings → Back up your books</strong>, and keep your own
         records (bank statements, receipts, invoices) as well.</p>
