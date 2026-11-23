@@ -235,6 +235,20 @@ its id. `POST …/jobs/:id/move { toJobId }` (`moveProjectUses`) moves time, tri
 with the same shares; refused if it is already on that trip), purchases and road items, with an audit `move` record.
 `DELETE …/jobs/:id` (`deleteProject`) refuses with the list while anything uses it; 0% trip lines go with it; audit
 `delete` keeps the name and number. Desk: Sales → Projects → delete (`askDeleteProject`, the `.delete-box` panel).
+Merging projects (Homer 2026-11-23, 26-143 and 26-151 were one claim; no migration): `POST …/jobs/:id/merge
+{ toJobId, preview }` (`mergeProjects` in projectService.js, permission `PROJECT_PERMISSIONS`, plus `invoices` / `bills`
+when it must re-save those). One transaction, in this order: (1) void every posted invoice that names the old project,
+bills its time, or bills a line of an affected bill (`PROJECT_DOCS_SQL`), which frees that time; (2) void + corrected
+copy of each affected bill, remembering old line id → new line id; (3) move time entries, trip shares (a trip both are
+on: shares add, kind by kind, null = the trip share), purchases, pending road items; (4) corrected copies of the
+invoices (lines' `jobId` swapped, `billedLineId` remapped), payments moved with `movePayments` (now exported from
+arapService.js); (5) delete the old project, or close it when void documents still name it (always, once any document
+was re-saved). Refused when both projects share a trip with anything billed on it. Audit `merge` lists each document and
+its copy. Desk: Sales → Projects → merge (`startMergeProject`, `previewMerge`, `mergeProject`). Test:
+test/projectMerge.db.test.js (every account balance unchanged afterwards).
+Duplicate warning: `public/projectSimilar.js` (`claimNumbers`, `streetKey`, `similarProjects`), shared by the desk's
+`saveProject` (the `.similar-box`, "Add it anyway") and the Road page's project form (a `confirm`); runs on the phone
+offline, so it is client-side only and never blocks a save. Road service worker cache bumped to v19.
 Typed projects (Homer 2026-11-16, a phantom project "26" named "26-147, 26-148"): `parseProjectFolder` now ends a
 number at a comma, semicolon or bracket too, and `typedProjects` (src/core/projects.js) splits a line of numbers only
 (`numberList`: `,` `;` `&` `/` `+` "and") into its numbers for a trip's `newProjects`, both when the item is cleaned and

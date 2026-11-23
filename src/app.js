@@ -840,6 +840,9 @@ export function createApp(pool, { log } = {}) {
   // Delete a project made by mistake (Homer, 2026-11-16): what uses it, move those to another project, delete it.
   api.get('/companies/:companyId/jobs/:jobId/uses', route(JOB_ADMIN, ({ db, req, companyId }) => projects.projectUses(db, companyId, req.params.jobId)));
   api.post('/companies/:companyId/jobs/:jobId/move', route(JOB_ADMIN, ({ db, req, companyId, actor }) => projects.moveProjectUses(db, companyId, req.params.jobId, req.body?.toJobId, { actor })));
+  // Merge two projects for the same job (Homer, 2026-11-23): preview: true answers the counts and changes nothing.
+  api.post('/companies/:companyId/jobs/:jobId/merge', route(JOB_ADMIN, ({ db, req, companyId, can, actor }) =>
+    projects.mergeProjects(db, companyId, req.params.jobId, req.body?.toJobId, { preview: req.body?.preview === true, can, actor })));
   api.delete('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => projects.deleteProject(db, companyId, req.params.jobId, { actor })));
   api.patch('/companies/:companyId/jobs/:jobId', route(JOB_ADMIN, ({ db, req, companyId, actor }) => time.updateJob(db, companyId, req.params.jobId, req.body ?? {}, { actor })));
   const TE = '/companies/:companyId/time-entries';

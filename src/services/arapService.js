@@ -667,7 +667,7 @@ export async function replaceDocument(pool, companyId, docId, { idempotencyKey =
  * puts the corrected amount in, and the payments already came off that total. The corrected copy must still cover
  * the payments, belong to the same customer or vendor, and be dated on or before the first one. Audited.
  */
-async function movePayments(c, companyId, { from, to, kind, oldContactId, actor }) {
+export async function movePayments(c, companyId, { from, to, kind, oldContactId, actor }) {
   const { rows: apps } = await c.query(
     `SELECT a.payment_id, a.amount_cents, to_char(p.pay_date, 'YYYY-MM-DD') AS pay_date FROM payment_applications a JOIN payments p ON p.id = a.payment_id
       WHERE a.company_id = $1 AND a.document_id = $2 AND p.status = 'posted' ORDER BY p.pay_date`, [companyId, from]);

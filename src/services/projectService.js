@@ -8,8 +8,8 @@ import { parseProjectList, splitProjectName } from '../core/projects.js';
 import { minutesToHours } from '../core/timesheets.js';
 import { divRoundHalfUp } from '../core/money.js';
 import { appendAudit } from './audit.js';
-import { lineAmount, minutesToHoursText } from './arapService.js';
-import { bpToQuantity, bpToPercent, COST_SHARE_SQL } from './tripService.js';
+import { lineAmount, minutesToHoursText, getDocument, voidDocument, createDocument, movePayments } from './arapService.js';
+import { bpToQuantity, bpToPercent, COST_SHARE_SQL, SHARE_GROUPS } from './tripService.js';
 
 const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
@@ -262,5 +262,155 @@ export async function moveProjectUses(pool, companyId, jobId, toJobId, { actor =
     const moved = { time: time.rowCount, trips: trips.rowCount, purchases: buys.rowCount, road: road.rowCount };
     await appendAudit(c, companyId, { action: 'move', entity: 'job', entityId: jobId, actor, payload: { to: toJobId, ...moved } });
     return { moved, to: to.name };
+  });
+}
+
+// ---------------------------------------------------------------- Merging two projects (Homer, 2026-11-23)
+// "hate that when it happens": 26-143 and 26-151 were the same insurance claim. The trip costs went on one, the office
+// time on the other, so neither invoice could pull in everything. Merge moves everything from one project (from) onto
+// the other (to) in one transaction, then deletes the empty one:
+//   * time entries, trip shares, purchases and items waiting from the road are moved as they are;
+//   * invoices and bills are saved records, so each one that names the project (or bills its time or costs) is
+//     corrected the same way Edit does it: void + a corrected copy with the same number, date, lines and amounts,
+//     naming the other project. Payments follow the copy. The ledger totals don't change; the audit trail shows both.
+//   * Void invoices and bills keep their history (including the old copies this merge voids), so when any name the old
+//     project it is closed instead of deleted: it drops off every pick list but the void copies still show it.
+// Refused (nothing changes) when both projects are on the same trip and part of that trip is already billed: the
+// trip's shares must be sorted out by hand there first, so nothing is billed twice or lost.
+
+const PROJECT_DOCS_SQL = `
+  WITH from_bills AS (SELECT d.id FROM documents d JOIN document_lines l ON l.document_id = d.id
+                       WHERE d.company_id = $1 AND d.kind = 'bill' AND d.status = 'posted' AND l.job_id = $2)
+  SELECT DISTINCT d.id, d.kind, d.number, to_char(d.doc_date, 'YYYY-MM-DD') AS date, d.created_at
+    FROM documents d JOIN document_lines l ON l.document_id = d.id
+   WHERE d.company_id = $1 AND d.status = 'posted' AND (
+         d.job_id = $2 OR l.job_id = $2 OR d.id IN (SELECT id FROM from_bills)
+      OR l.time_entry_id IN (SELECT id FROM time_entries WHERE company_id = $1 AND job_id = $2)
+      OR l.billed_line_id IN (SELECT x.id FROM document_lines x WHERE x.document_id IN (SELECT id FROM from_bills)))
+   ORDER BY d.created_at`;
+
+/** Both projects, or a clear refusal. */
+async function mergePair(db, companyId, fromId, toId) {
+  if (!isId(fromId)) throw new LedgerError('Project not found');
+  if (!isId(toId) || toId === fromId) throw new LedgerError('Choose the project to merge it into');
+  const { rows } = await db.query('SELECT id, name, code, is_active AS "isActive" FROM jobs WHERE company_id = $1 AND id = ANY($2::uuid[])', [companyId, [fromId, toId]]);
+  const from = rows.find((j) => j.id === fromId); const to = rows.find((j) => j.id === toId);
+  if (!from) throw new LedgerError('Project not found');
+  if (!to) throw new LedgerError('Choose the project to merge it into');
+  return { from, to };
+}
+
+/** What a merge would move, as counts and plain sentences, and what (if anything) stops it. */
+async function mergePlan(db, companyId, from, to) {
+  const { rows: [time] } = await db.query('SELECT count(*)::int AS n FROM time_entries WHERE company_id = $1 AND job_id = $2', [companyId, from.id]);
+  const { rows: trips } = await db.query(
+    `SELECT t.id, t.name, EXISTS (SELECT 1 FROM trip_jobs b WHERE b.trip_id = t.id AND b.job_id = $3) AS shared,
+            EXISTS (SELECT 1 FROM document_lines l JOIN documents d ON d.id = l.document_id WHERE d.status = 'posted' AND l.job_id IN ($2, $3)
+                     AND (l.trip_cost_id IN (SELECT id FROM trip_costs WHERE trip_id = t.id) OR l.time_entry_id IN (SELECT id FROM time_entries WHERE trip_id = t.id))) AS billed
+       FROM trip_jobs a JOIN trips t ON t.id = a.trip_id WHERE a.company_id = $1 AND a.job_id = $2 ORDER BY t.start_date`, [companyId, from.id, to.id]);
+  const { rows: [buys] } = await db.query('SELECT count(*)::int AS n FROM purchases WHERE company_id = $1 AND job_id = $2', [companyId, from.id]);
+  const { rows: [road] } = await db.query("SELECT count(*)::int AS n FROM road_items WHERE company_id = $1 AND status = 'pending' AND strpos(data::text, $2) > 0", [companyId, from.id]);
+  const { rows: docs } = await db.query(PROJECT_DOCS_SQL, [companyId, from.id]);
+  const { rows: [voided] } = await db.query(
+    `SELECT count(DISTINCT d.id)::int AS n FROM documents d LEFT JOIN document_lines l ON l.document_id = d.id
+      WHERE d.company_id = $1 AND d.status = 'void' AND (d.job_id = $2 OR l.job_id = $2)`, [companyId, from.id]);
+  const invoices = docs.filter((d) => d.kind === 'invoice'); const bills = docs.filter((d) => d.kind === 'bill');
+  const counts = { time: time.n, trips: trips.length, purchases: buys.n, road: road.n, invoices: invoices.length, bills: bills.length };
+  const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+  const nums = (list) => list.slice(0, 8).map((d) => d.number).join(', ') + (list.length > 8 ? '…' : '');
+  const lines = [
+    time.n && plural(time.n, 'time entry', 'time entries'),
+    trips.length && `its share of ${plural(trips.length, 'trip')} (${trips.map((t) => t.name).join(', ')})`,
+    buys.n && plural(buys.n, 'purchase'),
+    road.n && `${plural(road.n, 'item')} waiting in From the road`,
+    invoices.length && `${plural(invoices.length, 'invoice')} (${nums(invoices)}), re-saved naming ${to.name}: same number, date and amounts`,
+    bills.length && `${plural(bills.length, 'bill')} (${nums(bills)}), re-saved the same way`,
+  ].filter(Boolean);
+  const problems = trips.filter((t) => t.shared && t.billed)
+    .map((t) => `Both projects are on trip ${t.name}, and part of it is already billed. Open the trip and give one of them 0% first (or void that invoice).`);
+  // The voided copies (old or made by this merge) still name it, and history is never changed, so it is closed, not deleted.
+  return { counts, lines, problems, docs, trips, keepClosed: voided.n > 0 || docs.length > 0 };
+}
+
+/**
+ * Merge project `fromId` into `toId`. With preview, nothing changes: { from, to, counts, lines, problems, keepClosed }.
+ * Otherwise everything moves in one transaction and the old project is deleted (or closed, when void invoices or
+ * bills still name it). Refused, with the reasons, when `problems` is not empty.
+ */
+export async function mergeProjects(pool, companyId, fromId, toId, { preview = false, can = () => true, actor = null } = {}) {
+  return withTransaction(pool, async (c) => {
+    await c.query('SELECT 1 FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
+    const { from, to } = await mergePair(c, companyId, fromId, toId);
+    const plan = await mergePlan(c, companyId, from, to);
+    // Re-saving an invoice or bill is an edit of it, so it needs the right to write invoices or bills.
+    if (plan.counts.invoices && !can('invoices')) plan.problems.push('Its invoices have to be re-saved, and your role can\'t edit invoices');
+    if (plan.counts.bills && !can('bills')) plan.problems.push('Its bills have to be re-saved, and your role can\'t edit bills');
+    const out = { from, to, counts: plan.counts, lines: plan.lines, problems: plan.problems, keepClosed: plan.keepClosed };
+    if (preview) return { preview: true, ...out };
+    if (plan.problems.length) throw new LedgerError(`${from.name} can't be merged yet`, plan.problems);
+
+    // 1. Void the invoices first: that frees the time and costs they bill, so those can move.
+    const label = (d) => `${d.kind === 'invoice' ? 'Invoice' : 'Bill'} ${d.number}`;
+    const snaps = new Map();
+    for (const d of plan.docs) snaps.set(d.id, { doc: await getDocument(c, companyId, d.id), newId: (await c.query('SELECT gen_random_uuid() AS id')).rows[0].id });
+    const invoices = plan.docs.filter((d) => d.kind === 'invoice'); const bills = plan.docs.filter((d) => d.kind === 'bill');
+    for (const d of invoices) await voidDocument(c, companyId, d.id, { actor, replacedById: snaps.get(d.id).newId, keepPayments: true });
+    const swap = (id) => (id === from.id ? to.id : id);
+    const reSave = async (d, lineMap = new Map()) => {
+      const { doc, newId } = snaps.get(d.id);
+      const lines = doc.lines.map((l) => (l.comment ? { comment: true, description: l.description, serviceDate: l.serviceDate } : {
+        accountId: l.accountId, description: l.description, quantity: l.quantity, unitPrice: Number(l.unitPriceCents), lineAmount: Number(l.amountCents),
+        taxable: l.taxable, serviceDate: l.serviceDate, itemId: l.itemId, jobId: swap(l.jobId), billable: l.billable,
+        timeEntryId: l.timeEntryId, billedLineId: l.billedLineId ? lineMap.get(l.billedLineId) ?? l.billedLineId : null, tripCostId: l.tripCostId }));
+      let fixed;
+      try {
+        fixed = await createDocument(c, companyId, { kind: doc.kind, contactId: doc.contactId, number: doc.number, date: doc.date, dueDate: doc.dueDate,
+          memo: doc.memo, project: doc.project, jobId: swap(doc.jobId), taxRate: doc.taxRate, lines, attention: doc.attention, careOf: doc.careOf,
+          sendTo: doc.sendTo, clientRef: doc.clientRef, plan: doc.plan ? { count: doc.plan.count, firstDue: doc.plan.firstDue } : null,
+          noLateCharges: doc.noLateCharges, lateChargeMonth: doc.lateChargeMonth, actor, documentId: newId, replacesId: d.id });
+      } catch (e) {
+        if (e instanceof LedgerError) throw new LedgerError(`${label(d)} couldn't be re-saved on ${to.name}, so nothing was merged`, e.details ?? [e.message]);
+        throw e;
+      }
+      await movePayments(c, companyId, { from: d.id, to: fixed, kind: doc.kind, oldContactId: doc.contactId, actor });
+      return fixed;
+    };
+    // 2. Bills: void + corrected copy now. Their lines get new numbers, so remember old line -> new line for the invoices.
+    const lineMap = new Map();
+    for (const d of bills) {
+      await voidDocument(c, companyId, d.id, { actor, replacedById: snaps.get(d.id).newId, keepPayments: true });
+      const fixed = await reSave(d);
+      snaps.get(d.id).doc.lines.forEach((l, i) => lineMap.set(l.id, fixed.lines[i].id));
+    }
+    // 3. Time, trip shares, purchases, road items.
+    const time = await c.query('UPDATE time_entries SET job_id = $3, updated_at = now() WHERE company_id = $1 AND job_id = $2', [companyId, from.id, to.id]);
+    // A trip both are on: the other project's share grows by this one's, kind by kind (an empty kind = the trip share).
+    const { rows: shares } = await c.query('SELECT * FROM trip_jobs WHERE company_id = $1 AND job_id IN ($2, $3) AND trip_id IN (SELECT trip_id FROM trip_jobs WHERE job_id = $2)', [companyId, from.id, to.id]);
+    for (const a of shares.filter((r) => r.job_id === from.id)) {
+      const b = shares.find((r) => r.trip_id === a.trip_id && r.job_id === to.id);
+      if (!b) {
+        await c.query(`INSERT INTO trip_jobs (company_id, trip_id, job_id, share_bp, air_bp, hotel_bp, car_bp, rest_bp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [companyId, a.trip_id, to.id, a.share_bp, a.air_bp, a.hotel_bp, a.car_bp, a.rest_bp]);
+      } else {
+        const share = a.share_bp + b.share_bp;
+        const kind = (g) => { const v = (a[`${g}_bp`] ?? a.share_bp) + (b[`${g}_bp`] ?? b.share_bp); return v === share ? null : v; };
+        await c.query('UPDATE trip_jobs SET share_bp = $3, air_bp = $4, hotel_bp = $5, car_bp = $6, rest_bp = $7 WHERE trip_id = $1 AND job_id = $2',
+          [a.trip_id, to.id, share, ...SHARE_GROUPS.map(kind)]);
+      }
+    }
+    await c.query('DELETE FROM trip_jobs WHERE company_id = $1 AND job_id = $2', [companyId, from.id]);
+    const buys = await c.query('UPDATE purchases SET job_id = $3 WHERE company_id = $1 AND job_id = $2', [companyId, from.id, to.id]);
+    const road = await c.query(`UPDATE road_items SET data = replace(data::text, $2, $3)::jsonb
+      WHERE company_id = $1 AND status = 'pending' AND strpos(data::text, $2) > 0`, [companyId, from.id, to.id]);
+    // 4. The invoices' corrected copies, now that the time and trip shares are on the other project.
+    for (const d of invoices) await reSave(d, lineMap);
+    // 5. The empty project: deleted, or closed when void invoices or bills still name it (their history stays as it was).
+    if (plan.keepClosed) await c.query('UPDATE jobs SET is_active = false WHERE company_id = $1 AND id = $2', [companyId, from.id]);
+    else await c.query('DELETE FROM jobs WHERE company_id = $1 AND id = $2', [companyId, from.id]);
+    if (!to.isActive) await c.query('UPDATE jobs SET is_active = true WHERE company_id = $1 AND id = $2', [companyId, to.id]);
+    const moved = { time: time.rowCount, trips: plan.counts.trips, purchases: buys.rowCount, road: road.rowCount, invoices: invoices.length, bills: bills.length };
+    await appendAudit(c, companyId, { action: 'merge', entity: 'job', entityId: from.id, actor,
+      payload: { from: { name: from.name, code: from.code }, to: to.id, toName: to.name, ...moved, documents: plan.docs.map((d) => ({ id: d.id, number: d.number, kind: d.kind, copyId: snaps.get(d.id).newId })), closed: plan.keepClosed } });
+    return { merged: true, ...out, moved, deleted: !plan.keepClosed };
   });
 }
