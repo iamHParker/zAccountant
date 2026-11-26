@@ -481,6 +481,10 @@
           <h2>{{ costForm.editId ? 'Change this cost' : 'Cost' }}</h2>
           <p class="muted small" v-if="costForm.booking">Paying for a booking: it is marked paid when this cost is put in the books.</p>
           <form @submit.prevent="saveCost">
+            <p class="banner small" v-if="['amount', 'vendor', 'card'].some(b => needs(costForm, b))">The photo didn't show everything. While you're there:
+              <span v-if="needs(costForm, 'amount')">check the amount (it was hard to read); </span>
+              <span v-if="needs(costForm, 'vendor')">who was paid (the station's name); </span>
+              <span v-if="needs(costForm, 'card')">the card's last 4 digits.</span></p>
             <div class="chips">
               <button type="button" v-for="(label, k) in kinds" :class="{ active: costForm.kind === k }" @click="costForm.kind = k">{{ label }}</button>
             </div>
@@ -507,9 +511,10 @@
                 <a href="https://www.gsa.gov/travel/plan-book/per-diem-rates" target="_blank" rel="noopener">GSA meals rate</a> (75% on the first and last day: 2.75 for three days).</p>
               <p class="muted small" v-if="perDiemText"><span class="amt">{{ perDiemText }}</span></p>
             </template>
-            <label v-else>Amount ($) <input class="amt" v-model.trim="costForm.amount" inputmode="decimal" placeholder="0.00" required autocomplete="off"></label>
-            <label>Paid to (optional) <input v-model="costForm.vendor" maxlength="120" placeholder="Southwest, Avis, NTTA…"></label>
-            <label v-if="!['mileage', 'per_diem'].includes(costForm.kind)">Card it was paid with, last 4 digits (optional) <input v-model.trim="costForm.card" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="7413" autocomplete="off"></label>
+            <label v-else>Amount ($) <input class="amt" :class="{ needs: needs(costForm, 'amount') }" data-need="amount" v-model.trim="costForm.amount" inputmode="decimal" placeholder="0.00" required autocomplete="off"
+              @change="costForm.needs = (costForm.needs || []).filter(n => n !== 'amount')"></label>
+            <label>Paid to (optional) <input :class="{ needs: needs(costForm, 'vendor') }" data-need="vendor" v-model="costForm.vendor" maxlength="120" placeholder="Southwest, Avis, NTTA…"></label>
+            <label v-if="!['mileage', 'per_diem'].includes(costForm.kind)">Card it was paid with, last 4 digits (optional) <input :class="{ needs: needs(costForm, 'card') }" data-need="card" v-model.trim="costForm.card" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="7413" autocomplete="off"></label>
             <label>What it was <input v-model="costForm.description" maxlength="300" :placeholder="kinds[costForm.kind]"></label>
             <div class="photo-row" @dragover.prevent @drop.prevent="dropPhotos"><span class="label-like">Receipt photos</span>
               <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>

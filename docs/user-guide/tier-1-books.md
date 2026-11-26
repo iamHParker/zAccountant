@@ -474,6 +474,14 @@ On **Trip now**, **📷 A receipt** works before you choose a trip: the receipt'
 it. If no trip covers that day, the cost goes on a new **day run**, a one-day trip (no overnight stay) named like
 "Day run 05/06/2026 · Shell". Every box, the trip included, can be changed before you press **Save**.
 
+**No receipt at the pump?** Photograph the pump's display instead ("This Sale" and "Gallons"). The amount, the
+gallons and the station brand (when its logo is on the pump) fill in; the date is when the photo was taken, read from
+the photo itself. The message also shows the price per gallon it works out to (15.177 gal for $57.06 is $3.760 a
+gallon), so a misread digit stands out, and it says so when glare or a scratch made the amount hard to read. Where you
+were is not looked up: type the station's name if the pump doesn't show it. Since you're standing at the pump, Road asks right away for what
+the photo didn't show: a note at the top of the form lists it (the station's name, the card's last 4 digits, an amount
+to check), those boxes are outlined, and the cursor goes to the first one.
+
 **Checks received on the road.** Tap **+ Check received** (no trip needed): the date, amount, who paid, the check
 number, the invoice number(s) it pays (like 26-124, 26-130), a note (where you deposited it) and photos of the check
 and the remittance. At your desk, **Sales → Checks from the road** shows it with the invoices it found. Press

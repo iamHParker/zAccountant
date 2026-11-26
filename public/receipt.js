@@ -43,9 +43,9 @@ export function cardAccountFor(accounts, last4) {
 /** "Filled in the amount, date and paid to from the receipt." */
 export function filledText(filled, read) {
   const foreign = read.currency && read.currency !== 'USD' ? ` The receipt is in ${read.currency}: change the amount to dollars.` : '';
-  if (!filled.length) return `The receipt was read, but your boxes were already filled in, so nothing was changed.${foreign}`;
+  if (!filled.length) return `The receipt was read, but your boxes were already filled in, so nothing was changed.${foreign}${fuelText(read)}`;
   const list = filled.length === 1 ? filled[0] : `${filled.slice(0, -1).join(', ')} and ${filled.at(-1)}`;
-  return `Filled in the ${list} from the receipt. Check them before saving.${foreign}`;
+  return `Filled in the ${list} from the receipt. Check them before saving.${foreign}${fuelText(read)}${photoDateText(read)}`;
 }
 
 /** The pictures among dropped files (a receipt dragged onto the photo boxes). */
@@ -68,3 +68,30 @@ export function tripForDate(trips, date) {
   if (covering.length === 1) return { key: covering[0].key };
   return covering.length ? { key: null, several: covering.length } : { key: DAY_RUN };
 }
+
+/** "12.345" → 12345 (thousandths), or null. */
+const thousandths = (v) => { const m = /^(\d+)(?:\.(\d{1,3}))?$/.exec(String(v ?? '')); return m ? Number(m[1]) * 1000 + Number((m[2] ?? '').padEnd(3, '0')) : null; };
+
+/**
+ * The check on a fuel reading (Homer's pump photo, 2026-11-26: glare over the middle digits of "$51.66"). Gallons ×
+ * price per gallon must come to the amount (the pump rounds to the cent, so within 1¢); with no price shown, the
+ * price it works out to is given, so a misread digit stands out ($57.66 for 15.177 gal would be $3.80 a gallon).
+ * A digit the reader was unsure of is always said. "" when there is nothing to say.
+ */
+export function fuelText(read) {
+  const notes = [];
+  if (read.amountUnsure) notes.push('The amount was hard to read: check it against the pump or your card statement.');
+  const gal = thousandths(read.gallons);
+  const cents = /^\d+\.\d{2}$/.test(read.amount ?? '') ? Math.round(Number(read.amount) * 100) : null;
+  if (gal && cents) {
+    const ppg = thousandths(read.pricePerGallon); // dollars in thousandths: 3.399 → 3399
+    if (ppg) {
+      const expect = Math.round((gal * ppg) / 10000); // thousandths × thousandths = millionths of a dollar → cents
+      if (Math.abs(expect - cents) > 1) notes.push(`${read.gallons} gal × $${read.pricePerGallon} is $${(expect / 100).toFixed(2)}, not $${read.amount}: check the amount.`);
+    } else notes.push(`${read.gallons} gal for $${read.amount} is $${(cents * 10 / gal).toFixed(3)} a gallon.`);
+  }
+  return notes.length ? ` ${notes.join(' ')}` : '';
+}
+
+/** Said when the date came from the picture's own record (public/photoDate.js), not from the receipt. */
+const photoDateText = (read) => (read.dateFromPhoto ? ` The date is when the photo was taken (${read.dateFromPhoto}).` : '');
