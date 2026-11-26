@@ -22,7 +22,7 @@ const textOrNull = { anyOf: [{ type: 'string' }, { type: 'null' }] };
 export const RECEIPT_SCHEMA = {
   type: 'object',
   properties: {
-    isReceipt: { type: 'boolean', description: 'false when the picture is not a receipt, invoice or booking confirmation' },
+    isReceipt: { type: 'boolean', description: 'false when the picture is not a receipt, invoice, booking confirmation or fuel pump display' },
     vendor: { ...textOrNull, description: 'the business that was paid, as printed (e.g. "Southwest Airlines", "Avis", "Hampton Inn Selma")' },
     total: { ...textOrNull, description: 'the grand total actually charged, digits only with a decimal point, e.g. "412.30"' },
     currency: { ...textOrNull, description: 'three-letter currency code, e.g. "USD"' },
@@ -31,8 +31,11 @@ export const RECEIPT_SCHEMA = {
     description: { ...textOrNull, description: 'a few words on what was bought, e.g. "Airfare SAT-DAL" or "Hotel, 2 nights"' },
     cardBrand: { ...textOrNull, description: 'the card that paid, as printed, e.g. "Mastercard", "Visa", "Amex"; null for cash' },
     cardLast4: { ...textOrNull, description: 'the last four digits of the card that paid, e.g. "7413"; null when not printed' },
+    amountUnsure: { type: 'boolean', description: 'true when any digit of the total was hard to read (glare, a scratch, a smudge)' },
+    gallons: { ...textOrNull, description: 'fuel only: the gallons pumped as shown, e.g. "15.177"' },
+    pricePerGallon: { ...textOrNull, description: 'fuel only: the price per gallon as shown, e.g. "3.399"; null when not shown' },
   },
-  required: ['isReceipt', 'vendor', 'total', 'currency', 'date', 'kind', 'description', 'cardBrand', 'cardLast4'],
+  required: ['isReceipt', 'vendor', 'total', 'currency', 'date', 'kind', 'description', 'cardBrand', 'cardLast4', 'amountUnsure', 'gallons', 'pricePerGallon'],
   additionalProperties: false,
 };
 
@@ -49,6 +52,10 @@ export const RECEIPT_PROMPT = [
   '- description: a few words, like "Airfare SAT-DAL" or "Hotel, 2 nights".',
   '- cardBrand and cardLast4: the card that paid (e.g. "MASTERCARD 7413" or "VISA XXXXXXXXXXXX1234" → "Mastercard", "7413").',
   '  Only the last four digits, never more. If the receipt prints them more than once and one copy is smudged, use the clear copy.',
+  'A photo of a fuel pump display (no receipt printed) counts as a receipt: total = the "This Sale" dollar amount, gallons and',
+  '  price per gallon as shown, kind other, description like "Fuel, 15.177 gal". vendor = the station brand only if its logo or',
+  '  name shows on the pump (not a fleet-card sticker like Fuelman or the card logos); otherwise null. A pump has no date: null.',
+  '- amountUnsure: true if glare, a scratch or a smudge makes any digit of the total uncertain; still give your best reading.',
   'If more than one receipt shows in the picture, read only the one most fully in view and ignore the others at the edges.',
   'Use null for anything you cannot read clearly (a smudged card digit makes cardLast4 null). Do not guess numbers.',
 ].join('\n');
@@ -56,6 +63,10 @@ export const RECEIPT_PROMPT = [
 const MAX_VENDOR = 120;
 const MAX_DESCRIPTION = 300;
 const MAX_BRAND = 30;
+
+/** Fuel: "15.177" gallons (up to 3 decimals) and "3.399" a gallon (2 or 3 decimals, $ allowed); anything else → null. */
+const cleanGallons = (v) => (typeof v === 'string' && /^\d{1,3}(\.\d{1,3})?$/.test(v.trim()) ? v.trim() : null);
+const cleanPrice = (v) => { const t = typeof v === 'string' ? v.replace('$', '').trim() : ''; return /^\d{1,2}\.\d{2,3}$/.test(t) ? t : null; };
 
 /** "7413", " 7413 ", "XXXX7413" → "7413"; anything that isn't the last four digits → null. */
 function cleanLast4(v) {
@@ -109,5 +120,8 @@ export function normalizeReceipt(raw, { today }) {
     description: cleanText(r.description, MAX_DESCRIPTION),
     cardBrand: cleanText(r.cardBrand, MAX_BRAND),
     cardLast4: cleanLast4(r.cardLast4),
+    amountUnsure: r.amountUnsure === true,
+    gallons: cleanGallons(r.gallons),
+    pricePerGallon: cleanPrice(r.pricePerGallon),
   };
 }

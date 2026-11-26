@@ -10,6 +10,7 @@ import { render } from '/road.render.js';
 import { picturesFromClipboard } from '/paste.js';
 import { clockTime, clock12, nextDay, durationMinutes, hhmm } from '/clock.js';
 import { fillFromReceipt, filledText, droppedPictures, tripForDate, DAY_RUN } from '/receipt.js';
+import { fileTakenAt } from '/photoDate.js';
 import { projectChoices, projectLabel as projectPickText } from '/projectPick.js';
 import { similarProjects } from '/projectSimilar.js';
 
@@ -698,7 +699,9 @@ createApp({
       try {
         for (const f of files) {
           if (form.photos.length >= 6) { this.flash('At most 6 photos.', 'bad'); problem = true; break; }
-          form.photos.push({ clientId: `photo-${newId()}`, dataUrl: await shrinkPhoto(f) });
+          // When it was taken (a pump photo has no printed date): read from the original, since shrinking drops it.
+          const taken = await fileTakenAt(f).catch(() => null);
+          form.photos.push({ clientId: `photo-${newId()}`, dataUrl: await shrinkPhoto(f), ...(taken ? { takenOn: taken.date, takenAt: taken.time } : {}) });
         }
       } catch { this.flash('That photo could not be read. Try taking it again.', 'bad'); problem = true; } finally { this.busy = false; }
       // A photo went in: an old problem message ("no picture on the clipboard") no longer applies.
@@ -722,15 +725,33 @@ createApp({
       this.reading = true;
       try {
         const read = await this.call('POST', '/receipt', { picture: photo.dataUrl }, { seconds: 90 });
+        // No date on it (a gas pump's display): the moment the photo was taken, from the photo itself (Homer, 2026-11-26).
+        if (!read.date && photo.takenOn) Object.assign(read, { date: photo.takenOn, dateFromPhoto: `${this.usDate(photo.takenOn)}${photo.takenAt ? ' ' + clock12(photo.takenAt) : ''}` });
         if (this.costForm !== form && this.buyForm !== form) return; // the form was closed meanwhile
         const filled = fillFromReceipt(form, read);
         const note = form === this.costForm && read.date ? this.tripByDate(form) : ''; // after the date box is filled
         this.flash(filledText(filled, read) + note);
+        this.askForMissing(form, read);
       } catch (e) {
         if (e instanceof KeyProblem) this.keyProblem = e.message;
         else this.flash(e.message || 'The receipt could not be read just now. Type it in.', 'bad');
       } finally { this.reading = false; }
     },
+    /**
+     * Ask for what the photo couldn't give, right away (Homer, 2026-11-26: "when I take that picture you can ask for
+     * missing data, since I am standing there"). The boxes still empty (who was paid, the card) and an amount the reader
+     * was unsure of are marked, listed at the top of the form, and the first one gets the cursor.
+     */
+    askForMissing(form, read) {
+      const needs = [];
+      if (read.amountUnsure) needs.push('amount');
+      if (!String(form.vendor ?? '').trim()) needs.push('vendor');
+      if (!String(form.card ?? '').trim()) needs.push('card');
+      form.needs = needs;
+      if (needs.length) this.$nextTick(() => document.querySelector(`[data-need="${needs[0]}"]`)?.focus());
+    },
+    /** A box the form is asking for: marked until something is typed in it (the amount: until it is changed or checked). */
+    needs(form, box) { return Boolean(form?.needs?.includes(box)) && (box === 'amount' || !String(form[box] ?? '').trim()); },
     /**
      * Put a cost on the trip its date falls in (Homer, 2026-11-26), or on a new day run when no trip covers that day.
      * Only changes the form's Trip box, which the person can change back. Returns a sentence for the message.

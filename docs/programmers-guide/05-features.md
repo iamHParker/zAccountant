@@ -326,7 +326,15 @@ person picks. `roadCard` / `buyCardFor` use it after a card picked on the row; t
 Card numbers (migration 045, Homer: "alias numbers… when a card is lost or stolen the digits change but still the same
 account"): `accounts.card_numbers` lists every last-four; `cleanCardNumbers` + `updateAccount` (`PATCH …/accounts/:id`
 `{ cardNumbers }`) refuse non-four-digit values and a number already on another active account. `cardAccountFor` tries
-`cardNumbers` first, then the name (only for accounts with none listed). Trip by date: the Road cost form has its own
+`cardNumbers` first, then the name (only for accounts with none listed).
+Gas pump photos (Homer, 2026-11-26, no receipt printed): the form also has `amountUnsure`, `gallons` and
+`pricePerGallon`; the prompt treats a pump display as a receipt (vendor only from a brand on the pump, never a fleet-card
+sticker). `fuelText` (`public/receipt.js`) checks gallons × price against the amount (within 1¢, pumps round) or, with
+no price shown, states the price per gallon, in exact thousandths. The date comes from the photo: `public/photoDate.js`
+reads EXIF DateTimeOriginal (else DateTime) from the original file before `shrinkPhoto` drops it (`photo.takenOn`),
+used only when the reading has no date. No location: iPhone Safari strips GPS from photos given to a page, and Homer
+chose not to send the phone's location to a map service. After any read, `askForMissing` (road.js) sets `form.needs` (unsure amount,
+empty vendor, empty card): outlined with `input.needs`, listed in a banner, the first focused (`data-need`). Trip by date: the Road cost form has its own
 `tripKey`; after a read, `tripForDate` picks the trip covering the date, else `DAY_RUN`, which `saveCost` turns into a
 one-day trip item ("Day run 05/06/2026 · Shell") saved before the cost. Restaurant receipts: the prompt asks for the
 amount charged (total + tip), not the printed "Total" above the tip.

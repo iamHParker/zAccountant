@@ -139,6 +139,8 @@ input.search-small { max-width: 260px; margin: 0; }
 .joining { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line); }
 .ok { color: var(--ok); } .bad { color: var(--bad); } .neg { color: var(--bad); }
 .banner { background: var(--warn-bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+/* A box the Road form is asking for, after reading a photo that didn't show it (public/road.js askForMissing). */
+input.needs { border-color: #d97706; box-shadow: 0 0 0 2px var(--warn-bg); }
 ul.warn { color: var(--muted); font-size: 13px; }
 .toast { position: fixed; right: 16px; bottom: 52px; padding: 10px 16px; border-radius: 8px; background: var(--ok); color: #fff; cursor: pointer; z-index: 5; max-width: 90vw; }
 .toast.bad { background: var(--bad); }

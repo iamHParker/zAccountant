@@ -13,7 +13,7 @@ const JPEG = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 1
 
 test('a clean answer passes through; the total becomes a two-decimal amount', () => {
   const r = normalizeReceipt({ isReceipt: true, vendor: '  Avis   Rent A Car ', total: '412.3', currency: 'usd', date: '2026-10-04', kind: 'rental_car', description: 'Rental car, 3 days' }, { today });
-  assert.deepEqual(r, { isReceipt: true, vendor: 'Avis Rent A Car', amount: '412.30', currency: 'USD', date: '2026-10-04', kind: 'rental_car', description: 'Rental car, 3 days', cardBrand: null, cardLast4: null });
+  assert.deepEqual(r, { isReceipt: true, vendor: 'Avis Rent A Car', amount: '412.30', currency: 'USD', date: '2026-10-04', kind: 'rental_car', description: 'Rental car, 3 days', cardBrand: null, cardLast4: null, amountUnsure: false, gallons: null, pricePerGallon: null });
 });
 
 test('the card that paid: only the last four digits are kept (Homer\'s Serious Texas Bar-B-Q receipt, 2026-11-26)', () => {
@@ -166,4 +166,20 @@ test('tripForDate: the trip whose days cover the receipt, a day run when none do
   assert.deepEqual(tripForDate(trips, '2026-05-06'), { key: DAY_RUN }); // the Shell receipt: no trip that day
   assert.deepEqual(tripForDate(trips, '2026-10-06'), { key: null, several: 2 }); // two trips that day: the person picks
   assert.deepEqual(tripForDate(trips, null), { key: null });
+});
+
+test('a gas pump display, no receipt (Homer, 2026-11-26): gallons kept, an unsure digit and a bad sum are said', async () => {
+  const { fuelText } = await import('../public/receipt.js');
+  // Homer's pump: "This Sale" $57.06 under glare, 15.177 gallons, no price per gallon, no brand on the pump.
+  const r = normalizeReceipt({ isReceipt: true, vendor: null, total: '57.06', currency: 'USD', date: null, kind: 'other', description: 'Fuel, 15.177 gal',
+    cardBrand: null, cardLast4: null, amountUnsure: true, gallons: '15.177', pricePerGallon: null }, { today: '2026-11-26' });
+  assert.deepEqual([r.amount, r.vendor, r.date, r.gallons, r.pricePerGallon, r.amountUnsure], ['57.06', null, null, '15.177', null, true]);
+  // 5706 ¢ × 10 / 15177 thousandths = $3.760 a gallon: a misread $51.66 would show $3.404, easy to question.
+  assert.equal(fuelText(r), ' The amount was hard to read: check it against the pump or your card statement. 15.177 gal for $57.06 is $3.760 a gallon.');
+  // With a price shown: 15.177 × 3.759 = 57.050343 → $57.05, within a cent of $57.06 (pumps round): nothing to say.
+  assert.equal(fuelText({ amount: '57.06', gallons: '15.177', pricePerGallon: '3.759' }), '');
+  // A misread total: 15.177 × 3.759 = $57.05, not $51.66.
+  assert.match(fuelText({ amount: '51.66', gallons: '15.177', pricePerGallon: '3.759' }), /is \$57\.05, not \$51\.66: check the amount/);
+  const odd = normalizeReceipt({ gallons: 'lots', pricePerGallon: '$3.399', amountUnsure: 'yes' }, { today });
+  assert.deepEqual([odd.gallons, odd.pricePerGallon, odd.amountUnsure], [null, '3.399', false]);
 });
