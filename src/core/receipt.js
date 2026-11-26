@@ -6,6 +6,9 @@
 // check of what comes back (normalizeReceipt). It is pure: no network, no database, so the tests can feed it answers.
 // The network call is in src/services/receiptReader.js.
 //
+// Paid with (Homer, 2026-11-26): the card's brand and last four digits are read too ("MASTERCARD 7413"), so the desk can
+// pick the matching card account (public/receipt.js cardAccountFor). Only the last four digits are ever kept.
+//
 // Nothing read from a receipt goes into the books by itself: it only fills the boxes of the cost form, and the person
 // checks them and presses Save, the same as if they had typed them.
 import { toCents, centsToDecimal } from './money.js';
@@ -26,8 +29,10 @@ export const RECEIPT_SCHEMA = {
     date: { ...textOrNull, description: 'the date of the purchase or charge as YYYY-MM-DD' },
     kind: { type: 'string', enum: RECEIPT_KINDS },
     description: { ...textOrNull, description: 'a few words on what was bought, e.g. "Airfare SAT-DAL" or "Hotel, 2 nights"' },
+    cardBrand: { ...textOrNull, description: 'the card that paid, as printed, e.g. "Mastercard", "Visa", "Amex"; null for cash' },
+    cardLast4: { ...textOrNull, description: 'the last four digits of the card that paid, e.g. "7413"; null when not printed' },
   },
-  required: ['isReceipt', 'vendor', 'total', 'currency', 'date', 'kind', 'description'],
+  required: ['isReceipt', 'vendor', 'total', 'currency', 'date', 'kind', 'description', 'cardBrand', 'cardLast4'],
   additionalProperties: false,
 };
 
@@ -35,16 +40,29 @@ export const RECEIPT_SCHEMA = {
 export const RECEIPT_PROMPT = [
   'Read this receipt for a small business\'s books (a US engineering firm, mostly travel costs). Fill in the form:',
   '- vendor: the business that was paid, the way people would name it (the brand or hotel name, not the street address or the card processor).',
-  '- total: the grand total actually charged, after tax and tip. If a tip or total was written in by hand, use the hand-written total.',
+  '- total: the grand total actually charged to the card, after tax AND tip. Restaurants often print "Total" before the tip and the',
+  '  charged amount (total plus tip) below it, next to the card line: use the charged amount. If a tip or total was written in by hand,',
+  '  use the hand-written total.',
   '  For an airline or hotel confirmation, the total charged to the card. Digits and a decimal point only, no $ or commas.',
   '- date: the date of the purchase or charge (for a hotel folio, the check-out date). US receipts write dates month first: 11/04/26 is 2026-11-04.',
   '- kind: airfare, rental_car, lodging (hotel), meals (restaurant, coffee, groceries on the road), tolls (toll road, parking), or other (fuel and everything else).',
   '- description: a few words, like "Airfare SAT-DAL" or "Hotel, 2 nights".',
-  'Use null for anything you cannot read clearly. Do not guess numbers.',
+  '- cardBrand and cardLast4: the card that paid (e.g. "MASTERCARD 7413" or "VISA XXXXXXXXXXXX1234" → "Mastercard", "7413").',
+  '  Only the last four digits, never more. If the receipt prints them more than once and one copy is smudged, use the clear copy.',
+  'If more than one receipt shows in the picture, read only the one most fully in view and ignore the others at the edges.',
+  'Use null for anything you cannot read clearly (a smudged card digit makes cardLast4 null). Do not guess numbers.',
 ].join('\n');
 
 const MAX_VENDOR = 120;
 const MAX_DESCRIPTION = 300;
+const MAX_BRAND = 30;
+
+/** "7413", " 7413 ", "XXXX7413" → "7413"; anything that isn't the last four digits → null. */
+function cleanLast4(v) {
+  if (typeof v !== 'string' && typeof v !== 'number') return null;
+  const digits = String(v).replace(/[\sXx*•.-]/g, '');
+  return /^\d{4}$/.test(digits) ? digits : null;
+}
 
 function cleanText(v, max) {
   if (typeof v !== 'string') return null;
@@ -73,7 +91,8 @@ function cleanDate(v, today) {
 }
 
 /**
- * What the model answered → what the cost form may use: { isReceipt, vendor, amount, currency, date, kind, description }.
+ * What the model answered → what the cost form may use:
+ * { isReceipt, vendor, amount, currency, date, kind, description, cardBrand, cardLast4 }.
  * Every box is checked again here (the form's rules are the model's instructions, not a promise): an amount with
  * three decimals, an impossible date or an unknown kind becomes null / "other", never an error.
  */
@@ -88,5 +107,7 @@ export function normalizeReceipt(raw, { today }) {
     date: cleanDate(r.date, today),
     kind: RECEIPT_KINDS.includes(r.kind) ? r.kind : 'other',
     description: cleanText(r.description, MAX_DESCRIPTION),
+    cardBrand: cleanText(r.cardBrand, MAX_BRAND),
+    cardLast4: cleanLast4(r.cardLast4),
   };
 }

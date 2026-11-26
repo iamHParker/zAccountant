@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeReceipt, RECEIPT_SCHEMA } from '../src/core/receipt.js';
 import { readReceipt, ReceiptError } from '../src/services/receiptReader.js';
-import { fillFromReceipt, filledText } from '../public/receipt.js';
+import { fillFromReceipt, filledText, cardAccountFor } from '../public/receipt.js';
 import { LedgerError } from '../src/core/ledger.js';
 
 const today = '2026-11-06';
@@ -13,7 +13,39 @@ const JPEG = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 1
 
 test('a clean answer passes through; the total becomes a two-decimal amount', () => {
   const r = normalizeReceipt({ isReceipt: true, vendor: '  Avis   Rent A Car ', total: '412.3', currency: 'usd', date: '2026-10-04', kind: 'rental_car', description: 'Rental car, 3 days' }, { today });
-  assert.deepEqual(r, { isReceipt: true, vendor: 'Avis Rent A Car', amount: '412.30', currency: 'USD', date: '2026-10-04', kind: 'rental_car', description: 'Rental car, 3 days' });
+  assert.deepEqual(r, { isReceipt: true, vendor: 'Avis Rent A Car', amount: '412.30', currency: 'USD', date: '2026-10-04', kind: 'rental_car', description: 'Rental car, 3 days', cardBrand: null, cardLast4: null });
+});
+
+test('the card that paid: only the last four digits are kept (Homer\'s Serious Texas Bar-B-Q receipt, 2026-11-26)', () => {
+  // The receipt prints Total $37.71, Tip $9.43, then $47.14 charged to MASTERCARD 7413: the form wants the $47.14.
+  const r = normalizeReceipt({ isReceipt: true, vendor: 'Serious Texas Bar-B-Q', total: '47.14', currency: 'USD', date: '2026-11-25', kind: 'meals',
+    description: 'Lunch', cardBrand: 'Mastercard', cardLast4: 'XXXX7413' }, { today: '2026-11-26' });
+  assert.deepEqual([r.amount, r.date, r.cardBrand, r.cardLast4], ['47.14', '2026-11-25', 'Mastercard', '7413']);
+  const last4 = (v) => normalizeReceipt({ cardLast4: v }, { today }).cardLast4;
+  assert.equal(last4('9194'), '9194');
+  assert.equal(last4('488'), null); // a smudged digit: the person picks the card
+  assert.equal(last4('5555444433337413'), null); // never a whole card number
+  assert.equal(last4(null), null);
+});
+
+test('cardAccountFor: the one account whose name holds the digits, else nobody', () => {
+  const accts = [{ id: 'a', name: 'Mastercard 7413' }, { id: 'b', name: 'Mastercard x9194' }, { id: 'c', name: 'Chase Checking 4321' },
+    { id: 'd', name: 'Amex 4889' }, { id: 'e', name: 'Amex Gold 4889' }, { id: 'f', name: 'Loan 17413' }];
+  assert.equal(cardAccountFor(accts, '7413'), 'a'); // not "17413"
+  assert.equal(cardAccountFor(accts, '9194'), 'b');
+  assert.equal(cardAccountFor(accts, '4889'), null); // two cards share the digits: the person chooses
+  assert.equal(cardAccountFor(accts, '1111'), null);
+  assert.equal(cardAccountFor(accts, null), null);
+});
+
+test('fillFromReceipt fills the Road form\'s card box, but only on forms that have one', () => {
+  const road = { kind: 'other', date: '2026-11-26', dateDefault: '2026-11-26', amount: '', vendor: '', description: '', card: '' };
+  const read = { vendor: 'Best Buy', amount: '107.17', date: '2026-11-23', kind: 'other', description: 'Apple Pencil Pro', cardLast4: '9194' };
+  assert.ok(fillFromReceipt(road, read).includes('card'));
+  assert.deepEqual([road.vendor, road.amount, road.date, road.card], ['Best Buy', '107.17', '2026-11-23', '9194']);
+  const desk = { kind: 'other', date: '', amount: '', vendor: '', description: '' };
+  assert.ok(!fillFromReceipt(desk, read).includes('card'));
+  assert.equal('card' in desk, false);
 });
 
 test('totals: $ and commas are fine; three decimals, zero, negatives and words are not', () => {
@@ -113,4 +145,15 @@ test('filling the form: only empty boxes (and the date it started with) change',
   assert.deepEqual(typed, { kind: 'meals', date: '2026-10-06', dateDefault: today, amount: '300.00', vendor: 'Hampton', description: 'x' });
   assert.match(filledText([], read), /nothing was changed/);
   assert.match(filledText(['amount', 'date'], { currency: 'EUR' }), /amount and date.*in EUR/);
+});
+
+test('tripForDate: the trip whose days cover the receipt, a day run when none does (Homer, 2026-11-26)', async () => {
+  const { tripForDate, DAY_RUN } = await import('../public/receipt.js');
+  const trips = [{ key: 's:durango', startDate: '2026-11-24', endDate: '2026-11-26' }, { key: 'c:austin', startDate: '2026-11-23', endDate: null },
+    { key: 's:dallas', startDate: '2026-10-04', endDate: '2026-10-06' }, { key: 's:waco', startDate: '2026-10-06', endDate: '2026-10-06' }];
+  assert.deepEqual(tripForDate(trips, '2026-11-25'), { key: 's:durango' });
+  assert.deepEqual(tripForDate(trips, '2026-11-23'), { key: 'c:austin' }); // no end date: that one day
+  assert.deepEqual(tripForDate(trips, '2026-05-06'), { key: DAY_RUN }); // the Shell receipt: no trip that day
+  assert.deepEqual(tripForDate(trips, '2026-10-06'), { key: null, several: 2 }); // two trips that day: the person picks
+  assert.deepEqual(tripForDate(trips, null), { key: null });
 });

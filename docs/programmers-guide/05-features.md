@@ -318,6 +318,16 @@ Opus 5.5: roughly 1–2¢ a receipt; `RECEIPT_MODEL=claude-haiku-5-5` is about 1
 (default 200) caps one company's reads a day (in memory). Errors: no picture / not a receipt = 400; off = 503;
 reader down or refusing = 502; busy or over the cap = 429 (`ReceiptError`). ⚠️ Never log or store the picture.
 
+Card and trip (Homer, 2026-11-26): the form also asks for `cardBrand` and `cardLast4`; `normalizeReceipt` keeps only
+exactly four digits (a smudged or longer number → null). The Road cost and purchase forms keep them as `data.card`
+(`roadService` stores only `^\d{4}$`). At the desk `cardAccountFor(accounts, last4)` (`public/receipt.js`) finds the one
+paid-with account whose name holds the digits standing alone ("Mastercard 7413", not "17413"); none or two → null, the
+person picks. `roadCard` / `buyCardFor` use it after a card picked on the row; the desk trip-cost reader sets Paid with.
+No new column: names already carry the digits ("Chase Checking 4321"). Trip by date: the Road cost form has its own
+`tripKey`; after a read, `tripForDate` picks the trip covering the date, else `DAY_RUN`, which `saveCost` turns into a
+one-day trip item ("Day run 05/06/2026 · Shell") saved before the cost. Restaurant receipts: the prompt asks for the
+amount charged (total + tip), not the printed "Total" above the tip.
+
 ## MileIQ import (migration 028, `src/core/mileiq.js` reader, `src/services/mileIqService.js`)
 The CSV is laid out
 like a spreadsheet (rates row, a SUMMARY of `=SUMIFS` formulas, then DETAILED LOG); the reader finds the log's

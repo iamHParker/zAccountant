@@ -9,7 +9,7 @@ import { createApp } from '/vendor/vue.js';
 import { render } from '/road.render.js';
 import { picturesFromClipboard } from '/paste.js';
 import { clockTime, clock12, nextDay, durationMinutes, hhmm } from '/clock.js';
-import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
+import { fillFromReceipt, filledText, droppedPictures, tripForDate, DAY_RUN } from '/receipt.js';
 import { projectChoices, projectLabel as projectPickText } from '/projectPick.js';
 import { similarProjects } from '/projectSimilar.js';
 
@@ -99,6 +99,7 @@ const NEW_PROJECT = '+newproject';
 // Time in blocks (Homer, 2026-11-06): travel, site time, office/drafting; lunch is the gap between two blocks.
 const BLOCK_TYPES = { travel: 'Travel', site: 'Site', office: 'Office / drafting' };
 const BLOCK_ICON = { travel: '🚗', site: '🏗️', office: '📐' };
+const keyOf = (ref) => (ref?.clientId ? `c:${ref.clientId}` : ref?.id ? `s:${ref.id}` : '');
 const keyRef = (k) => (k?.startsWith('c:') ? { clientId: k.slice(2) } : k?.startsWith('s:') ? { id: k.slice(2) } : null);
 const KINDS = { airfare: 'Airfare', rental_car: 'Rental car', lodging: 'Lodging', meals: 'Meals', per_diem: 'Per diem', tolls: 'Tolls', mileage: 'Mileage', other: 'Other' };
 // Bookings on a trip planned ahead (Homer, 2026-11-06): the reservation, not money. The words for its two dates.
@@ -117,7 +118,7 @@ createApp({
       online: navigator.onLine, syncing: false, syncAgain: false, busy: false,
       items: [], tripKey: getLocal('zacc.roadTrip') ?? '',
       tripForm: null, projectSearch: '', costForm: null, timeForm: null, checkForm: null, bookingForm: null, buyForm: null, blockForm: null, blockDay: today(), blockTypes: BLOCK_TYPES, blockIcon: BLOCK_ICON, kinds: KINDS, reading: false,
-      bookingKinds: BOOKING_KINDS, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
+      bookingKinds: BOOKING_KINDS, dayRun: DAY_RUN, bookingIcon: BOOKING_ICON, bookingDates: BOOKING_DATES,
       // Projects (Homer, 2026-11-16): look one up, or add one from the field.
       projectForm: null, customerForm: null, projectQuery: '', openProjectKey: '', projectTab: 'projects', customerQuery: '', openCustomerId: '', newCustomer: NEW_CUSTOMER, newProjectChoice: NEW_PROJECT,
       // A form left for "+ New project": { screen, formKey, form }. Saving the project brings it back, with the project picked.
@@ -372,9 +373,9 @@ createApp({
           newProjects: (d.newProjects ?? []).join('\n'), notes: d.notes ?? '' };
         this.projectSearch = '';
       } else if (i.kind === 'cost') {
-        this.costForm = { ...base, kind: d.kind, date: d.date, amount: d.amount ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? lastMileRate(),
+        this.costForm = { ...base, tripKey: keyOf(d.trip) || this.tripKey, kind: d.kind, date: d.date, amount: d.amount ?? '', miles: d.miles ?? '', mileRate: d.mileRate ?? lastMileRate(),
           days: d.days ?? '', dayRate: d.dayRate ?? lastDayRate(),
-          vendor: d.vendor ?? '', description: d.description === KINDS[d.kind] ? '' : (d.description ?? ''), photos: [...(i.photos ?? [])], booking: d.booking ?? null };
+          vendor: d.vendor ?? '', card: d.card ?? '', description: d.description === KINDS[d.kind] ? '' : (d.description ?? ''), photos: [...(i.photos ?? [])], booking: d.booking ?? null };
       } else if (i.kind === 'booking') {
         this.bookingForm = { ...base, kind: d.kind, vendor: d.vendor ?? '', confirmation: d.confirmation ?? '', startsOn: d.startsOn, startTime: d.startTime ?? '',
           endsOn: d.endsOn ?? '', endTime: d.endTime ?? '', amount: d.amount ?? '', details: d.details ?? '' };
@@ -390,7 +391,7 @@ createApp({
       } else if (i.kind === 'project') {
         this.projectForm = { ...base, code: d.code ?? '', name: d.name, customerId: d.customerId ?? (d.customerName ? NEW_CUSTOMER : ''), customerName: d.customerName ?? '', address: d.address ?? '' };
       } else if (i.kind === 'purchase') {
-        this.buyForm = { ...base, kind: 'purchase', category: d.category, date: d.date, amount: d.amount ?? '', vendor: d.vendor ?? '',
+        this.buyForm = { ...base, kind: 'purchase', category: d.category, date: d.date, amount: d.amount ?? '', vendor: d.vendor ?? '', card: d.card ?? '',
           description: d.description ?? '', serialNumber: d.serialNumber ?? '', jobId: d.jobId ?? '', photos: [...(i.photos ?? [])] };
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -426,7 +427,7 @@ createApp({
     },
     // A new cost or day of travel starts on today's date (it used to copy the last item's date, which was easy to miss:
     // Homer, 2026-10-28). For the days after, "Save, then next day".
-    newCost() { this.timeForm = null; this.bookingForm = null; this.costForm = { kind: 'other', date: today(), dateDefault: today(), amount: '', miles: '', mileRate: lastMileRate(), days: '', dayRate: lastDayRate(), vendor: '', description: '', photos: [], booking: null }; },
+    newCost() { this.timeForm = null; this.bookingForm = null; this.costForm = { tripKey: this.tripKey, kind: 'other', date: today(), dateDefault: today(), amount: '', miles: '', mileRate: lastMileRate(), days: '', dayRate: lastDayRate(), vendor: '', card: '', description: '', photos: [], booking: null }; },
     // ---- Bookings: the flight, hotel and rental car for a trip planned ahead. Not money until paid.
     newBooking() {
       this.costForm = null; this.timeForm = null;
@@ -446,8 +447,8 @@ createApp({
     payBooking(x) {
       this.timeForm = null; this.bookingForm = null;
       const b = x.b;
-      this.costForm = { kind: b.kind, date: today(), dateDefault: today(), amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : (b.amount ?? ''), miles: '', mileRate: lastMileRate(), days: '', dayRate: lastDayRate(),
-        vendor: b.vendor ?? '', description: b.confirmation ? `${KINDS[b.kind]}, confirmation ${b.confirmation}` : '', photos: [], booking: x.ref };
+      this.costForm = { tripKey: this.tripKey, kind: b.kind, date: today(), dateDefault: today(), amount: b.amountCents != null ? (b.amountCents / 100).toFixed(2) : (b.amount ?? ''), miles: '', mileRate: lastMileRate(), days: '', dayRate: lastDayRate(),
+        vendor: b.vendor ?? '', card: '', description: b.confirmation ? `${KINDS[b.kind]}, confirmation ${b.confirmation}` : '', photos: [], booking: x.ref };
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     /** Paid, as far as this phone knows: the desk says so, or a cost for it was saved here. */
@@ -476,7 +477,7 @@ createApp({
     // list at the desk (with its serial number); supplies are used up. The desk puts each in the right account.
     newBuy() {
       this.closeForms();
-      this.buyForm = { kind: 'purchase', category: this.screen, date: today(), dateDefault: today(), amount: '', vendor: '', description: '', serialNumber: '', jobId: '', photos: [] };
+      this.buyForm = { kind: 'purchase', category: this.screen, date: today(), dateDefault: today(), amount: '', vendor: '', card: '', description: '', serialNumber: '', jobId: '', photos: [] };
     },
     async saveBuy() {
       const f = this.buyForm;
@@ -484,6 +485,7 @@ createApp({
       const data = { date: f.date, category: f.category, amount: f.amount.replace(/[$,]/g, ''), vendor: f.vendor.trim() || null,
         description: f.description.trim() || SCREENS[f.category].title, jobId: f.jobId || null };
       if (f.category === 'equipment') data.serialNumber = f.serialNumber.trim() || null;
+      if (/^\d{4}$/.test(f.card ?? '')) data.card = f.card;
       if (await this.saveItem('purchase', f, data, f.photos)) { this.buyForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
     },
     // ---- Projects (Homer, 2026-11-16): look a project up in the field (number, customer, site address, a map), or add
@@ -721,14 +723,34 @@ createApp({
       try {
         const read = await this.call('POST', '/receipt', { picture: photo.dataUrl }, { seconds: 90 });
         if (this.costForm !== form && this.buyForm !== form) return; // the form was closed meanwhile
-        this.flash(filledText(fillFromReceipt(form, read), read));
+        const filled = fillFromReceipt(form, read);
+        const note = form === this.costForm && read.date ? this.tripByDate(form) : ''; // after the date box is filled
+        this.flash(filledText(filled, read) + note);
       } catch (e) {
         if (e instanceof KeyProblem) this.keyProblem = e.message;
         else this.flash(e.message || 'The receipt could not be read just now. Type it in.', 'bad');
       } finally { this.reading = false; }
     },
+    /**
+     * Put a cost on the trip its date falls in (Homer, 2026-11-26), or on a new day run when no trip covers that day.
+     * Only changes the form's Trip box, which the person can change back. Returns a sentence for the message.
+     */
+    tripByDate(f) {
+      const all = this.tripChoices.ahead.concat(this.tripChoices.rest);
+      const now = all.find((t) => t.key === f.tripKey);
+      if (now && now.startDate <= f.date && f.date <= (now.endDate || now.startDate)) return ''; // already on its trip
+      const pick = tripForDate(all, f.date);
+      if (pick.several) return ` ${pick.several} trips cover ${this.usDate(f.date)}: choose the trip.`;
+      if (!pick.key) return '';
+      f.tripKey = pick.key;
+      if (pick.key === DAY_RUN) return ` No trip covers ${this.usDate(f.date)}, so it goes on a new day run that day (change Trip if not).`;
+      return ` It is dated ${this.usDate(f.date)}, so it goes on the trip ${all.find((t) => t.key === pick.key).name}.`;
+    },
+    /** "Day run 11/25/2026 · Serious Texas Bar-B-Q": the one-day trip a cost with no trip makes. */
+    dayRunName(f) { return `Day run ${this.usDate(f.date)}${f.vendor.trim() ? ' · ' + f.vendor.trim() : ''}`.slice(0, 120); },
     async saveCost() {
       const f = this.costForm;
+      if (!f.tripKey) { this.flash('Choose the trip (or a day run).', 'bad'); return; }
       if (f.kind === 'mileage') {
         if (mileageCents(f.miles, f.mileRate) == null) { this.flash('Enter the miles (like 212.4) and the rate per mile (like 0.70).', 'bad'); return; }
         setLocal('zacc.mileRate', f.mileRate);
@@ -736,12 +758,24 @@ createApp({
         if (perDiemCents(f.days, f.dayRate) == null) { this.flash('Enter the days (like 3, or 2.75) and the rate per day (like 59.00).', 'bad'); return; }
         setLocal('zacc.dayRate', f.dayRate);
       } else if (!/^\$?\d{1,3}(,?\d{3})*(\.\d{1,2})?$|^\$?\d+(\.\d{1,2})?$/.test(f.amount)) { this.flash('Enter the amount like 412.30', 'bad'); return; }
-      const data = { trip: this.tripRef, date: f.date, kind: f.kind, vendor: f.vendor.trim() || null, description: f.description.trim() || KINDS[f.kind] };
+      if (f.tripKey === DAY_RUN) {
+        // A day run (no overnight stay): a one-day trip on the cost's date, saved first so the cost can go on it.
+        const run = await this.addItem('trip', { name: this.dayRunName(f), startDate: f.date, endDate: f.date, notes: null, jobIds: [], newProjects: [] });
+        if (!run) return;
+        f.tripKey = `c:${run.clientId}`;
+      }
+      const data = { trip: keyRef(f.tripKey), date: f.date, kind: f.kind, vendor: f.vendor.trim() || null, description: f.description.trim() || KINDS[f.kind] };
       if (f.kind === 'mileage') Object.assign(data, { miles: f.miles, mileRate: f.mileRate });
       else if (f.kind === 'per_diem') Object.assign(data, { days: f.days, dayRate: f.dayRate });
       else data.amount = f.amount.replace(/[$,]/g, '');
       if (f.booking) data.booking = f.booking;
-      if (await this.saveItem('cost', f, data, f.photos)) { this.costForm = null; this.flash(f.editId ? 'Change saved.' : 'Saved on this phone.'); }
+      if (f.kind !== 'mileage' && f.kind !== 'per_diem' && /^\d{4}$/.test(f.card ?? '')) data.card = f.card; // the card that paid, last 4 digits
+      if (await this.saveItem('cost', f, data, f.photos)) {
+        this.costForm = null;
+        const moved = f.tripKey !== this.tripKey;
+        if (moved) this.tripKey = f.tripKey; // show the trip it went on
+        this.flash(f.editId ? 'Change saved.' : moved ? `Saved on this phone, on ${this.tripName || 'that trip'}.` : 'Saved on this phone.');
+      }
     },
     // One day's travel: the hours, or start and end less breaks. "Save, then next day" keeps the times for the next date.
     async saveTime(next = false) {
@@ -772,10 +806,10 @@ createApp({
         return `${BLOCK_ICON[d.type]} ${d.start ? clock12(d.start) + '–' + clock12(d.end) + ' ' : ''}${this.blockHours(d)} h · ${where}${d.notes ? ' · ' + d.notes : ''}`;
       }
       if (i.kind === 'project') return `${i.data.code && !i.data.name.startsWith(i.data.code) ? i.data.code + ' · ' : ''}${i.data.name}`;
-      if (i.kind === 'purchase') return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.serialNumber ? ' · serial ' + i.data.serialNumber : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
+      if (i.kind === 'purchase') return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.card ? ' · card ' + i.data.card : ''}${i.data.serialNumber ? ' · serial ' + i.data.serialNumber : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'check') return `Check${i.data.checkNumber ? ' #' + i.data.checkNumber : ''}${i.data.from ? ' from ' + i.data.from : ''}${i.data.invoices ? ' · inv ' + i.data.invoices : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
       if (i.kind === 'time') return `Travel time ${i.data.hours} h${i.data.notes ? ' · ' + i.data.notes : ''}`;
-      return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
+      return `${i.data.description}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.card ? ' · card ' + i.data.card : ''}${i.photos?.length ? ` · 📷 ${i.photos.length}` : ''} ·`;
     },
     /** The money part of an item, shown on its own so the privacy switch can blur it (empty for trips and time). */
     itemAmount(i) {

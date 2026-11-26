@@ -150,6 +150,14 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   const pdc = ok(await desk.call('POST', `${b}/road-items/${pd.id}/accept`, accounts));
   const pdTrip = ok(await desk.call('GET', `${b}/trips/${tr.tripId}`));
   assert.deepEqual(pdTrip.costs.filter((c) => c.id === pdc.costId).map((c) => [c.kind, c.days, c.dayRateCents, c.amountCents]), [['per_diem', '2.75', 6800, 18700]]);
+  // The card that paid, read off the receipt (Homer, 2026-11-26): only four digits are kept; a longer number is dropped.
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'cost-bbq-0001', kind: 'cost',
+    data: { trip: ref, date: '2026-10-05', kind: 'meals', vendor: 'Serious Texas Bar-B-Q', amount: '47.14', card: '7413' } }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'cost-card-bad', kind: 'cost',
+    data: { trip: ref, date: '2026-10-05', kind: 'meals', amount: '5.00', card: '5555444433337413' } }), 201);
+  const sent = ok(await desk.call('GET', `${b}/road-items`));
+  assert.deepEqual(Object.fromEntries(sent.map((i) => [i.data.amountCents, i.data.card ?? null])), { 4714: '7413', 500: null });
+  for (const i of sent) ok(await desk.call('POST', `${b}/road-items/${i.id}/dismiss`, {}));
   // Accepting twice is refused; a photo for a reviewed cost is refused.
   assert.equal((await desk.call('POST', `${b}/road-items/${air.id}/accept`, accounts)).status, 400);
   assert.equal((await phone.call('POST', '/api/road/items/cost-air-01/photos', { clientId: 'photo-air-02', picture: PNG })).status, 400);

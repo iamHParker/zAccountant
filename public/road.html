@@ -150,6 +150,7 @@
               <label>Amount ($) <input class="amt" v-model.trim="buyForm.amount" inputmode="decimal" placeholder="0.00" required autocomplete="off"></label>
             </div>
             <label>Store (optional) <input v-model="buyForm.vendor" maxlength="120" placeholder="Home Depot, Lowe's…"></label>
+            <label>Card it was paid with, last 4 digits (optional) <input v-model.trim="buyForm.card" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="7413" autocomplete="off"></label>
             <label>What it was <input v-model="buyForm.description" maxlength="300" :placeholder="buyForm.category === 'equipment' ? 'Laser level' : 'Batteries, markers'"></label>
             <label v-if="buyForm.category === 'equipment'">Serial or model number (optional) <input v-model.trim="buyForm.serialNumber" maxlength="60" autocapitalize="characters" autocomplete="off"></label>
             <label>For a project (optional)
@@ -398,6 +399,7 @@
               <option v-for="t in tripChoices.rest" :value="t.key">{{ t.name }}</option></optgroup>
           </select></label>
         <button class="wide" @click="newTrip">+ New trip</button>
+        <button class="wide" v-if="!tripKey && !costForm" @click="newCost">📷 A receipt (its date finds the trip, or makes a day run)</button>
       </section>
 
       <section class="card" v-if="tripForm">
@@ -425,7 +427,7 @@
         </form>
       </section>
 
-      <template v-if="tripKey && !tripForm && screen === 'trip'">
+      <template v-if="(tripKey || costForm) && !tripForm && screen === 'trip'">
         <div class="row wrap road-actions" v-if="!costForm && !timeForm && !bookingForm">
           <button class="primary" @click="newCost">+ Cost or receipt</button>
           <button @click="newTime">+ Travel time</button>
@@ -483,6 +485,12 @@
               <button type="button" v-for="(label, k) in kinds" :class="{ active: costForm.kind === k }" @click="costForm.kind = k">{{ label }}</button>
             </div>
             <label>Date <input type="date" v-model="costForm.date" required></label>
+            <label>Trip
+              <select v-model="costForm.tripKey" required>
+                <option value="">Choose a trip…</option>
+                <option :value="dayRun">New day run on {{ usDate(costForm.date) }}</option>
+                <option v-for="t in tripChoices.ahead.concat(tripChoices.rest)" :value="t.key">{{ t.name }} · {{ usDate(t.startDate) }}</option>
+              </select></label>
             <template v-if="costForm.kind === 'mileage'">
               <div class="grid2">
                 <label>Miles <input v-model.trim="costForm.miles" inputmode="decimal" placeholder="212.4" required></label>
@@ -501,6 +509,7 @@
             </template>
             <label v-else>Amount ($) <input class="amt" v-model.trim="costForm.amount" inputmode="decimal" placeholder="0.00" required autocomplete="off"></label>
             <label>Paid to (optional) <input v-model="costForm.vendor" maxlength="120" placeholder="Southwest, Avis, NTTA…"></label>
+            <label v-if="!['mileage', 'per_diem'].includes(costForm.kind)">Card it was paid with, last 4 digits (optional) <input v-model.trim="costForm.card" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="7413" autocomplete="off"></label>
             <label>What it was <input v-model="costForm.description" maxlength="300" :placeholder="kinds[costForm.kind]"></label>
             <div class="photo-row" @dragover.prevent @drop.prevent="dropPhotos"><span class="label-like">Receipt photos</span>
               <label class="photo-btn">📷 Take photo<input type="file" accept="image/*" capture="environment" @change="addPhotos"></label>
