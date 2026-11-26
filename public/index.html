@@ -741,7 +741,7 @@
               <label class="small">Paid with
                 <select :value="buyCardFor(i)" @change="ar.buyCard[i.id] = $event.target.value"><option value="">Choose…</option><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
             </div>
-            <p v-if="cardUnmatched(i) && can('bills')" class="hint small">Paid with the card ending in {{ i.data.card }}, but no account's name has those digits. Choose the card here; to have it picked by itself next time, rename the card account to include them (Accounts → Rename, like "Mastercard {{ i.data.card }}").</p>
+            <p v-if="cardUnmatched(i) && can('bills')" class="hint small">Paid with the card ending in {{ i.data.card }}, but no account's name has those digits. Choose the card here; to have it picked by itself next time, add {{ i.data.card }} to that account's card numbers (Accounts → the card → Card numbers).</p>
             <div class="row wrap" v-if="can('bills')">
               <span class="muted small">from {{ i.keyName }}</span>
               <span><button class="primary small" :disabled="ar.buyBusy" @click="acceptBuy(i)">Accept</button>
@@ -1678,7 +1678,7 @@
               </div>
               <label v-if="i.kind === 'cost' && can('bills')" class="small card-pick">Card
                 <select :value="roadCard(i)" @change="road.cardFor[i.id] = $event.target.value"><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
-              <p v-if="cardUnmatched(i) && can('bills')" class="hint small">Paid with the card ending in {{ i.data.card }}, but no account's name has those digits. Choose the card here; to have it picked by itself next time, rename the card account to include them (Accounts → Rename, like "Mastercard {{ i.data.card }}").</p>
+              <p v-if="cardUnmatched(i) && can('bills')" class="hint small">Paid with the card ending in {{ i.data.card }}, but no account's name has those digits. Choose the card here; to have it picked by itself next time, add {{ i.data.card }} to that account's card numbers (Accounts → the card → Card numbers).</p>
               <label v-if="roadNeedsTrip(i)" class="small">Trip for this
                 <select v-model="road.tripFor[i.id]"><option value="">Choose a trip…</option><option v-for="t in trip.list" :value="t.id">{{ t.name }}</option></select></label>
               <div class="row wrap" v-if="can('bills')">
@@ -2553,6 +2553,13 @@
           <form v-else class="row wrap" @submit.prevent="renameAccount">
             <label>New name for {{ register.account.code }} <input v-model.trim="renaming" maxlength="100" required></label>
             <button class="primary">Save</button> <button type="button" @click="renaming = null">Cancel</button>
+          </form>
+          <!-- Card numbers (Homer, 2026-11-26): every last-four this card or bank account has had, old and new, so a receipt's
+               card digits find it even after a lost or stolen card is replaced. -->
+          <form v-if="['bank', 'cash', 'credit_card'].includes(register.account.subtype)" class="row wrap" @submit.prevent="saveCardNumbers">
+            <label class="small">Card numbers, last 4 digits (old and new cards, separated by commas)
+              <input v-model="cardNums" :disabled="!can('accounts')" inputmode="numeric" maxlength="70" placeholder="7413, 2210" autocomplete="off"></label>
+            <button v-if="can('accounts')" class="small" :disabled="cardNums.replace(/\s/g, '') === (register.account.cardNumbers || []).join(',')">Save card numbers</button>
           </form>
           <table class="data">
             <thead><tr><th>Date</th><th>#</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>

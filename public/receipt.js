@@ -26,15 +26,18 @@ const lastFourIn = (last4) => new RegExp(`(^|\\D)${last4}(\\D|$)`);
 
 /**
  * The account a card paid from, by its last four digits (Homer, 2026-11-26: "what form of payment was used by the last
- * digits of the card"). The digits are looked for in the account names, the way accounts are already named
- * ("Chase Checking 4321", "Mastercard 7413"). Exactly one match → its id; none, or two that share the digits → null,
- * so the person picks (never a guess between two cards).
+ * digits of the card"). First the account's card numbers (every last-four it has had: a replaced card keeps the same
+ * account, Accounts → Card numbers); then, for an account with none listed, the digits in its name ("Mastercard 7413").
+ * Exactly one match → its id; none, or two → null, so the person picks (never a guess between two cards).
  */
 export function cardAccountFor(accounts, last4) {
   if (!/^\d{4}$/.test(String(last4 ?? ''))) return null;
+  const list = accounts ?? [];
+  const listed = list.filter((a) => (a.cardNumbers ?? []).includes(String(last4)));
+  if (listed.length) return listed.length === 1 ? listed[0].id : null;
   const re = lastFourIn(last4);
-  const found = (accounts ?? []).filter((a) => re.test(String(a.name ?? '')));
-  return found.length === 1 ? found[0].id : null;
+  const named = list.filter((a) => !(a.cardNumbers ?? []).length && re.test(String(a.name ?? '')));
+  return named.length === 1 ? named[0].id : null;
 }
 
 /** "Filled in the amount, date and paid to from the receipt." */

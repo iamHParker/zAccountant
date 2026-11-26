@@ -62,6 +62,21 @@ test('edits: company, accounts, recurring entries, bank rules, employees', { ski
     ok(await call('PATCH', `${c}/accounts/${supplies.id}`, { isActive: true }));
   });
 
+  await t.test('card numbers: old and new cards\' last four on one account (Homer, 2026-11-26)', async () => {
+    const got = (r, status = 200) => { ok(r, status); return r.body; };
+    const mc = got(await call('POST', `${c}/accounts`, { code: '2110', name: 'Mastercard', type: 'liability', subtype: 'credit_card' }), 201);
+    const amex = got(await call('POST', `${c}/accounts`, { code: '2120', name: 'Amex', type: 'liability', subtype: 'credit_card' }), 201);
+    // The lost card was 2210; the replacement is 7413. Spaces, commas and a repeat are fine.
+    const r = got(await call('PATCH', `${c}/accounts/${mc.id}`, { cardNumbers: '2210, 7413 ,7413' }));
+    assert.deepEqual(r.cardNumbers, ['2210', '7413']);
+    assert.deepEqual((await call('GET', `${c}/accounts`)).body.find((a) => a.id === mc.id).cardNumbers, ['2210', '7413']);
+    refused(await call('PATCH', `${c}/accounts/${amex.id}`, { cardNumbers: '4889, 7413' }), /7413 is already on 2110 · Mastercard/);
+    refused(await call('PATCH', `${c}/accounts/${amex.id}`, { cardNumbers: '5555444433334889' }), /last 4 digits only/);
+    refused(await call('PATCH', `${c}/accounts/${A['6300'].id}`, { cardNumbers: '4889' }), /bank, cash or credit card/);
+    assert.deepEqual(got(await call('PATCH', `${c}/accounts/${amex.id}`, { cardNumbers: ['4889'] })).cardNumbers, ['4889']);
+    assert.deepEqual(got(await call('PATCH', `${c}/accounts/${amex.id}`, { cardNumbers: '' })).cardNumbers, []);
+  });
+
   await t.test('recurring entry: change the amount from the next date on, end early, restart', async () => {
     const lines = (amt) => [{ accountId: A['6300'].id, debit: amt }, { accountId: A['1000'].id, credit: amt }];
     const r = (await call('POST', `${c}/recurring`, { name: 'Office rent', frequency: 'monthly', startDate: '2026-04-01', memo: 'Rent', lines: lines('1800') })).body;

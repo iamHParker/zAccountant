@@ -43,7 +43,7 @@ that aren't obvious from the code. Read the entry for a feature before changing 
 - Receipt reading (`src/services/receiptReader.js`, `public/receipt.js`): photo → Claude → vendor/total/date fill empty
   cost boxes, saves nothing. Off until Homer sets `ANTHROPIC_API_KEY` (runbook step 12). Never log the picture.
   Card + trip (2026-11-26): reads the card's last four (`data.card` on Road costs/purchases); desk matches the account
-  whose name holds them (`cardAccountFor`). Road cost form has its own trip; receipt date → covering trip or a day run.
+  whose `card_numbers` (migration 045: old + new cards' last four) or else name holds them (`cardAccountFor`). Road cost form has its own trip; receipt date → covering trip or a day run.
 - Book file `.zacc` (`src/services/bookFileService.js`): zip of every company table + manifest SHA-256s; QuickBooks
   .iif / Online CSV exports. Whole-file re-import not built yet.
 - MileIQ import (migration 028, `src/core/mileiq.js`, `src/services/mileIqService.js`): monthly CSV → one mileage trip

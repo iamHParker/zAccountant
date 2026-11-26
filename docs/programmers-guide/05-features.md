@@ -323,7 +323,10 @@ exactly four digits (a smudged or longer number → null). The Road cost and pur
 (`roadService` stores only `^\d{4}$`). At the desk `cardAccountFor(accounts, last4)` (`public/receipt.js`) finds the one
 paid-with account whose name holds the digits standing alone ("Mastercard 7413", not "17413"); none or two → null, the
 person picks. `roadCard` / `buyCardFor` use it after a card picked on the row; the desk trip-cost reader sets Paid with.
-No new column: names already carry the digits ("Chase Checking 4321"). Trip by date: the Road cost form has its own
+Card numbers (migration 045, Homer: "alias numbers… when a card is lost or stolen the digits change but still the same
+account"): `accounts.card_numbers` lists every last-four; `cleanCardNumbers` + `updateAccount` (`PATCH …/accounts/:id`
+`{ cardNumbers }`) refuse non-four-digit values and a number already on another active account. `cardAccountFor` tries
+`cardNumbers` first, then the name (only for accounts with none listed). Trip by date: the Road cost form has its own
 `tripKey`; after a read, `tripForDate` picks the trip covering the date, else `DAY_RUN`, which `saveCost` turns into a
 one-day trip item ("Day run 05/06/2026 · Shell") saved before the cost. Restaurant receipts: the prompt asks for the
 amount charged (total + tip), not the printed "Total" above the tip.
