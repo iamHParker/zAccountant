@@ -38,6 +38,16 @@ test('cardAccountFor: the one account whose name holds the digits, else nobody',
   assert.equal(cardAccountFor(accts, null), null);
 });
 
+test('cardAccountFor: an account\'s card numbers (old and new cards) come before the name', () => {
+  const accts = [{ id: 'mc', name: 'Mastercard', cardNumbers: ['2210', '7413'] }, { id: 'old', name: 'Old Visa 2210', cardNumbers: [] },
+    { id: 'amex', name: 'Amex 4889', cardNumbers: [] }, { id: 'renamed', name: 'Travel card 7413 (closed)', cardNumbers: ['9001'] }];
+  assert.equal(cardAccountFor(accts, '2210'), 'mc'); // the lost card's number still finds the account
+  assert.equal(cardAccountFor(accts, '7413'), 'mc'); // a listed number wins over a name holding it
+  assert.equal(cardAccountFor(accts, '4889'), 'amex'); // no numbers listed: the name
+  assert.equal(cardAccountFor(accts, '9001'), 'renamed');
+  assert.equal(cardAccountFor([{ id: 'a', cardNumbers: ['1234'] }, { id: 'b', cardNumbers: ['1234'] }], '1234'), null);
+});
+
 test('fillFromReceipt fills the Road form\'s card box, but only on forms that have one', () => {
   const road = { kind: 'other', date: '2026-11-26', dateDefault: '2026-11-26', amount: '', vendor: '', description: '', card: '' };
   const read = { vendor: 'Best Buy', amount: '107.17', date: '2026-11-23', kind: 'other', description: 'Apple Pencil Pro', cardLast4: '9194' };

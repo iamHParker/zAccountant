@@ -500,7 +500,7 @@ export function createApp(pool, { log } = {}) {
   api.put('/companies/:companyId/accounts/:accountId/name', route('accounts', ({ db, req, companyId, actor }) =>
     ledger.renameAccount(db, companyId, req.params.accountId, { name: req.body?.name, actor })));
   api.patch('/companies/:companyId/accounts/:accountId', route('accounts', ({ db, req, companyId, actor }) =>
-    ledger.updateAccount(db, companyId, req.params.accountId, { subtype: req.body?.subtype, isActive: req.body?.isActive, actor })));
+    ledger.updateAccount(db, companyId, req.params.accountId, { subtype: req.body?.subtype, isActive: req.body?.isActive, cardNumbers: req.body?.cardNumbers, actor })));
   api.get('/companies/:companyId/accounts/:accountId/register', route('view_books', ({ db, req, companyId }) =>
     reports.getAccountRegister(db, companyId, req.params.accountId, { from: q(req.query.from), to: q(req.query.to) })));
 

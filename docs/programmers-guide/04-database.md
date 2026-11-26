@@ -49,6 +49,7 @@ tell the story of the product, like a set of as-built drawings with revisions.
 | `042_road_time_blocks.sql` | Road items may be `kind = 'block'`: one block of a day (travel, site or office; start/end or minutes; project, a second project to split travel with, or a trip). Accepted as time entries; a split becomes two |
 | `043_comment_lines.sql` | `document_lines.is_comment`: an invoice comment line (text and date only). `account_id` becomes nullable, allowed NULL only on a comment; CHECK `document_lines_comment_shape` keeps price, amount, tax, item, project and billing links off comments |
 | `044_per_diem.sql` | Per diem: `invoice_items.kind` may be `per_day` (days × daily rate); `trip_costs.kind` may be `per_diem` with `days` (text, up to 2 decimals) and `day_rate_cents`, CHECK `trip_costs_per_diem_shape` (both set exactly when the kind is per diem) |
+| `045_card_numbers.sql` | `accounts.card_numbers`: every last-four a bank or card account has had (old and new cards), so a receipt's card digits find the account; four digits only, at most 12, never on two active accounts |
 
 ## How migrations run
 

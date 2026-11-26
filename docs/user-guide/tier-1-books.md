@@ -464,9 +464,11 @@ change the amount to dollars. (This shows only once zAccountant has turned recei
 
 **The card it was paid with, and the trip, from the receipt.** The reading also picks up the last four digits of
 the card printed on the receipt (like "MASTERCARD 7413") and puts them in **Card it was paid with**. At the desk, the
-cost's **Card** is then set to the card account whose name holds those digits, so name your card accounts with them
-(**Accounts → Rename**, like "Mastercard 7413"). If no account has them, or two do, you choose the card yourself, and a
-note says so. On a restaurant receipt the amount is what went on the card, tip included ($37.71 + $9.43 tip = $47.14).
+cost's **Card** is then set to the card account that has those digits. Tell each card account its numbers once:
+**Accounts →** the card **→ Card numbers**, the last 4 digits of every card it has had, separated by commas (like
+"2210, 7413"). When a card is lost or stolen and the bank sends a new number, add the new one and keep the old: receipts
+from either still land on the same account. (An account with no card numbers is matched by digits in its name, like
+"Mastercard 7413".) If no account has the digits, or two do, you choose the card yourself, and a note says so. On a restaurant receipt the amount is what went on the card, tip included ($37.71 + $9.43 tip = $47.14).
 
 On **Trip now**, **📷 A receipt** works before you choose a trip: the receipt's date picks the trip whose days cover
 it. If no trip covers that day, the cost goes on a new **day run**, a one-day trip (no overnight stay) named like

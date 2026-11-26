@@ -327,7 +327,7 @@ createApp({
       ],
       help: { q: '', id: 'start', from: 'home' },
       version: '', siteFeatures: { receiptReading: false },
-      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, NEW_CONTACT, COMMENT_LINE, renaming: null, ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
+      zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, NEW_CONTACT, COMMENT_LINE, renaming: null, cardNums: '', ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
       MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
       statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
@@ -1294,7 +1294,19 @@ createApp({
       const a = await this.run(() => api('POST', `/companies/${this.companyId}/accounts`, this.newAcct), 'Account added.');
       if (a) { this.accounts = await api('GET', `/companies/${this.companyId}/accounts`); this.newAcct = { code: '', name: '', type: 'expense', subtype: 'operating' }; this.showNewAcct = false; }
     },
-    async openRegister(a) { this.register = await this.run(() => api('GET', `/companies/${this.companyId}/accounts/${a.id}/register`)); this.renaming = null; },
+    async openRegister(a) {
+      this.register = await this.run(() => api('GET', `/companies/${this.companyId}/accounts/${a.id}/register`)); this.renaming = null;
+      this.cardNums = (this.accounts.find((x) => x.id === a.id)?.cardNumbers ?? []).join(', ');
+    },
+    /** Save the open account's card numbers (each card's last four, old and new: Homer, 2026-11-26). */
+    async saveCardNumbers() {
+      const a = this.register?.account;
+      if (!a) return;
+      const r = await this.run(() => api('PATCH', `/companies/${this.companyId}/accounts/${a.id}`, { cardNumbers: this.cardNums }), 'Card numbers saved.');
+      if (!r) return;
+      this.accounts = await api('GET', `/companies/${this.companyId}/accounts`);
+      a.cardNumbers = r.cardNumbers; this.cardNums = r.cardNumbers.join(', ');
+    },
     /** Change the open account's kind, or turn it off/on (the server explains why when it can't). */
     async changeAccount(patch) {
       const a = this.register?.account;

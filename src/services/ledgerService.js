@@ -107,7 +107,7 @@ export async function getCompany(db, companyId) {
 
 export async function listAccounts(db, companyId) {
   const { rows } = await db.query(
-    `SELECT id, code, name, type, subtype, cash_flow AS "cashFlow", system_key AS "key", is_active AS "isActive"
+    `SELECT id, code, name, type, subtype, cash_flow AS "cashFlow", system_key AS "key", is_active AS "isActive", card_numbers AS "cardNumbers"
        FROM accounts WHERE company_id = $1 ORDER BY code`, [companyId]);
   return rows;
 }
@@ -172,7 +172,8 @@ const BANKLIKE = new Set(['bank', 'cash', 'credit_card']);
  *   invoice item still uses it. Its history stays; it just isn't offered for new entries.
  * The number and type never change once created.
  */
-export async function updateAccount(pool, companyId, accountId, { subtype, isActive, actor = null }) {
+export async function updateAccount(pool, companyId, accountId, { subtype, isActive, cardNumbers, actor = null }) {
+  const cards = cardNumbers === undefined ? undefined : cleanCardNumbers(cardNumbers);
   return withTransaction(pool, async (c) => {
     await lockCompany(c, companyId);
     const { rows: [a] } = await c.query('SELECT * FROM accounts WHERE company_id = $1 AND id::text = $2 FOR UPDATE', [companyId, String(accountId)]);
@@ -192,6 +193,16 @@ export async function updateAccount(pool, companyId, accountId, { subtype, isAct
         }
         change.subtype = subtype; change.cash_flow = allowed[subtype];
       }
+    }
+    if (cards !== undefined && cards.join(',') !== (a.card_numbers ?? []).join(',')) {
+      // Card numbers (old and new cards' last four): only on bank, cash and card accounts, and never on two accounts,
+      // so a receipt's digits always point at one account.
+      if (cards.length && !BANKLIKE.has(subtype ?? a.subtype)) errors.push('card numbers go on a bank, cash or credit card account');
+      const { rows: taken } = cards.length ? await c.query(
+        `SELECT code, name, n FROM accounts, unnest(card_numbers) AS n WHERE company_id = $1 AND id <> $2 AND is_active AND n = ANY($3::text[])`,
+        [companyId, a.id, cards]) : { rows: [] };
+      for (const t of taken) errors.push(`${t.n} is already on ${t.code} · ${t.name}`);
+      change.card_numbers = cards;
     }
     if (isActive !== undefined && typeof isActive !== 'boolean') errors.push('isActive must be true or false');
     else if (isActive === false && a.is_active) {
@@ -217,7 +228,21 @@ export async function updateAccount(pool, companyId, accountId, { subtype, isAct
     return accountOut(out);
   });
 }
-const accountOut = (a) => ({ id: a.id, code: a.code, name: a.name, type: a.type, subtype: a.subtype, cashFlow: a.cash_flow, key: a.system_key, isActive: a.is_active });
+const accountOut = (a) => ({ id: a.id, code: a.code, name: a.name, type: a.type, subtype: a.subtype, cashFlow: a.cash_flow, key: a.system_key, isActive: a.is_active,
+  cardNumbers: a.card_numbers ?? [] });
+
+/**
+ * "7413, 2210" or ["7413", "2210"] → ["7413", "2210"] (each card's last four digits, old and new: Homer, 2026-11-26).
+ * Throws the person's mistake: anything that isn't four digits, or more than 12.
+ */
+export function cleanCardNumbers(v) {
+  const list = Array.isArray(v) ? v : String(v ?? '').split(/[\s,;]+/);
+  const out = [...new Set(list.map((x) => String(x ?? '').trim()).filter(Boolean))];
+  const bad = out.filter((x) => !/^\d{4}$/.test(x));
+  if (bad.length) throw new LedgerError('Account is not valid', [`card numbers are the last 4 digits only, like 7413 (not ${bad.join(', ')})`]);
+  if (out.length > 12) throw new LedgerError('Account is not valid', ['at most 12 card numbers on one account']);
+  return out;
+}
 
 const addDays = (date, n) => {
   const d = new Date(date + 'T00:00:00Z');
