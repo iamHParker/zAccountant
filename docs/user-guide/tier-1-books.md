@@ -482,6 +482,10 @@ were is not looked up: type the station's name if the pump doesn't show it. Sinc
 the photo didn't show: a note at the top of the form lists it (the station's name, the card's last 4 digits, an amount
 to check), those boxes are outlined, and the cursor goes to the first one.
 
+**Your receipt photos are kept.** Every receipt or pump photo stays with its cost in zAccountant (made smaller, about
+300 KB, still easy to read), goes into the nightly off-site backup and the book file, and opens from the cost at the
+desk: that is your proof for taxes.
+
 **Checks received on the road.** Tap **+ Check received** (no trip needed): the date, amount, who paid, the check
 number, the invoice number(s) it pays (like 26-124, 26-130), a note (where you deposited it) and photos of the check
 and the remittance. At your desk, **Sales → Checks from the road** shows it with the invoices it found. Press
