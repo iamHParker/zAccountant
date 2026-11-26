@@ -65,7 +65,7 @@ test('receipt reading: off without a key, then desk and phone both read, nothing
   process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${fake.address().port}`;
   assert.deepEqual(ok(await client().call('GET', '/api/public/features')), { receiptReading: true });
   assert.equal(ok(await phone.call('GET', '/api/road')).receiptReading, true);
-  const expected = { isReceipt: true, vendor: 'Hampton Inn Selma', amount: '318.44', currency: 'USD', date: '2026-10-05', kind: 'lodging', description: 'Hotel, 2 nights' };
+  const expected = { isReceipt: true, vendor: 'Hampton Inn Selma', amount: '318.44', currency: 'USD', date: '2026-10-05', kind: 'lodging', description: 'Hotel, 2 nights', cardBrand: null, cardLast4: null };
   assert.deepEqual(ok(await desk.call('POST', `${b}/receipts/read`, { picture: JPEG })), expected);
   assert.deepEqual(ok(await phone.call('POST', '/api/road/receipt', { picture: JPEG })), expected);
   assert.equal(seen.length, 2);

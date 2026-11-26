@@ -28,6 +28,8 @@ const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const isId = (v) => typeof v === 'string' && UUIDISH.test(v);
 const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const text = (v, max) => (v == null || v === '' ? null : String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) || null); // eslint-disable-line no-control-regex
+/** The last four digits of the card that paid ("7413"); anything else → null. Never more than four digits are kept. */
+const cardLast4 = (v) => (/^\d{4}$/.test(String(v ?? '').trim()) ? String(v).trim() : null);
 const hashKey = (token) => createHash('sha256').update(token).digest('hex');
 const KEY_DAYS = 90;
 const MAX_KEYS = 5;
@@ -306,6 +308,7 @@ async function cleanItem(db, key, kind, d) {
       out.kind = COST_KINDS[d.kind] ? d.kind : 'other';
       out.vendor = text(d.vendor, 120);
       out.description = text(d.description, 300) ?? (out.kind !== 'other' ? COST_KINDS[out.kind] : null);
+      if (cardLast4(d.card)) out.card = cardLast4(d.card); // the card that paid, last four digits only (Homer, 2026-11-26)
       // Paying for a booking sent or seen on the phone: the cost is linked to it when accepted.
       const booking = await bookingRef(db, key, d.booking);
       if (booking) out.booking = booking;
@@ -381,6 +384,7 @@ async function cleanItem(db, key, kind, d) {
     if (!out.category) errors.push('say whether it is equipment or supplies');
     out.description ??= out.category ? PURCHASE_CATEGORIES[out.category] : null;
     if (out.category === 'equipment') out.serialNumber = text(d.serialNumber, 60);
+    if (cardLast4(d.card)) out.card = cardLast4(d.card);
     if (!isIsoDate(out.date)) errors.push('the date must be a real date');
     let c = null;
     try { c = toCents(String(d.amount ?? '')); } catch { /* reported below */ }

@@ -6,7 +6,7 @@ import { render } from '/app.render.js';
 import { HELP, helpForTab, searchHelp } from '/help.js';
 import { startRecorder, noteError, captureContext, pictureOfScreen, pictureFromFile } from '/feedback.js';
 import { picturesFromClipboard } from '/paste.js';
-import { fillFromReceipt, filledText, droppedPictures } from '/receipt.js';
+import { fillFromReceipt, filledText, droppedPictures, cardAccountFor } from '/receipt.js';
 import { clockTime, clock12, hhmm, nextDay } from '/clock.js';
 import { payeeKey, payeeRuleText } from '/payee.js';
 import { projectChoices, projectLabel } from '/projectPick.js';
@@ -1498,7 +1498,11 @@ createApp({
     buyAccount(i) {
       return this.ar.buyAcct[i.id] ?? this.buyAccounts().find((a) => a.code === (i.data.category === 'equipment' ? '1500' : '6200'))?.id ?? '';
     },
-    buyCardFor(i) { return this.ar.buyCard[i.id] ?? lastRoadAccounts().buyCardId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? ''; },
+    /** The paid-with account whose name holds these last four digits ("Mastercard 7413"), or null (public/receipt.js). */
+    cardByDigits(last4) { return last4 ? cardAccountFor(this.tripPaidFromAccounts(), last4) : null; },
+    /** Last four digits sent from the road that no account name holds: say how to make them match. */
+    cardUnmatched(i) { return Boolean(i.data?.card) && !this.cardByDigits(i.data.card); },
+    buyCardFor(i) { return this.ar.buyCard[i.id] ?? this.cardByDigits(i.data.card) ?? lastRoadAccounts().buyCardId ?? this.tripPaidFromAccounts().find((a) => a.subtype === 'credit_card')?.id ?? ''; },
     /** Equipment (an asset that isn't cash or a control account) or any expense. */
     buyAccounts() { return this.accounts.filter((a) => a.isActive && (a.type === 'expense' || (a.type === 'asset' && a.cashFlow !== 'cash' && !a.key))); },
     buyPhotoUrl(p, id) { return `/api${this.arBase()}/purchases/${p.id}/photos/${id}`; },
@@ -1793,14 +1797,19 @@ createApp({
       if (i.kind === 'booking') return `Booking: ${BOOKING_KINDS[i.data.kind]}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.confirmation ? ' · ' + i.data.confirmation : ''} · ${this.bookingWhen(i.data)}`;
       const what = i.data.kind === 'mileage' ? `${i.data.description} · ${i.data.miles} mi × $${i.data.mileRate}` : i.data.description;
       // (a per diem's description already says "3 days × $68.00")
-      return `${what}${i.data.vendor ? ' · ' + i.data.vendor : ''}`;
+      return `${what}${i.data.vendor ? ' · ' + i.data.vendor : ''}${i.data.card ? ' · card ' + i.data.card : ''}`;
     },
     /** A cost or travel time whose trip isn't in the books yet (or was dismissed) needs a trip chosen here. */
     roadNeedsTrip(i) { return i.kind !== 'trip' && !(i.kind === 'block' && !i.trip) && !i.trip?.tripId && i.trip?.tripStatus !== 'pending'; },
-    /** The card a waiting cost goes on: the one picked on its row, else the card last used for its kind, else Paid with. */
+    /**
+     * The card a waiting cost goes on: the one picked on its row, else the card whose last four digits the phone sent
+     * (read off the receipt, or typed: Homer 2026-11-26), else the card last used for its kind, else Paid with.
+     */
     roadCard(i) {
       const picked = this.road.cardFor[i.id];
       if (picked) return picked;
+      const byDigits = this.cardByDigits(i.data.card);
+      if (byDigits) return byDigits;
       const last = cardsByKind()[i.data.kind ?? 'other'];
       return last && this.tripPaidFromAccounts().some((a) => a.id === last) ? last : this.road.paidFromId;
     },
@@ -2283,7 +2292,10 @@ createApp({
         const kindBefore = c.kind;
         const filled = fillFromReceipt(c, read);
         if (c.kind !== kindBefore) { c.kind = kindBefore; this.pickCostKind(read.kind); } // and the card last used for that kind
-        this.flash(filledText(filled, read));
+        // Paid with: the card whose last four digits are on the receipt, when one account's name holds them (Homer, 2026-11-26).
+        const card = this.cardByDigits(read.cardLast4);
+        if (card && !this.trip.editCostId) { c.paidFromAccountId = card; filled.push('paid with'); }
+        this.flash(filledText(filled, read) + (read.cardLast4 && !card ? ` The card ends in ${read.cardLast4}; no account's name has those digits, so choose Paid with yourself.` : ''));
       } finally { c.reading = false; }
     },
     async saveTripCost() {

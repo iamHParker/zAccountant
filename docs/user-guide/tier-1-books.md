@@ -462,6 +462,16 @@ cost**, where you can also drag a receipt picture from an email or your desktop 
 signal; with none, type the cost in, or tap the button later. A receipt in another currency is read as printed:
 change the amount to dollars. (This shows only once zAccountant has turned receipt reading on for the site.)
 
+**The card it was paid with, and the trip, from the receipt.** The reading also picks up the last four digits of
+the card printed on the receipt (like "MASTERCARD 7413") and puts them in **Card it was paid with**. At the desk, the
+cost's **Card** is then set to the card account whose name holds those digits, so name your card accounts with them
+(**Accounts → Rename**, like "Mastercard 7413"). If no account has them, or two do, you choose the card yourself, and a
+note says so. On a restaurant receipt the amount is what went on the card, tip included ($37.71 + $9.43 tip = $47.14).
+
+On **Trip now**, **📷 A receipt** works before you choose a trip: the receipt's date picks the trip whose days cover
+it. If no trip covers that day, the cost goes on a new **day run**, a one-day trip (no overnight stay) named like
+"Day run 05/06/2026 · Shell". Every box, the trip included, can be changed before you press **Save**.
+
 **Checks received on the road.** Tap **+ Check received** (no trip needed): the date, amount, who paid, the check
 number, the invoice number(s) it pays (like 26-124, 26-130), a note (where you deposited it) and photos of the check
 and the remittance. At your desk, **Sales → Checks from the road** shows it with the invoices it found. Press
