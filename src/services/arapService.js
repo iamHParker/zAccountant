@@ -533,7 +533,7 @@ export async function getDocument(db, companyId, docId, { today = null } = {}) {
 }
 
 /** Invoices or bills. status: 'open' (anything with a balance), 'paid', 'void', or 'all'. */
-export async function listDocuments(db, companyId, { kind, status = 'open', contactId = null, today = null, limit = 500 }) {
+export async function listDocuments(db, companyId, { kind, status = 'open', contactId = null, today = null, limit = 500, withLines = false }) {
   if (!SIDE[kind]) throw new LedgerError('kind must be invoice or bill');
   if (!['open', 'paid', 'void', 'all'].includes(status)) throw new LedgerError('status must be open, paid, void or all');
   if (contactId && !UUIDISH.test(contactId)) throw new LedgerError('Contact not found');
@@ -543,7 +543,15 @@ export async function listDocuments(db, companyId, { kind, status = 'open', cont
          OR ($4 = 'open' AND status = 'posted' AND total_cents > paid_cents) OR ($4 = 'paid' AND status = 'posted' AND total_cents = paid_cents)
       ORDER BY doc_date DESC, created_at DESC LIMIT $5`,
     [companyId, kind, contactId, status, Math.min(Number(limit) || 500, 2000)]);
-  return rows.map((d) => docOut(d, today));
+  const docs = rows.map((d) => docOut(d, today));
+  if (!withLines || !docs.length) return docs;
+  // ?lines=1 (Find the invoice for a check from the road): each one's line descriptions, so a word such as a street or
+  // owner's name written only on a line ("Williams residence, foundation letter") still finds it.
+  const { rows: lines } = await db.query(
+    `SELECT document_id, left(string_agg(description, ' · ' ORDER BY id), 600) AS text FROM document_lines
+      WHERE company_id = $1 AND document_id = ANY($2::uuid[]) AND description IS NOT NULL GROUP BY document_id`, [companyId, docs.map((d) => d.id)]);
+  const byDoc = new Map(lines.map((l) => [l.document_id, l.text]));
+  return docs.map((d) => ({ ...d, lineText: byDoc.get(d.id) ?? '' }));
 }
 
 /**

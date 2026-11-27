@@ -243,6 +243,13 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.deepEqual(chkN.customer, { id: smith.id, name: 'Smith Residence' });
   assert.equal(chkL.customer, null);
   for (const i of [chkB, chkN, chkL]) ok(await desk.call('POST', `${b}/road-items/${i.id}/dismiss`, {}));
+  // Find the invoice searches line descriptions too: ?lines=1 adds each open invoice's lines as one text.
+  const bInv = ok(await desk.call('POST', `${b}/invoices`, { contactId: boozer.id, number: '26-200', date: '2026-11-01',
+    lines: [{ accountId: A['4100'], description: 'Williams residence, foundation letter', amount: '3750.00' }] }), 201);
+  const open = ok(await desk.call('GET', `${b}/invoices?status=open&lines=1`));
+  assert.equal(open.find((d) => d.id === bInv.id).lineText, 'Williams residence, foundation letter');
+  assert.equal(ok(await desk.call('GET', `${b}/invoices?status=open`)).find((d) => d.id === bInv.id).lineText, undefined);
+  ok(await desk.call('POST', `${b}/documents/${bInv.id}/void`, {}));
 
   // At the desk, from the trip's grid (Homer, 2026-10-30): change an item before it goes in, then Accept all.
   const ref2 = { id: tr.tripId };
