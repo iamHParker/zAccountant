@@ -840,6 +840,15 @@ export async function voidPayment(pool, companyId, paymentId, { date = null, act
     await c.query(`UPDATE payments SET status = 'void', void_date = $3, void_entry_id = $4, voided_by = $5, voided_at = now(), replaced_by_id = $6
                     WHERE company_id = $1 AND id = $2`, [companyId, p.id, rev.entry_date, rev.id, actor, replacedById]);
     await appendAudit(c, companyId, { action: 'void', entity: 'payment', entityId: p.id, actor, payload: { amountCents: p.amount_cents, voidDate: rev.entry_date, reversalId: rev.id } });
+    // A check from the road whose payment is voided goes back to Sales → Checks from the road, waiting, with its photos,
+    // so it can be recorded again once it's known what it pays (Homer, 2026-11-26). An edit (replacedById) instead
+    // moves the link to the corrected payment, in replacePayment.
+    if (!replacedById) {
+      const { rows: back } = await c.query(
+        `UPDATE road_items SET status = 'pending', payment_id = NULL, reviewed_by = NULL, reviewed_at = NULL
+          WHERE company_id = $1 AND payment_id = $2 RETURNING id`, [companyId, p.id]);
+      for (const r of back) await appendAudit(c, companyId, { action: 'restore', entity: 'road_item', entityId: r.id, actor, payload: { kind: 'check', voidedPaymentId: p.id } });
+    }
     return getPayment(c, companyId, p.id);
   });
 }
@@ -860,6 +869,7 @@ export async function replacePayment(pool, companyId, paymentId, { idempotencyKe
     await voidPayment(c, companyId, paymentId, { actor, replacedById: newId });
     await createPayment(c, companyId, { ...input, kind: old.kind, idempotencyKey, actor, paymentId: newId, replacesId: paymentId });
     await copyPaymentPhotos(c, companyId, paymentId, newId);   // the check photo belongs to the corrected payment too
+    await c.query('UPDATE road_items SET payment_id = $3 WHERE company_id = $1 AND payment_id = $2', [companyId, paymentId, newId]);
     return getPayment(c, companyId, newId);
   });
 }

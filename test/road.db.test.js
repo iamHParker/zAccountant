@@ -195,6 +195,16 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.equal(ok(await desk.call('GET', `${b}/payments/${pay.id}/photos`)).length, 1);
   assert.equal(ok(await desk.call('GET', `${b}/road-items`)).length, 0);
   assert.equal((await desk.call('POST', `${b}/road-items/${chk.id}/accept-check`, { paymentId: pay.id })).status, 400);
+  // Voiding the payment puts the check back in Checks from the road, waiting (Homer, 2026-11-26: recorded on the wrong
+  // invoice); recording it again works the same way.
+  ok(await desk.call('POST', `${b}/payments/${pay.id}/void`, {}));
+  const again = ok(await desk.call('GET', `${b}/road-items`)).find((i) => i.id === chk.id);
+  assert.equal(again.status, 'pending');
+  assert.equal(again.paymentId, null);
+  assert.equal(again.photos.length, 1);
+  const pay1b = ok(await desk.call('POST', `${b}/payments-received`, { contactId: cust.id, date: '2026-10-20', accountId: A['1000'], method: 'check',
+    applications: [{ documentId: inv.id, amount: '900.00' }] }), 201);
+  ok(await desk.call('POST', `${b}/road-items/${chk.id}/accept-check`, { paymentId: pay1b.id }));
 
   // Dismissed by mistake (Homer, 2026-11-16): a check for project 2601, paid by someone whose name isn't the customer's.
   // Restore puts it back in the inbox; the job number finds the project's lettered invoice; it's recorded as usual.

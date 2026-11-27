@@ -342,7 +342,7 @@ createApp({
       zoom: lastZoom(), ZOOM_MIN, ZOOM_MAX, NEW_CONTACT, COMMENT_LINE, renaming: null, cardNums: '', ENTRY_OWNER, CORRECTABLE, mine: { name: '', current: '', next: '', code: '' }, profile: null,
       MONTHS: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
       fullscreen: false, fullscreenOk: !!document.documentElement.requestFullscreen,
-      statusMenu: false, prefs: lastPrefs(), STATUS_OPTIONS,
+      statusMenu: false, bigPhoto: null, prefs: lastPrefs(), STATUS_OPTIONS,
       fb: { open: false, note: '', picture: null, pictureSource: null, busy: false, error: '' },
       adm: { from: 'home', data: null, changes: [], edit: null, q: '' },
       dev: { from: 'home', summary: null, status: 'new', list: null, report: null, text: '', note: '', copied: false },
@@ -487,7 +487,7 @@ createApp({
   async mounted() {
     applyZoom(this.zoom);
     document.addEventListener('fullscreenchange', () => { this.fullscreen = !!document.fullscreenElement; });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.statusMenu = false; });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { this.statusMenu = false; this.bigPhoto = null; } });
     // Back to this browser tab (rates may have been changed in another tab): refresh the saved rates, quietly.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible' || this.tab !== 'sales' || !this.auth.user) return;
@@ -2967,6 +2967,8 @@ createApp({
       catch (err) { this.flash(err.message, 'bad'); } finally { pay.photoBusy = false; }
       if (pay.photos.length + pay.keptPhotos >= 6) this.flash('A payment can have at most 6 photos.');
     },
+    /** A photo link clicked: show the picture full size over the page, with Close, instead of leaving zAccountant. */
+    showPhoto(e) { e.preventDefault(); this.bigPhoto = e.currentTarget.href; },
     photoUrl(p, ph) { return `/api${this.arBase()}/payments/${p.id}/photos/${ph.id}`; },
     async openPhotos(p) {
       const photos = (await this.run(() => api('GET', `${this.arBase()}/payments/${p.id}/photos`))) ?? [];

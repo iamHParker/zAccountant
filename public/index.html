@@ -10,6 +10,15 @@
 </head>
 <body>
 <div id="app" v-cloak>
+  <!-- A photo opened big stays inside zAccountant, with Close (Homer, 2026-11-26: the full-size picture opened in a
+       viewer with no way back to the app). Esc or a click outside the picture also closes it. -->
+  <div class="photo-overlay" v-if="bigPhoto" role="dialog" aria-label="Photo" @click.self="bigPhoto = null">
+    <div class="photo-overlay-bar">
+      <button type="button" class="primary" @click="bigPhoto = null">✕ Close</button>
+      <a :href="bigPhoto" target="_blank" rel="noopener" class="small">open in a new tab</a>
+    </div>
+    <img :src="bigPhoto" alt="Photo, full size" @click="bigPhoto = null">
+  </div>
   <!-- Desk header (Homer, 2026-11-07): a blue banner (icon, name, company on the left; feedback, who you are, sign out on the right)
        with the page links on their own rail underneath. Help sits at the end of the rail, after Settings. -->
   <header class="top desk-top">
@@ -706,7 +715,7 @@
             <span v-else class="bad"> · no unpaid invoice with that number</span></div>
           <div class="small muted" v-if="i.data.notes">{{ i.data.notes }}</div>
           <div class="photo-strip" v-if="i.photos.length">
-            <a v-for="id in i.photos" :href="roadCheckPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadCheckPhotoUrl(i, id)" alt="Check photo"></a>
+            <a v-for="id in i.photos" :href="roadCheckPhotoUrl(i, id)" target="_blank" rel="noopener" @click="showPhoto($event)"><img :src="roadCheckPhotoUrl(i, id)" alt="Check photo"></a>
           </div>
           <div class="row wrap" v-if="can('invoices')">
             <span class="muted small">from {{ i.keyName }}</span>
@@ -738,7 +747,7 @@
               <strong class="num">{{ money(i.data.amountCents) }}</strong>
             </div>
             <div class="photo-strip" v-if="i.photos.length">
-              <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
+              <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener" @click="showPhoto($event)"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
             </div>
             <div class="grid2" v-if="can('bills')">
               <label class="small">Goes to
@@ -1130,7 +1139,7 @@
               <img v-for="id in ar.pay.roadItem.photos" class="road-check-photo" :src="roadCheckPhotoUrl(ar.pay.roadItem, id)" alt="Check photo" @click="ar.pay.zoom = id">
             </div>
             <div v-else>
-              <a :href="roadCheckPhotoUrl(ar.pay.roadItem, ar.pay.zoom)" target="_blank" rel="noopener"><img class="road-check-zoom" :src="roadCheckPhotoUrl(ar.pay.roadItem, ar.pay.zoom)" alt="Check photo, large"></a>
+              <a :href="roadCheckPhotoUrl(ar.pay.roadItem, ar.pay.zoom)" target="_blank" rel="noopener" @click="showPhoto($event)"><img class="road-check-zoom" :src="roadCheckPhotoUrl(ar.pay.roadItem, ar.pay.zoom)" alt="Check photo, large"></a>
               <button type="button" class="small" @click="ar.pay.zoom = null">Smaller</button>
             </div>
           </div>
@@ -1185,7 +1194,7 @@
                 </template>
               </div>
               <div v-else>
-                <a :href="ar.pay.zoom" target="_blank" rel="noopener"><img class="road-check-zoom" :src="ar.pay.zoom" alt="Saved photo, large" title="Click for the full-size picture"></a>
+                <a :href="ar.pay.zoom" target="_blank" rel="noopener" @click="showPhoto($event)"><img class="road-check-zoom" :src="ar.pay.zoom" alt="Saved photo, large" title="Click for the full-size picture"></a>
                 <button type="button" class="small" @click="ar.pay.zoom = null">Smaller</button>
               </div>
             </div>
@@ -1538,7 +1547,7 @@
         <p class="hint" v-if="!ar.photoView.photos.length">No photos yet.</p>
         <div class="row wrap">
           <span class="thumb big" v-for="ph in ar.photoView.photos">
-            <a :href="photoUrl(ar.photoView.payment, ph)" target="_blank" rel="noopener"><span v-if="isPdf(ph)" class="pdf-thumb">📄 PDF<br><span class="small">open</span></span><img v-else :src="photoUrl(ar.photoView.payment, ph)" alt="Payment photo"></a>
+            <a :href="photoUrl(ar.photoView.payment, ph)" target="_blank" rel="noopener" @click="isPdf(ph) || showPhoto($event)"><span v-if="isPdf(ph)" class="pdf-thumb">📄 PDF<br><span class="small">open</span></span><img v-else :src="photoUrl(ar.photoView.payment, ph)" alt="Payment photo"></a>
             <button v-if="can(S.perm) && ar.photoView.payment.status !== 'void'" type="button" class="link" @click="removePhoto(ph)">remove</button>
           </span>
         </div>
@@ -1733,7 +1742,7 @@
               </div>
               <p class="small bad" v-if="roadTimeWarning(i)">⚠ {{ roadTimeWarning(i) }}</p>
               <div class="photo-strip" v-if="i.photos.length">
-                <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
+                <a v-for="id in i.photos" :href="roadPhotoUrl(i, id)" target="_blank" rel="noopener" @click="showPhoto($event)"><img :src="roadPhotoUrl(i, id)" alt="Receipt photo"></a>
               </div>
               <label v-if="i.kind === 'cost' && can('bills')" class="small card-pick">Card
                 <select :value="roadCard(i)" @change="road.cardFor[i.id] = $event.target.value"><option v-for="a in tripPaidFromAccounts()" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
@@ -2144,7 +2153,7 @@
                 <template v-if="g.type === 'road'">
                   <div class="small muted">Sent from {{ g.item.keyName }} on {{ usDate(g.item.receivedAt) }}<span v-if="g.item.data.vendor"> · paid to {{ g.item.data.vendor }}</span></div>
                   <div class="photo-strip" v-if="g.item.photos.length">
-                    <a v-for="id in g.item.photos" :href="roadPhotoUrl(g.item, id)" target="_blank" rel="noopener"><img :src="roadPhotoUrl(g.item, id)" alt="Receipt photo"></a></div>
+                    <a v-for="id in g.item.photos" :href="roadPhotoUrl(g.item, id)" target="_blank" rel="noopener" @click="showPhoto($event)"><img :src="roadPhotoUrl(g.item, id)" alt="Receipt photo"></a></div>
                   <span v-else class="small muted">No photos.</span>
                 </template>
                 <div v-else class="small muted">{{ g.x.start ? g.x.start + '–' + g.x.end + ' · ' : '' }}{{ g.x.userName }}{{ g.x.billable ? '' : ' · not billable' }}</div>
@@ -2156,7 +2165,7 @@
             <p class="hint" v-if="!trip.photoView.photos.length">No photos yet.</p>
             <div class="row wrap">
               <span class="thumb" v-for="ph in trip.photoView.photos">
-                <a :href="tripPhotoUrl(trip.photoView.cost, ph)" target="_blank" rel="noopener"><img :src="tripPhotoUrl(trip.photoView.cost, ph)" alt="Receipt photo"></a>
+                <a :href="tripPhotoUrl(trip.photoView.cost, ph)" target="_blank" rel="noopener" @click="showPhoto($event)"><img :src="tripPhotoUrl(trip.photoView.cost, ph)" alt="Receipt photo"></a>
                 <button class="link" v-if="can('bills')" @click="removeTripPhoto(ph)">remove</button></span>
             </div>
             <div class="row wrap" v-if="can('bills')">
