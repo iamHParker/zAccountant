@@ -164,7 +164,7 @@ const blankDoc = (taxRate = '') => ({ contactId: '', number: '', date: today(), 
 const blankItem = () => ({ name: '', kind: 'service', rate: '', taxable: false, accountId: '' });
 const blankContact = () => ({ name: '', email: '', phone: '', address: '', termsDays: 30, is1099: false, isHomeowner: false, noLateCharges: false, groupName: '', people: [] });
 const blankPerson = () => ({ name: '', email: '', phone: '' });
-const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', nameOnCheck: '', open: [], amounts: {}, photos: [], keptPhotos: 0, photoBusy: false, key: newKey() });
+const blankPay = () => ({ contactId: '', date: today(), accountId: '', method: 'check', reference: '', memo: '', nameOnCheck: '', checkCents: 0, open: [], amounts: {}, photos: [], keptPhotos: 0, photoBusy: false, key: newKey() });
 // Check photos: shrunk in the browser to 2000 pixels on the longer side (enough to read a check), JPEG.
 const PHOTO_SIDE = 2000;
 
@@ -382,7 +382,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], docSort: { invoice: docSort('invoice'), bill: docSort('bill') }, contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
-        pdfOver: false, pdfBusy: false, roadChecks: [], roadBuys: [], buys: [], buyView: 'recent', buyAcct: {}, buyCard: {}, buyBusy: false, plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        pdfOver: false, pdfBusy: false, roadChecks: [], roadAllAcct: '', roadAllBusy: false, roadBuys: [], buys: [], buyView: 'recent', buyAcct: {}, buyCard: {}, buyBusy: false, plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null, del: null, merge: null, similar: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
@@ -1546,18 +1546,90 @@ createApp({
     roadCheckPhotoUrl(i, id) { return `/api${this.arBase()}/road-items/${i.id}/photos/${id}`; },
     /** Opens Receive payment filled in from the check: the customer and invoices it names, the amount spread over them. */
     async recordRoadCheck(i) {
-      // The customer comes from the invoices it names; failing that, a customer with exactly the name on the check.
+      // The customer comes from the invoices it names; failing that, the customer the server found from the name on the
+      // check or a name typed in its invoices box. With none, the form says to choose one, and the amount follows.
       await this.startPay(i.invoices[0]?.contactId ?? i.customer?.id ?? '');
       const p = this.ar.pay;
       Object.assign(p, { nameOnCheck: i.data.from ?? '', date: i.data.date, reference: i.data.checkNumber ?? '', memo: [i.data.from && `From ${i.data.from}`, i.data.notes].filter(Boolean).join(' · ').slice(0, 500),
-        roadItem: i, keptPhotos: i.photos.length });
-      let left = i.data.amountCents;
-      for (const inv of i.invoices.filter((x) => x.contactId === p.contactId)) {
-        const d = p.open.find((x) => x.id === inv.id);
-        if (!d || left <= 0) continue;
+        roadItem: i, checkCents: i.data.amountCents, keptPhotos: i.photos.length, lookup: '', lookupAll: [], picked: null });
+      this.spreadCheck();
+      // Every unpaid invoice, for Find the invoice: a check that names no invoice (or the wrong one) is matched by hand.
+      p.lookupAll = (await this.run(() => api('GET', `${this.arBase()}/${this.S.docPath}?status=open`))) ?? [];
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    /** The invoices a check named, with the whole check fitting on them: one customer, balances at least the check. */
+    roadCheckReady(i) {
+      const inv = i.invoices.filter((x) => x.balanceCents > 0);
+      return inv.length > 0 && inv.every((x) => x.contactId === inv[0].contactId) && inv.reduce((t, x) => t + x.balanceCents, 0) >= i.data.amountCents;
+    },
+    roadChecksReady() { return this.ar.roadChecks.filter((i) => this.roadCheckReady(i)); },
+    /**
+     * Record all matched (Homer, 2026-11-26): every check whose invoices were found becomes its payment in one go, into
+     * one deposit account; the rest stay for Record payment one at a time. Each payment is the same as the form would
+     * save (amount spread over the named invoices in order, check number, memo, phone photos), and each has its own
+     * idempotency key so pressing twice can't record a check twice.
+     */
+    async recordAllRoadChecks() {
+      const ar = this.ar; const list = this.roadChecksReady();
+      const acct = this.payAccounts.find((a) => a.id === ar.roadAllAcct);
+      if (!list.length || !acct) return;
+      const total = list.reduce((t, i) => t + i.data.amountCents, 0);
+      const lines = list.map((i) => `${this.usDate(i.data.date)}  #${i.data.checkNumber ?? '—'}  ${money(i.data.amountCents)} → ${i.invoices.map((x) => x.number).join(', ')} (${i.invoices[0].contactName})`);
+      if (!confirm(`Record ${list.length} check${list.length === 1 ? '' : 's'}, ${money(total)} in all, deposited to ${acct.code} · ${acct.name}?\n\n${lines.join('\n')}`)) return;
+      ar.roadAllBusy = true; let done = 0;
+      try {
+        for (const i of list) {
+          let left = i.data.amountCents; const applications = [];
+          for (const x of i.invoices.filter((v) => v.balanceCents > 0)) {
+            if (left <= 0) break;
+            const c = Math.min(left, x.balanceCents); applications.push({ documentId: x.id, amount: (c / 100).toFixed(2) }); left -= c;
+          }
+          const body = { contactId: i.invoices[0].contactId, date: i.data.date, accountId: acct.id, method: 'check', reference: i.data.checkNumber ?? '',
+            memo: [i.data.from && `From ${i.data.from}`, i.data.notes].filter(Boolean).join(' · ').slice(0, 500), applications };
+          const r = await this.run(() => api('POST', `${this.arBase()}/payments-received`, body, { 'Idempotency-Key': `road-check-${i.id}` }));
+          if (r && await this.run(() => api('POST', `${this.arBase()}/road-items/${i.id}/accept-check`, { paymentId: r.id }))) done++;
+        }
+      } finally { ar.roadAllBusy = false; }
+      if (done) this.flash(`${done} of ${list.length} check${list.length === 1 ? '' : 's'} recorded.`, done === list.length ? 'ok' : 'bad');
+      await this.loadAr();
+    },
+    /**
+     * Puts a road check's amount on the chosen customer's unpaid invoices: first the invoices the check names, then the
+     * rest oldest first, each up to its balance. Run again whenever the customer changes (Homer, 2026-11-26: a check that
+     * matched no invoice opened with $0.00 and a grey Save, so nothing was recorded).
+     */
+    spreadCheck() {
+      const p = this.ar.pay;
+      if (!p.roadItem || p.editId) return;
+      p.amounts = {};
+      const named = new Set(p.picked ? [p.picked] : p.roadItem.invoices.map((x) => x.id));
+      const order = [...p.open.filter((d) => named.has(d.id)), ...p.open.filter((d) => !named.has(d.id))];
+      let left = p.checkCents;
+      for (const d of order) {
+        if (left <= 0) break;
         const c = Math.min(left, d.balanceCents); p.amounts[d.id] = (c / 100).toFixed(2); left -= c;
       }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    /** Customer picked on Receive payment: their unpaid invoices, and a road check's amount spread over them. */
+    async payContactChanged() { this.ar.pay.picked = null; await this.loadPayDocs(); this.spreadCheck(); },
+    /**
+     * Find the invoice (a road check with no job or invoice number on it, Homer 2026-11-26): unpaid invoices of every
+     * customer whose number, customer or project name holds what is typed, or whose balance is the typed amount. With
+     * nothing typed, the invoices owing exactly the check's amount, the likeliest ones. At most 8 are shown.
+     */
+    payLookupHits() {
+      const p = this.ar.pay;
+      const q = (p.lookup ?? '').trim().toLowerCase();
+      const amt = cents(q.replace(/[$,]/g, ''));
+      const hit = (d) => (q ? [d.number, d.contactName, d.project, d.clientRef].some((x) => String(x ?? '').toLowerCase().includes(q)) || (amt > 0 && d.balanceCents === amt)
+        : d.balanceCents === p.checkCents);
+      return p.lookupAll.filter(hit).sort((a, b) => (b.balanceCents === p.checkCents) - (a.balanceCents === p.checkCents)).slice(0, 8);
+    },
+    /** Use this invoice: its customer is chosen and the check's amount goes on it first. */
+    async payPickInvoice(d) {
+      const p = this.ar.pay;
+      p.contactId = d.contactId; p.picked = d.id; p.lookup = '';
+      await this.loadPayDocs(); this.spreadCheck();
     },
     // ---- Road items dismissed by mistake (Homer, 2026-11-16): listed under each inbox, with Restore.
     async loadDismissed() {

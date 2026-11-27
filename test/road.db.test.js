@@ -228,6 +228,21 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   const [chk3] = ok(await desk.call('GET', `${b}/road-items`));
   assert.deepEqual(chk3.customer, { id: cust.id, name: 'Doe Law' });
   ok(await desk.call('POST', `${b}/road-items/${chk3.id}/dismiss`, {}));
+  // Homer, 2026-11-26: checks that matched no invoice opened Receive payment with no customer, so nothing was recorded.
+  // The name on the check is compared without capitals, punctuation or "LLC"; a word typed in the invoices box finds
+  // the one customer it names. Two customers with that word: no guess.
+  const boozer = ok(await desk.call('POST', `${b}/customers`, { name: 'Don Boozer Construction, LLC' }), 201);
+  ok(await desk.call('POST', `${b}/customers`, { name: 'Lee Family' }), 201);
+  ok(await desk.call('POST', `${b}/customers`, { name: 'Lee Garage Inc.' }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'check-boozer-01', kind: 'check', data: { date: '2026-11-24', amount: '1806.49', from: 'Don boozer construction', checkNumber: '15841' } }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'check-nhwic-001', kind: 'check', data: { date: '2026-11-24', amount: '3750.00', from: 'Nhwic', invoices: 'Smith' } }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'check-lee-0001', kind: 'check', data: { date: '2026-11-24', amount: '10.00', from: 'Someone', invoices: 'Lee' } }), 201);
+  const [chkB, chkN, chkL] = ok(await desk.call('GET', `${b}/road-items`));
+  assert.deepEqual(chkB.customer, { id: boozer.id, name: 'Don Boozer Construction, LLC' });
+  assert.deepEqual(chkN.invoices, []);
+  assert.deepEqual(chkN.customer, { id: smith.id, name: 'Smith Residence' });
+  assert.equal(chkL.customer, null);
+  for (const i of [chkB, chkN, chkL]) ok(await desk.call('POST', `${b}/road-items/${i.id}/dismiss`, {}));
 
   // At the desk, from the trip's grid (Homer, 2026-10-30): change an item before it goes in, then Accept all.
   const ref2 = { id: tr.tripId };
