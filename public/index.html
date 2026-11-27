@@ -691,6 +691,11 @@
       <div class="card road-inbox" v-if="tab === 'sales' && ar.roadChecks.length && !ar.showPay && !ar.showDoc">
         <h2>Checks from the road ({{ ar.roadChecks.length }})</h2>
         <p class="hint">Sent from your phone. <strong>Record payment</strong> opens Receive payment filled in from the check; choose the deposit account and save. The photos go with the payment.</p>
+        <div class="row wrap" v-if="can('invoices') && roadChecksReady().length">
+          <label>Deposited to <select v-model="ar.roadAllAcct"><option value="">Choose…</option><option v-for="a in payAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
+          <button class="primary" :disabled="!ar.roadAllAcct || ar.roadAllBusy" @click="recordAllRoadChecks">{{ ar.roadAllBusy ? 'Recording…' : (roadChecksReady().length === 1 ? 'Record the 1 matched check (' : 'Record all ' + roadChecksReady().length + ' matched checks (') + money(roadChecksReady().reduce((t, i) => t + i.data.amountCents, 0)) + ')' }}</button>
+          <span class="muted small">Only checks whose invoices were found; the others wait for Record payment one at a time.</span>
+        </div>
         <div class="road-item" v-for="i in ar.roadChecks">
           <div class="row wrap">
             <span><span class="muted small">{{ usDate(i.data.date) }}</span> Check{{ i.data.checkNumber ? ' #' + i.data.checkNumber : '' }}{{ i.data.from ? ' from ' + i.data.from : '' }}</span>

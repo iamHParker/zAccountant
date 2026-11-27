@@ -502,6 +502,10 @@ the check's amount goes on their unpaid invoices, oldest first, and you can chan
 on an invoice, so if the invoice isn't in the books yet, enter it first (or drop its PDF on Sales); the check waits in
 Checks from the road until you record it.
 
+Several checks already matched to their invoices? Choose the **Deposited to** account at the top of Checks from the
+road and press **Record all matched checks**. It lists each check and its invoices for you to confirm, then records
+them all; the ones that need fixing stay for Record payment one at a time.
+
 **Dismissed something by mistake?** Under each road list (Sales for checks, Bills for equipment and supplies, Trips for
 the rest) a folded card, **Dismissed … from the road**, lists what was dismissed in the last 120 days. Press
 **Restore**: the item goes back in the list waiting, exactly as the phone sent it, and you accept it the usual way.
