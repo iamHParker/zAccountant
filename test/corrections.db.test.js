@@ -35,6 +35,10 @@ test('edit: invoices, bills and payments are corrected by void + replace', { ski
     // Edit the corrected copy again: still 1001, and the next new invoice is 1002.
     const again = await arap.replaceDocument(pool, co.id, fixed.id, { contactId: smith.id, date: '2026-03-02', lines: [{ accountId: A['4100'], amount: '1200' }] });
     assert.equal(again.number, '1001');
+    // An old version names the copy that stands now, after every later edit, and its customer (Homer, 2026-11-26).
+    const first = await arap.getDocument(pool, co.id, inv.id);
+    assert.deepEqual([first.current.id, first.current.number, first.current.contactName, first.current.totalCents], [again.id, '1001', 'Smith Homes', 120000]);
+    assert.equal((await arap.getDocument(pool, co.id, again.id)).current, null);
     const next = await arap.createDocument(pool, co.id, { kind: 'invoice', contactId: acme.id, date: '2026-03-05', lines: [{ accountId: A['4100'], amount: '10' }] });
     assert.equal(next.number, '1002');
     // A plain new invoice can't take a number in use: typing 1001 again gives 1001A.
