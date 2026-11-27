@@ -592,7 +592,7 @@ export function createApp(pool, { log } = {}) {
   api.post('/companies/:companyId/invoices/read-pdf', route('invoices', ({ db, req, companyId }) => oldInvoices.readOldInvoice(db, companyId, req.body ?? {})));
   for (const [path, kind] of [['invoices', 'invoice'], ['bills', 'bill']]) {
     api.get(`/companies/:companyId/${path}`, route(['view_books', SIDE_PERM[kind]], ({ db, req, companyId }) =>
-      arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), today: centralToday() })));
+      arap.listDocuments(db, companyId, { kind, status: q(req.query.status) ?? 'open', contactId: q(req.query.contactId), withLines: q(req.query.lines) === '1', today: centralToday() })));
     api.post(`/companies/:companyId/${path}`, route(SIDE_PERM[kind], ({ db, req, companyId, actor }) => {
       const { contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan, noLateCharges } = req.body ?? {};
       return arap.createDocument(db, companyId, { kind, contactId, number, date, dueDate, memo, project, jobId, taxRate, lines, attention, careOf, sendTo, clientRef, plan, noLateCharges, idempotencyKey: idemKey(req), actor });

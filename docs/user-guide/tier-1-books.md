@@ -495,9 +495,11 @@ shows "In the books". Typing just the project number (2601) also finds that proj
 If the name on the check isn't your customer's name (an owner, a parent company or an insurer paid), that's fine: the
 payment goes on the customer and invoice you choose, and the name on the check is kept in the memo.
 
-No invoice number on the check (or the wrong one)? Use **Find the invoice** on the same form: type part of an
-invoice number, the customer's or project's name, or an amount, and press **Use this** beside the right invoice. With
-nothing typed, it lists the unpaid invoices that owe exactly the check's amount. You can also just choose the customer:
+No invoice number on the check (or the wrong one)? The form shows the phone's photo of the check (click it to make it
+bigger) and **Find the invoice**: it lists every unpaid invoice, those owing exactly the check's amount first, and starts
+with whatever the phone typed in the invoices box. Type part of an invoice number, a customer, project or person's name,
+a word from the invoice's lines, or an amount, and press **Use this** beside the right invoice. A small typo is fine
+("williiam" finds Williams). If nothing matches, you still see the whole list. You can also just choose the customer:
 the check's amount goes on their unpaid invoices, oldest first, and you can change the amounts. A payment always goes
 on an invoice, so if the invoice isn't in the books yet, enter it first (or drop its PDF on Sales); the check waits in
 Checks from the road until you record it.

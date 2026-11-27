@@ -243,6 +243,26 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   assert.deepEqual(chkN.customer, { id: smith.id, name: 'Smith Residence' });
   assert.equal(chkL.customer, null);
   for (const i of [chkB, chkN, chkL]) ok(await desk.call('POST', `${b}/road-items/${i.id}/dismiss`, {}));
+  // Find the invoice searches line descriptions too: ?lines=1 adds each open invoice's lines as one text.
+  const bInv = ok(await desk.call('POST', `${b}/invoices`, { contactId: boozer.id, number: '26-200', date: '2026-11-01',
+    lines: [{ accountId: A['4100'], description: 'Williams residence, foundation letter', amount: '3750.00' }] }), 201);
+  const open = ok(await desk.call('GET', `${b}/invoices?status=open&lines=1`));
+  assert.equal(open.find((d) => d.id === bInv.id).lineText, 'Williams residence, foundation letter');
+  assert.equal(ok(await desk.call('GET', `${b}/invoices?status=open`)).find((d) => d.id === bInv.id).lineText, undefined);
+  ok(await desk.call('POST', `${b}/documents/${bInv.id}/void`, {}));
+  // The project's name instead of its number (Homer, 2026-11-26: check from NHWIC with "Williams" for project
+  // 26-057 POR Williams, NHWIC …): the one project with that word in its name gives its unpaid invoices.
+  ok(await desk.call('POST', `${b}/jobs/import`, { text: '26-057 POR Williams, NHWIC TX292708-02\n26-058 Shapiro, NHWIC TX311342-02' }));
+  const J2 = Object.fromEntries(ok(await desk.call('GET', `${b}/jobs`)).map((j) => [j.code, j.id]));
+  const wInv = ok(await desk.call('POST', `${b}/invoices`, { contactId: boozer.id, number: '2611', jobId: J2['26-057'], date: '2026-10-26',
+    lines: [{ accountId: A['4100'], description: 'Inspection', amount: '3750.00' }] }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'check-nhwic-002', kind: 'check', data: { date: '2026-11-24', amount: '3750.00', from: 'Nhwic', invoices: 'Williams' } }), 201);
+  ok(await phone.call('POST', '/api/road/items', { clientId: 'check-nhwic-003', kind: 'check', data: { date: '2026-11-24', amount: '3750.00', from: 'Nhwic', invoices: 'NHWIC' } }), 201);
+  const [chkW, chkNh] = ok(await desk.call('GET', `${b}/road-items`));
+  assert.deepEqual(chkW.invoices.map((i) => i.id), [wInv.id]);
+  assert.deepEqual(chkNh.invoices, []); // in two projects' names: no guess
+  for (const i of [chkW, chkNh]) ok(await desk.call('POST', `${b}/road-items/${i.id}/dismiss`, {}));
+  ok(await desk.call('POST', `${b}/documents/${wInv.id}/void`, {}));
 
   // At the desk, from the trip's grid (Homer, 2026-10-30): change an item before it goes in, then Accept all.
   const ref2 = { id: tr.tripId };

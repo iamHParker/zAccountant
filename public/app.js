@@ -285,6 +285,18 @@ const hrs = (m) => { const h = Math.floor((m * 100 + 30) / 60); return `${Math.f
 
 // One key per "Save" click: if the request is retried (double click, flaky Wi-Fi), the server posts it only once.
 const newKey = () => crypto.randomUUID();
+/** True when two words differ by at most `max` letters changed, added or dropped (a typo: "williiam" ~ "williams"). */
+function nearWord(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return false;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (Math.min(...cur) > max) return false;
+    prev = cur;
+  }
+  return prev[b.length] <= max;
+}
 const blankSearch = () => ({ text: '', from: '', to: '', accountId: '', source: '' });
 const blankRepeat = () => ({ on: false, name: '', frequency: 'monthly', endDate: '' });
 
@@ -1551,10 +1563,12 @@ createApp({
       await this.startPay(i.invoices[0]?.contactId ?? i.customer?.id ?? '');
       const p = this.ar.pay;
       Object.assign(p, { nameOnCheck: i.data.from ?? '', date: i.data.date, reference: i.data.checkNumber ?? '', memo: [i.data.from && `From ${i.data.from}`, i.data.notes].filter(Boolean).join(' · ').slice(0, 500),
-        roadItem: i, checkCents: i.data.amountCents, keptPhotos: i.photos.length, lookup: '', lookupAll: [], picked: null });
+        roadItem: i, checkCents: i.data.amountCents, keptPhotos: i.photos.length, picked: null, zoom: null, lookupAll: [],
+        // What the phone typed in the invoices box ("Williams") starts the search when it found no invoice.
+        lookup: i.invoices.length ? '' : (i.data.invoices ?? '').slice(0, 60) });
       this.spreadCheck();
       // Every unpaid invoice, for Find the invoice: a check that names no invoice (or the wrong one) is matched by hand.
-      p.lookupAll = (await this.run(() => api('GET', `${this.arBase()}/${this.S.docPath}?status=open`))) ?? [];
+      p.lookupAll = (await this.run(() => api('GET', `${this.arBase()}/${this.S.docPath}?status=open&lines=1`))) ?? [];
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
     /** The invoices a check named, with the whole check fitting on them: one customer, balances at least the check. */
@@ -1613,18 +1627,39 @@ createApp({
     /** Customer picked on Receive payment: their unpaid invoices, and a road check's amount spread over them. */
     async payContactChanged() { this.ar.pay.picked = null; await this.loadPayDocs(); this.spreadCheck(); },
     /**
-     * Find the invoice (a road check with no job or invoice number on it, Homer 2026-11-26): unpaid invoices of every
-     * customer whose number, customer or project name holds what is typed, or whose balance is the typed amount. With
-     * nothing typed, the invoices owing exactly the check's amount, the likeliest ones. At most 8 are shown.
+     * Find the invoice (a road check with no job or invoice number on it, Homer 2026-11-26). Every word typed must be
+     * found somewhere on an unpaid invoice: its number, customer, project, memo, attention, care of, send-to, client
+     * reference, line descriptions, or the customer's people and group. A word is forgiving of a slip of the keys:
+     * one letter off for words of 4+ letters, two for 7+ ("williiam" finds Williams). An amount finds invoices with that
+     * balance or total. Invoices owing exactly the check's amount come first.
+     * Returns { hits, all }: all = true when nothing matched (or nothing was typed) and every unpaid invoice is listed.
      */
-    payLookupHits() {
+    payLookup() {
       const p = this.ar.pay;
       const q = (p.lookup ?? '').trim().toLowerCase();
-      const amt = cents(q.replace(/[$,]/g, ''));
-      const hit = (d) => (q ? [d.number, d.contactName, d.project, d.clientRef].some((x) => String(x ?? '').toLowerCase().includes(q)) || (amt > 0 && d.balanceCents === amt)
-        : d.balanceCents === p.checkCents);
-      return p.lookupAll.filter(hit).sort((a, b) => (b.balanceCents === p.checkCents) - (a.balanceCents === p.checkCents)).slice(0, 8);
+      const byAmount = (a, b) => (b.balanceCents === p.checkCents) - (a.balanceCents === p.checkCents) || String(b.date).localeCompare(String(a.date));
+      const every = [...p.lookupAll].sort(byAmount);
+      if (!q) return { hits: every, all: true };
+      const amt = /^[$\d,.\s]+$/.test(q) ? cents(q.replace(/[$,\s]/g, '')) : null;
+      const words = q.split(/[^a-z0-9.-]+/).filter((w) => w.length >= 2);
+      const hits = every.filter((d) => {
+        if (amt > 0 && (d.balanceCents === amt || d.totalCents === amt)) return true;
+        if (!words.length) return false;
+        const hay = this.lookupText(d);
+        const hayWords = hay.split(/[^a-z0-9-]+/).filter(Boolean);
+        return words.every((w) => hay.includes(w) || (w.length >= 4 && hayWords.some((h) => nearWord(w, h, w.length >= 7 ? 2 : 1))));
+      });
+      return hits.length ? { hits, all: false } : { hits: every, all: true };
     },
+    /** Everything Find the invoice searches on one invoice, in lower case. */
+    lookupText(d) {
+      const c = this.ar.contacts.find((x) => x.id === d.contactId);
+      const j = d.jobId ? this.ar.jobs.find((x) => x.id === d.jobId) : null;
+      return [d.number, d.contactName, d.project, j?.code, j?.name, d.memo, d.attention, d.careOf, d.sendTo, d.clientRef, d.lineText, c?.groupName,
+        ...(c?.people ?? []).map((x) => x.name)].filter(Boolean).join(' · ').toLowerCase();
+    },
+    /** The project an invoice is for, as shown in Find the invoice: its project (job) name, else its project text. */
+    lookupProject(d) { return (d.jobId && this.ar.jobs.find((x) => x.id === d.jobId)?.name) || d.project || ''; },
     /** Use this invoice: its customer is chosen and the check's amount goes on it first. */
     async payPickInvoice(d) {
       const p = this.ar.pay;
