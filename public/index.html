@@ -1177,6 +1177,18 @@
             <strong>Photos of the check and remittance, or a PDF</strong> <span class="muted small">(optional; kept with this payment, e.g. the bank's deposit confirmation)</span>
             <p class="muted small" v-if="ar.pay.roadItem && ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} from the phone will be saved with this payment.</p>
             <p class="muted small" v-else-if="ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} already saved; they stay with the corrected payment.</p>
+            <div v-if="ar.pay.editId && ar.pay.savedPhotos && ar.pay.savedPhotos.length">
+              <div class="row wrap" v-if="!ar.pay.zoom">
+                <template v-for="ph in ar.pay.savedPhotos">
+                  <a v-if="isPdf(ph)" :href="ph.url" target="_blank" rel="noopener" class="pdf-thumb">📄 PDF<br><span class="small">open</span></a>
+                  <img v-else class="road-check-photo" :src="ph.url" alt="Saved photo of the check or remittance" @click="ar.pay.zoom = ph.url" title="Click to make it bigger">
+                </template>
+              </div>
+              <div v-else>
+                <a :href="ar.pay.zoom" target="_blank" rel="noopener"><img class="road-check-zoom" :src="ar.pay.zoom" alt="Saved photo, large" title="Click for the full-size picture"></a>
+                <button type="button" class="small" @click="ar.pay.zoom = null">Smaller</button>
+              </div>
+            </div>
             <div class="row wrap">
               <label class="button">📷 Take photo<input type="file" accept="image/*" capture="environment" class="hidden-file" @change="addPayPhotos"></label>
               <label class="button">🖼 Choose photo<input type="file" accept="image/*" multiple class="hidden-file" @change="addPayPhotos"></label> <button type="button" @click="pastePhotos('addPayPhotos')">📋 Paste</button>
@@ -1517,7 +1529,7 @@
         </table>
       </div>
 
-      <div class="card" v-if="ar.panel === 'payments' && ar.photoView">
+      <div class="card pay-photos" v-if="ar.panel === 'payments' && ar.photoView">
         <div class="row">
           <h2>Photos and PDFs · {{ ar.photoView.payment.contactName }} · {{ money(ar.photoView.payment.amountCents) }} on {{ ar.photoView.payment.date }}</h2>
           <button type="button" @click="ar.photoView = null">Close</button>

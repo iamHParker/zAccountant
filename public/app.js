@@ -2908,7 +2908,11 @@ createApp({
     // Edit a payment: the form, filled in. The invoices it paid are listed with their balance before this payment.
     async editPay(p) {
       this.ar.pay = { ...blankPay(), editId: p.id, contactId: p.contactId, date: p.date, accountId: p.accountId, method: p.method || 'check',
-        reference: p.reference ?? '', memo: p.memo ?? '', keptPhotos: p.photoCount ?? 0 };
+        reference: p.reference ?? '', memo: p.memo ?? '', keptPhotos: p.photoCount ?? 0, savedPhotos: [], zoom: null };
+      // The photos already saved with it (the check and remittance), shown on the form to read while correcting it
+      // (Homer, 2026-11-26: "I need to see the check").
+      if (p.photoCount) this.ar.pay.savedPhotos = ((await this.run(() => api('GET', `${this.arBase()}/payments/${p.id}/photos`))) ?? [])
+        .map((ph) => ({ ...ph, url: this.photoUrl(p, ph) }));
       this.ar.showPay = true; this.ar.showDoc = false; this.ar.detail = null;
       await this.loadPayDocs();
       const pay = this.ar.pay;
@@ -2967,6 +2971,9 @@ createApp({
     async openPhotos(p) {
       const photos = (await this.run(() => api('GET', `${this.arBase()}/payments/${p.id}/photos`))) ?? [];
       this.ar.photoView = { payment: p, photos, busy: false };
+      // The photos open below the payments list; from a long list that was out of sight, so the link looked dead
+      // (Homer, 2026-11-26). Scroll to them.
+      this.$nextTick(() => document.querySelector('.pay-photos')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     },
     async uploadPhotos(e) {
       const files = [...(e.target.files ?? [])]; e.target.value = '';
