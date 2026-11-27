@@ -2860,7 +2860,12 @@ createApp({
       return `mailto:${encodeURIComponent(doc.sendTo ?? '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     },
     openEmail(doc) { window.location.href = this.emailLink(doc); },
-    async openDoc(d) { this.ar.details = null; this.ar.detail = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`)); },
+    // The invoice opens above the tabs; from far down a long list (Sales → Invoices → All) it opened out of sight and
+    // "view" looked like it did nothing (Homer, 2026-11-26), so the page scrolls to it.
+    async openDoc(d) {
+      this.ar.details = null; this.ar.detail = await this.run(() => api('GET', `${this.arBase()}/documents/${d.id}`));
+      if (this.ar.detail) this.$nextTick(() => document.querySelector('.statement-doc')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    },
     startDetails(d) {
       this.ar.details = { memo: d.memo ?? '', dueDate: d.dueDate, clientRef: d.clientRef ?? '', planCount: d.plan ? String(d.plan.count) : '', planFirstDue: d.plan?.firstDue ?? '',
         noLateCharges: !!d.noLateCharges };

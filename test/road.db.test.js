@@ -261,6 +261,9 @@ test('Road page: phone key, inbox, review at the desk', { skip: !hasDb && 'DATAB
   const [chkW, chkNh] = ok(await desk.call('GET', `${b}/road-items`));
   assert.deepEqual(chkW.invoices.map((i) => i.id), [wInv.id]);
   assert.deepEqual(chkNh.invoices, []); // in two projects' names: no guess
+  // The payer's short name is the start of one customer's name: that customer ("Nhwic" → "NHWIC Warranty").
+  const nhwic = ok(await desk.call('POST', `${b}/customers`, { name: 'NHWIC Warranty' }), 201);
+  assert.deepEqual(ok(await desk.call('GET', `${b}/road-items`)).find((i) => i.id === chkNh.id).customer, { id: nhwic.id, name: 'NHWIC Warranty' });
   for (const i of [chkW, chkNh]) ok(await desk.call('POST', `${b}/road-items/${i.id}/dismiss`, {}));
   ok(await desk.call('POST', `${b}/documents/${wInv.id}/void`, {}));
 

@@ -502,7 +502,8 @@ a word from the invoice's lines, or an amount, and press **Use this** beside the
 ("williiam" finds Williams). If nothing matches, you still see the whole list. You can also just choose the customer:
 the check's amount goes on their unpaid invoices, oldest first, and you can change the amounts. A payment always goes
 on an invoice, so if the invoice isn't in the books yet, enter it first (or drop its PDF on Sales); the check waits in
-Checks from the road until you record it.
+Checks from the road until you record it. When the check's payer is a short form of your customer's name ("Nhwic" for NHWIC
+Warranty), that customer is chosen for you.
 
 Several checks already matched to their invoices? Choose the **Deposited to** account at the top of Checks from the
 road and press **Record all matched checks**. It lists each check and its invoices for you to confirm, then records

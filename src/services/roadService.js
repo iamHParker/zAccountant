@@ -547,6 +547,9 @@ export async function listRoadItems(db, companyId, { status = 'pending' } = {}) 
     const from = nameKey(r.data.from);
     const same = from ? custs.filter((c) => nameKey(c.name) === from) : [];
     if (same.length === 1) return { id: same[0].id, name: same[0].name };
+    // A short payer name that is the start of one customer's name ("Nhwic" → "NHWIC Warranty"; Homer, 2026-11-26).
+    const starts = from ? custs.filter((c) => (nameKey(c.name) + ' ').startsWith(from + ' ')) : [];
+    if (starts.length === 1) return { id: starts[0].id, name: starts[0].name };
     for (const word of typed(r).filter((w) => /[a-z]{3,}/.test(w))) {
       const hit = (name) => nameKey(name).split(' ').includes(nameKey(word));
       const ids = new Map([...custs.filter((c) => hit(c.name)).map((c) => [c.id, c.name]),
