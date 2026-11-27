@@ -518,9 +518,22 @@ export async function getDocument(db, companyId, docId, { today = null } = {}) {
     `SELECT p.id, p.pay_date, p.method, p.reference, p.status, a.amount_cents FROM payment_applications a JOIN payments p ON p.id = a.payment_id
       WHERE a.document_id = $1 ORDER BY p.pay_date, p.created_at`, [d.id]);
   const { rows: [ct] } = await db.query('SELECT name, email, phone, address, terms_days AS "termsDays", group_name AS "groupName" FROM contacts WHERE id = $1', [d.contact_id]);
+  // A replaced invoice names the copy that stands now (following every later edit), with its number and customer:
+  // "Replaced" alone left Homer looking for 26-151 under the old customer when the edit had moved it (2026-11-26).
+  let current = null;
+  if (d.replaced_by_id) {
+    const { rows: [cur] } = await db.query(
+      `WITH RECURSIVE chain AS (SELECT id, replaced_by_id, 1 AS depth FROM documents WHERE company_id = $1 AND id = $2
+         UNION ALL SELECT x.id, x.replaced_by_id, c.depth + 1 FROM documents x JOIN chain c ON x.id = c.replaced_by_id WHERE x.company_id = $1 AND c.depth < 100)
+       SELECT d2.id, d2.number, d2.status, ct2.name AS "contactName", to_char(d2.doc_date, 'YYYY-MM-DD') AS date, d2.total_cents AS "totalCents"
+         FROM chain JOIN documents d2 ON d2.id = chain.id JOIN contacts ct2 ON ct2.id = d2.contact_id
+        WHERE chain.replaced_by_id IS NULL`, [companyId, d.replaced_by_id]);
+    if (cur) current = { ...cur, totalCents: Number(cur.totalCents) };
+  }
   return {
     ...docOut(d, today),
     contact: ct,
+    current,
     job: job ?? null,
     lines: lines.map((l) => ({ id: String(l.id), comment: l.is_comment, accountId: l.account_id, accountCode: l.code, accountName: l.account_name, description: l.description,
       quantity: l.quantity, unitPriceCents: l.unit_price_cents, amountCents: l.amount_cents, taxable: l.taxable,

@@ -1208,6 +1208,10 @@
             <button @click="ar.detail = null">Close</button>
           </span>
         </div>
+          <p class="hint no-print" v-if="ar.detail.current">This is an old version. It was replaced by
+            <strong>{{ S.Doc.toLowerCase() }} {{ ar.detail.current.number }}</strong> for <strong>{{ ar.detail.current.contactName }}</strong>
+            ({{ money(ar.detail.current.totalCents) }}, {{ ar.detail.current.status === 'void' ? 'void' : 'in the books' }}).
+            <button type="button" class="link" @click="openDoc(ar.detail.current)">Open the current version</button></p>
         <form class="row wrap no-print" v-if="ar.details" @submit.prevent="saveDetails">
           <label>Memo <input v-model.trim="ar.details.memo" maxlength="500"></label>
           <label>Due date <input type="date" v-model="ar.details.dueDate" required></label>
