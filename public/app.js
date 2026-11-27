@@ -1654,9 +1654,12 @@ createApp({
     /** Everything Find the invoice searches on one invoice, in lower case. */
     lookupText(d) {
       const c = this.ar.contacts.find((x) => x.id === d.contactId);
-      return [d.number, d.contactName, d.project, d.memo, d.attention, d.careOf, d.sendTo, d.clientRef, d.lineText, c?.groupName,
+      const j = d.jobId ? this.ar.jobs.find((x) => x.id === d.jobId) : null;
+      return [d.number, d.contactName, d.project, j?.code, j?.name, d.memo, d.attention, d.careOf, d.sendTo, d.clientRef, d.lineText, c?.groupName,
         ...(c?.people ?? []).map((x) => x.name)].filter(Boolean).join(' · ').toLowerCase();
     },
+    /** The project an invoice is for, as shown in Find the invoice: its project (job) name, else its project text. */
+    lookupProject(d) { return (d.jobId && this.ar.jobs.find((x) => x.id === d.jobId)?.name) || d.project || ''; },
     /** Use this invoice: its customer is chosen and the check's amount goes on it first. */
     async payPickInvoice(d) {
       const p = this.ar.pay;

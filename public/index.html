@@ -1146,7 +1146,7 @@
                 <tbody>
                   <tr v-for="d in payLookup().hits" :class="{ muted: d.id === ar.pay.picked }">
                     <td>{{ d.number }}</td>
-                    <td>{{ d.contactName }}<span class="muted small" v-if="d.project"> · {{ d.project }}</span>
+                    <td>{{ d.contactName }}<span class="muted small" v-if="lookupProject(d)"> · {{ lookupProject(d) }}</span>
                       <div class="muted small" v-if="d.attention || d.memo || d.lineText">{{ [d.attention && 'Attn ' + d.attention, d.memo, d.lineText].filter(Boolean).join(' · ').slice(0, 110) }}</div></td>
                     <td>{{ usDate(d.date) }}</td>
                     <td class="num">{{ money(d.balanceCents) }}<div class="small" v-if="d.balanceCents === ar.pay.checkCents">✓ same as check</div></td>

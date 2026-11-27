@@ -504,23 +504,34 @@ export async function listRoadItems(db, companyId, { status = 'pending' } = {}) 
   const wanted = [...new Set(checks.flatMap(typed))];
   const { rows: invs } = wanted.length ? await db.query(
     `SELECT * FROM (
-       SELECT d.id, d.number, d.contact_id AS "contactId", ct.name AS "contactName", lower(j.code) AS "jobCode",
+       SELECT d.id, d.number, d.contact_id AS "contactId", ct.name AS "contactName", lower(j.code) AS "jobCode", d.job_id AS "jobId",
               d.total_cents - COALESCE((SELECT sum(a.amount_cents) FROM payment_applications a JOIN payments p ON p.id = a.payment_id
                                          WHERE a.document_id = d.id AND p.status = 'posted'), 0)::bigint AS "balanceCents"
          FROM documents d JOIN contacts ct ON ct.id = d.contact_id LEFT JOIN jobs j ON j.company_id = d.company_id AND j.id = d.job_id
         WHERE d.company_id = $1 AND d.kind = 'invoice' AND d.status <> 'void' AND d.replaced_by_id IS NULL
-          AND (lower(d.number) = ANY($2::text[]) OR regexp_replace(lower(d.number), '[a-z]+$', '') = ANY($2::text[]) OR lower(j.code) = ANY($2::text[]))) x
+          AND (lower(d.number) = ANY($2::text[]) OR regexp_replace(lower(d.number), '[a-z]+$', '') = ANY($2::text[]) OR lower(j.code) = ANY($2::text[])
+              OR regexp_split_to_array(lower(j.name), '[^a-z0-9]+') && $2::text[])) x
       ORDER BY number`,
+    [companyId, wanted]) : { rows: [] };
+  // Projects whose name has a typed word, to tell whether the word names one project or several.
+  const { rows: namedJobs } = wanted.length ? await db.query(
+    "SELECT id, lower(name) AS name FROM jobs WHERE company_id = $1 AND regexp_split_to_array(lower(name), '[^a-z0-9]+') && $2::text[]",
     [companyId, wanted]) : { rows: [] };
   const invoicesFor = (r) => {
     const found = new Set();
     for (const n of typed(r)) {
       const exact = invs.filter((i) => i.number.toLowerCase() === n);
-      const hits = exact.length ? exact
+      let hits = exact.length ? exact
         : invs.filter((i) => Number(i.balanceCents) > 0 && (i.number.toLowerCase().replace(/[a-z]+$/, '') === n || i.jobCode === n));
+      // A name typed instead of a number ("Williams"): the unpaid invoices of the one project whose name has that word
+      // ("26-057 POR Williams, NHWIC …"; Homer, 2026-11-26). A word in two projects' names ("NHWIC") finds nothing.
+      if (!hits.length && /[a-z]{3,}/.test(n)) {
+        const jobs = namedJobs.filter((j) => j.name.split(/[^a-z0-9]+/).includes(n));
+        if (jobs.length === 1) hits = invs.filter((i) => Number(i.balanceCents) > 0 && i.jobId === jobs[0].id);
+      }
       for (const i of hits) found.add(i);
     }
-    return [...found].map(({ jobCode, ...i }) => ({ ...i, balanceCents: Number(i.balanceCents) }));
+    return [...found].map(({ jobCode, jobId, ...i }) => ({ ...i, balanceCents: Number(i.balanceCents) }));
   };
   // No invoice found: the customer to start the payment with. First the customer whose name is the name on the check,
   // ignoring capitals, punctuation and "LLC"/"Inc." ("Don boozer construction" finds "Don Boozer Construction, LLC").
