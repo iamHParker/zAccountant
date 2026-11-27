@@ -1529,7 +1529,7 @@
         </table>
       </div>
 
-      <div class="card" v-if="ar.panel === 'payments' && ar.photoView">
+      <div class="card pay-photos" v-if="ar.panel === 'payments' && ar.photoView">
         <div class="row">
           <h2>Photos and PDFs · {{ ar.photoView.payment.contactName }} · {{ money(ar.photoView.payment.amountCents) }} on {{ ar.photoView.payment.date }}</h2>
           <button type="button" @click="ar.photoView = null">Close</button>

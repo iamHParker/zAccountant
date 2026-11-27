@@ -2971,6 +2971,9 @@ createApp({
     async openPhotos(p) {
       const photos = (await this.run(() => api('GET', `${this.arBase()}/payments/${p.id}/photos`))) ?? [];
       this.ar.photoView = { payment: p, photos, busy: false };
+      // The photos open below the payments list; from a long list that was out of sight, so the link looked dead
+      // (Homer, 2026-11-26). Scroll to them.
+      this.$nextTick(() => document.querySelector('.pay-photos')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     },
     async uploadPhotos(e) {
       const files = [...(e.target.files ?? [])]; e.target.value = '';
