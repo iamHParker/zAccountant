@@ -473,3 +473,9 @@ button.link.danger-link { color: var(--bad); }
 .grid4 > .span-all { grid-column: 1 / -1; }
 /* "view" scrolls the invoice into sight; keep it clear of the sticky header (Homer, 2026-11-26). */
 .statement-doc, .pay-photos { scroll-margin-top: 112px; }
+
+/* The full-size photo over the page (showPhoto). */
+.photo-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.85); display: flex; flex-direction: column; align-items: center; padding: 12px; gap: 8px; }
+.photo-overlay-bar { display: flex; gap: 16px; align-items: center; width: 100%; max-width: 1200px; }
+.photo-overlay-bar a { color: #fff; }
+.photo-overlay img { max-width: 100%; max-height: calc(100vh - 80px); object-fit: contain; border-radius: 6px; background: #fff; cursor: zoom-out; }
