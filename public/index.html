@@ -1459,9 +1459,11 @@
       <div class="card" v-if="ar.panel === 'docs'">
         <div class="row">
           <h2>{{ { open: 'Open', paid: 'Paid', void: 'Voided', all: 'All' }[ar.view] }} {{ S.docs.toLowerCase() }}</h2>
+          <input v-model="ar.docSearch" class="auto" placeholder="Search: number, name, project or amount" maxlength="60" aria-label="Search this list">
           <select v-model="ar.view" @change="loadAr" class="auto"><option value="open">Open (unpaid)</option><option value="paid">Paid</option><option value="void">Voided</option><option value="all">All</option></select>
         </div>
         <p class="hint" v-if="!ar.docs.length">None yet.</p>
+        <p class="hint" v-else-if="ar.docSearch.trim() && !sortedDocs().length">Nothing in this list matches “{{ ar.docSearch.trim() }}”.{{ ar.view !== 'all' ? ' Try All.' : '' }}</p>
         <table class="data" v-else>
           <thead><tr>
             <th v-for="[k, label, cls] in [['number', 'Number'], ['who', S.Who], ['date', 'Date'], ['due', 'Due'], ['total', 'Total', 'num'], ['balance', 'Balance', 'num']]" :class="cls" :aria-sort="docSortOf().key === k ? (docSortOf().dir > 0 ? 'ascending' : 'descending') : 'none'">
