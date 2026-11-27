@@ -1110,7 +1110,7 @@
         <p class="hint" v-if="ar.pay.editId">Saving voids the old payment and records this corrected one in its place. The old one stays in history, marked replaced.</p>
         <form @submit.prevent="savePay">
           <div class="grid4">
-            <label>{{ S.Who }} <select v-model="ar.pay.contactId" @change="loadPayDocs" required><option value="">Choose…</option>
+            <label>{{ S.Who }} <select v-model="ar.pay.contactId" @change="payContactChanged" required><option value="">Choose…</option>
               <option v-for="c in ar.contacts.filter(c => c.openCents > 0 || c.id === ar.pay.contactId)" :value="c.id">{{ c.name }} ({{ money(c.openCents) }})</option></select></label>
             <label>Date <input type="date" v-model="ar.pay.date" required></label>
             <label>{{ S.kind === 'invoice' ? 'Deposited to' : 'Paid from' }} <select v-model="ar.pay.accountId" required><option v-for="a in payAccounts" :value="a.id">{{ a.code }} · {{ a.name }}</option></select></label>
@@ -1119,7 +1119,24 @@
           <label>Check or reference number (optional) <input v-model="ar.pay.reference" maxlength="60"></label>
           <p class="hint" v-if="ar.pay.roadItem && ar.pay.nameOnCheck && ar.pay.nameOnCheck.trim().toLowerCase() !== (ar.contacts.find(c => c.id === ar.pay.contactId)?.name ?? '').trim().toLowerCase()">
             The name on the check is <strong>{{ ar.pay.nameOnCheck }}</strong>. That's fine when someone else pays for your {{ S.who }} (an owner, a parent company, an insurer): the payment still goes on the {{ S.who }} and invoice you choose here, and the name is kept in the memo.</p>
-          <p class="hint" v-if="ar.pay.contactId && !ar.pay.open.length">Nothing open for this {{ S.who }}.</p>
+          <div class="photo-box" v-if="ar.pay.roadItem && !ar.pay.editId && ar.pay.lookupAll.length">
+            <strong>Find the invoice</strong> <span class="muted small">(when the check has no invoice or job number on it)</span>
+            <label>Invoice number, customer, project or amount <input v-model="ar.pay.lookup" placeholder="e.g. 26-073, Williams, 3750.00" maxlength="60"></label>
+            <p class="muted small" v-if="!ar.pay.lookup.trim()">{{ payLookupHits().length ? 'Unpaid invoices owing exactly ' + money(ar.pay.checkCents) + ':' : 'No unpaid invoice owes exactly ' + money(ar.pay.checkCents) + '. Type to search.' }}</p>
+            <p class="muted small" v-else-if="!payLookupHits().length">No unpaid invoice matches.</p>
+            <table class="data" v-if="payLookupHits().length">
+              <tbody>
+                <tr v-for="d in payLookupHits()" :class="{ muted: d.id === ar.pay.picked }">
+                  <td>{{ d.number }}</td><td>{{ d.contactName }}<span class="muted small" v-if="d.project"> · {{ d.project }}</span></td><td>{{ d.date }}</td>
+                  <td class="num">{{ money(d.balanceCents) }}<span class="small" v-if="d.balanceCents === ar.pay.checkCents"> ✓ same as check</span></td>
+                  <td><button type="button" class="small" @click="payPickInvoice(d)" :disabled="d.id === ar.pay.picked">{{ d.id === ar.pay.picked ? 'Chosen' : 'Use this' }}</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="hint" v-if="ar.pay.roadItem && !ar.pay.contactId">This check didn't match a {{ S.who }} or an invoice. <strong>Choose the {{ S.who }} it pays</strong> above; its {{ money(ar.pay.checkCents) }} then goes on their unpaid invoices, oldest first, and you can change the amounts.
+            Only {{ S.who }}s who owe something are listed.</p>
+          <p class="hint" v-if="ar.pay.contactId && !ar.pay.open.length">Nothing open for this {{ S.who }}.<template v-if="ar.pay.roadItem"> A payment has to go on an invoice, so enter the invoice first (<strong>+ New invoice</strong>, or drop its PDF), then press Record payment on this check again. It waits in Checks from the road until then.</template></p>
           <table class="data" v-if="ar.pay.open.length">
             <thead><tr><th>{{ S.Doc }}</th><th>Date</th><th>Due</th><th class="num">Balance</th><th class="num w150">Payment</th></tr></thead>
             <tbody>
@@ -1131,7 +1148,9 @@
             </tbody>
           </table>
           <button type="button" class="small" v-if="ar.pay.open.length" @click="payInFull">Pay all in full</button>
-          <p class="num"><strong>Payment total {{ money(payTotal) }}</strong></p>
+          <p class="num"><strong>Payment total {{ money(payTotal) }}</strong>
+            <span class="muted small" v-if="ar.pay.roadItem && !ar.pay.editId"> · check {{ money(ar.pay.checkCents) }}</span></p>
+          <p class="hint bad" v-if="ar.pay.roadItem && !ar.pay.editId && ar.pay.open.length && payTotal !== ar.pay.checkCents">The amounts add up to {{ money(payTotal) }}, but the check is {{ money(ar.pay.checkCents) }}.{{ payTotal < ar.pay.checkCents ? ' When this customer\'s open invoices owe less than the check, the rest can be recorded once its invoice is entered.' : '' }}</p>
           <div class="photo-box">
             <strong>Photos of the check and remittance, or a PDF</strong> <span class="muted small">(optional; kept with this payment, e.g. the bank's deposit confirmation)</span>
             <p class="muted small" v-if="ar.pay.roadItem && ar.pay.keptPhotos">{{ ar.pay.keptPhotos }} photo{{ ar.pay.keptPhotos === 1 ? '' : 's' }} from the phone will be saved with this payment.</p>

@@ -30,6 +30,9 @@ const CLIENT_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const text = (v, max) => (v == null || v === '' ? null : String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) || null); // eslint-disable-line no-control-regex
 /** The last four digits of the card that paid ("7413"); anything else → null. Never more than four digits are kept. */
 const cardLast4 = (v) => (/^\d{4}$/.test(String(v ?? '').trim()) ? String(v).trim() : null);
+/** A name to compare by: lower case, no punctuation, no company endings ("Doe Law, PLLC" → "doe law"). */
+const nameKey = (v) => String(v ?? '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9 ]+/g, ' ')
+  .replace(/\b(llc|l l c|pllc|llp|lp|inc|incorporated|co|corp|corporation|company|ltd|the)\b/g, ' ').replace(/\s+/g, ' ').trim();
 const hashKey = (token) => createHash('sha256').update(token).digest('hex');
 const KEY_DAYS = 90;
 const MAX_KEYS = 5;
@@ -519,16 +522,30 @@ export async function listRoadItems(db, companyId, { status = 'pending' } = {}) 
     }
     return [...found].map(({ jobCode, ...i }) => ({ ...i, balanceCents: Number(i.balanceCents) }));
   };
-  // No invoice found: a customer whose name is exactly the name on the check, to start the payment with.
-  const names = [...new Set(checks.map((r) => r.data.from?.trim().toLowerCase()).filter(Boolean))];
-  const { rows: custs } = names.length ? await db.query(
-    "SELECT id, name, lower(trim(name)) AS key FROM contacts WHERE company_id = $1 AND kind = 'customer' AND lower(trim(name)) = ANY($2::text[])",
-    [companyId, names]) : { rows: [] };
-  return rows.map(({ keyId, ...r }) => {
-    if (r.kind === 'check') {
-      const c = custs.find((x) => x.key === r.data.from?.trim().toLowerCase());
-      return { ...r, trip: null, hours: null, invoices: invoicesFor(r), customer: c ? { id: c.id, name: c.name } : null };
+  // No invoice found: the customer to start the payment with. First the customer whose name is the name on the check,
+  // ignoring capitals, punctuation and "LLC"/"Inc." ("Don boozer construction" finds "Don Boozer Construction, LLC").
+  // Failing that, a word typed in the invoices box that names one customer or one project ("Williams" finds the
+  // customer Williams Residence, or the customer of project 2603 Williams Remodel). Never a guess between two.
+  // Homer, 2026-11-26: checks that matched no invoice opened Receive payment with no customer and nothing to save.
+  const { rows: custs } = checks.length ? await db.query(
+    "SELECT id, name FROM contacts WHERE company_id = $1 AND kind = 'customer'", [companyId]) : { rows: [] };
+  const { rows: jobCusts } = checks.some((r) => r.data.invoices) ? await db.query(
+    `SELECT j.name, c.id, c.name AS "customerName" FROM jobs j JOIN contacts c ON c.company_id = j.company_id AND c.id = j.customer_id
+      WHERE j.company_id = $1`, [companyId]) : { rows: [] };
+  const customerFor = (r) => {
+    const from = nameKey(r.data.from);
+    const same = from ? custs.filter((c) => nameKey(c.name) === from) : [];
+    if (same.length === 1) return { id: same[0].id, name: same[0].name };
+    for (const word of typed(r).filter((w) => /[a-z]{3,}/.test(w))) {
+      const hit = (name) => nameKey(name).split(' ').includes(nameKey(word));
+      const ids = new Map([...custs.filter((c) => hit(c.name)).map((c) => [c.id, c.name]),
+        ...jobCusts.filter((j) => hit(j.name)).map((j) => [j.id, j.customerName])]);
+      if (ids.size === 1) { const [[id, name]] = ids; return { id, name }; }
     }
+    return null;
+  };
+  return rows.map(({ keyId, ...r }) => {
+    if (r.kind === 'check') return { ...r, trip: null, hours: null, invoices: invoicesFor(r), customer: customerFor(r) };
     let trip = null;
     if (r.kind === 'trip') trip = { name: r.data.name, tripId: r.tripId, fromRoad: true };
     else if (r.data.trip?.id) trip = { name: tripName.get(r.data.trip.id) ?? 'a trip', tripId: r.data.trip.id, fromRoad: false };
