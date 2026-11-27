@@ -394,7 +394,7 @@ createApp({
         { id: 'iif', label: 'QuickBooks Desktop IIF file', template: null, help: 'QuickBooks Desktop: File → Utilities → Export → Lists/Transactions to IIF. Accounts in the file are created automatically.' },
       ],
       ar: { panel: 'docs', view: 'open', docs: [], docSort: { invoice: docSort('invoice'), bill: docSort('bill') }, contacts: [], payments: [], aging: null, agingAsOf: today(), detail: null, details: null,
-        pdfOver: false, pdfBusy: false, roadChecks: [], roadAllAcct: '', roadAllBusy: false, roadBuys: [], buys: [], buyView: 'recent', buyAcct: {}, buyCard: {}, buyBusy: false, plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
+        pdfOver: false, pdfBusy: false, roadChecks: [], docSearch: '', roadAllAcct: '', roadAllBusy: false, roadBuys: [], buys: [], buyView: 'recent', buyAcct: {}, buyCard: {}, buyBusy: false, plans: [], planStatement: null, late: null, lateAsOf: today(), showContact: false, contactPopup: false, contact: blankContact(), showDoc: false, doc: blankDoc(), showPay: false, pay: blankPay(), photoView: null,
         jobs: [], proj: { form: blankProject(), editId: null, show: false, popup: false, sort: projectSort(), paste: '', pasteCustomer: '', makeCustomers: true, preview: null, del: null, merge: null, similar: null }, pull: null },
       // Trips: list, the open trip, and its forms (a cost with receipt photos, travel time).
       trip: { list: [], cur: null, form: null, editing: false, booking: null, cost: null, editCostId: null, travel: null, photoView: null, viewRow: null, shares: {}, shareTouched: {}, shareSig: '', find: { q: '', pick: {}, newJob: null, customers: [] } },
@@ -1729,7 +1729,18 @@ createApp({
     sortedDocs() {
       const { key, dir } = this.docSortOf();
       const val = (d) => ({ number: d.number, who: d.contactName, date: d.date, due: this.dueShown(d), total: d.totalCents, balance: d.balanceCents })[key];
-      return [...this.ar.docs].sort((a, b) => {
+      // The search box (Homer, 2026-11-26: "find the invoice that matches the amount paid"): every word must be found
+      // in the number, customer, project or memo; an amount matches the total or balance ("2081.68", "$2,081.68").
+      const q = (this.ar.docSearch ?? '').trim().toLowerCase();
+      const amt = /^[$\d,.\s]+$/.test(q) ? cents(q.replace(/[$,\s]/g, '')) : null;
+      const words = q.split(/\s+/).filter(Boolean);
+      const shown = !q ? this.ar.docs : this.ar.docs.filter((d) => {
+        if (amt > 0) return d.totalCents === amt || d.balanceCents === amt;
+        const j = d.jobId ? this.ar.jobs.find((x) => x.id === d.jobId) : null;
+        const hay = [d.number, d.contactName, d.project, d.memo, d.attention, d.clientRef, j?.code, j?.name].filter(Boolean).join(' ').toLowerCase();
+        return words.every((w) => hay.includes(w));
+      });
+      return [...shown].sort((a, b) => {
         const x = val(a), y = val(b);
         if (typeof x === 'number' || typeof y === 'number') return dir * ((x ?? 0) - (y ?? 0));
         if (!x !== !y) return x ? -1 : 1; // blanks last either way
