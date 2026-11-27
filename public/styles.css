@@ -471,3 +471,5 @@ button.link.danger-link { color: var(--bad); }
 .similar-box ul { margin: 4px 0 8px; padding-left: 20px; }
 .similar-box p { margin: 4px 0; }
 .grid4 > .span-all { grid-column: 1 / -1; }
+/* "view" scrolls the invoice into sight; keep it clear of the sticky header (Homer, 2026-11-26). */
+.statement-doc { scroll-margin-top: 112px; }
